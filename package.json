@@ -1,0 +1,73 @@
+{
+  "name": "compendus",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "cf-dev": "vite -c ./cf/vite.config.ts",
+    "cf-build": "vite -c ./cf/vite.config.ts build",
+    "cf-preview": "vite -c ./cf/vite.config.ts preview",
+    "cf-release": "wrangler deploy -c dist/rsc/wrangler.json && wrangler deploy",
+    "lint": "oxfmt && oxlint"
+  },
+  "dependencies": {
+    "@lingo-reader/epub-parser": "^0.4.5",
+    "@lingo-reader/mobi-parser": "^0.4.5",
+    "adm-zip": "^0.5.16",
+    "better-sqlite3": "^12.6.2",
+    "canvas": "^3.2.1",
+    "drizzle-orm": "^0.45.1",
+    "epubjs": "^0.3.93",
+    "mime-types": "^3.0.2",
+    "node-unrar-js": "^2.0.2",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.4.530",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-pdf": "^10.3.0",
+    "react-reader": "^2.0.15",
+    "react-router": "7.12.0",
+    "sharp": "^0.34.5",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.21.0",
+    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/adm-zip": "^0.5.7",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/mime-types": "^3.0.1",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3",
+    "@types/uuid": "^11.0.0",
+    "@typescript/native-preview": "7.0.0-dev.20260124.1",
+    "@vitejs/plugin-react": "latest",
+    "@vitejs/plugin-rsc": "latest",
+    "drizzle-kit": "^0.31.8",
+    "oxfmt": "0.26.0",
+    "oxlint": "1.41.0",
+    "puppeteer": "^24.36.0",
+    "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "wrangler": "^4.59.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "canvas",
+      "core-js",
+      "es5-ext",
+      "esbuild",
+      "puppeteer"
+    ]
+  }
+}
