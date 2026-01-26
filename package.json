@@ -24,6 +24,7 @@
     "canvas": "^3.2.1",
     "drizzle-orm": "^0.45.1",
     "epubjs": "^0.3.93",
+    "foliate-js": "^1.0.1",
     "mime-types": "^3.0.2",
     "node-unrar-js": "^2.0.2",
     "pdf-parse": "^2.4.5",
@@ -32,19 +33,19 @@
     "react-dom": "^19.2.3",
     "react-pdf": "^10.3.0",
     "react-reader": "^2.0.15",
-    "react-router": "7.12.0",
+    "react-router": "7.13.0",
     "sharp": "^0.34.5",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.21.0",
+    "@cloudflare/vite-plugin": "^1.21.2",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "@types/adm-zip": "^0.5.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/mime-types": "^3.0.1",
     "@types/pdf-parse": "^1.1.5",
-    "@types/react": "^19.2.8",
+    "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^11.0.0",
     "@typescript/native-preview": "7.0.0-dev.20260124.1",
@@ -58,7 +59,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "wrangler": "^4.59.2"
+    "wrangler": "^4.60.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

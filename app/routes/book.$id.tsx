@@ -4,6 +4,8 @@ import { getTagsForBook } from "../actions/tags";
 import { getCollectionsForBook } from "../actions/collections";
 import { MetadataRefreshButton } from "../components/MetadataRefreshButton";
 import { CoverUploadButton } from "../components/CoverUploadButton";
+import { BookCollectionsManager } from "../components/BookCollectionsManager";
+import { EditBookButton } from "../components/EditBookButton";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -79,6 +81,9 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
           >
             Download {book.format.toUpperCase()}
           </a>
+
+          {/* Edit button */}
+          <EditBookButton book={book} tags={tags} />
 
           {/* Progress */}
           {progressPercent > 0 && (
@@ -168,24 +173,7 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
           )}
 
           {/* Collections */}
-          {collections.length > 0 && (
-            <div className="mb-6">
-              <h2 className="font-semibold mb-2 text-foreground">
-                Collections
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {collections.map((collection) => (
-                  <Link
-                    key={collection.id}
-                    to={`/collection/${collection.id}`}
-                    className="inline-block px-3 py-1 text-sm rounded-full bg-accent-light text-accent hover:opacity-80 transition-opacity"
-                  >
-                    {collection.name}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
+          <BookCollectionsManager bookId={book.id} currentCollections={collections} />
 
           {/* Metadata */}
           <div className="border-t border-border pt-4 mt-6">

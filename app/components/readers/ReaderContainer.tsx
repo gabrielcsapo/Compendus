@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { PdfReader } from "./PdfReader";
 import { EpubReader } from "./EpubReader";
@@ -14,6 +14,7 @@ interface ReaderContainerProps {
 }
 
 export function ReaderContainer({ book }: ReaderContainerProps) {
+  const [isMounted, setIsMounted] = useState(false);
   const navigate = useNavigate();
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -34,8 +35,9 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
     [book.id],
   );
 
-  // Cleanup on unmount
+  // Set mounted state
   useEffect(() => {
+    setIsMounted(true);
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -49,6 +51,32 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
 
   // Get the book file URL
   const bookUrl = `/books/${book.id}.${book.format}`;
+
+  // Show loading state during SSR and initial mount to avoid hydration mismatch
+  if (!isMounted) {
+    return (
+      <div className="reader-container h-screen w-screen flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
+          <div className="flex items-center gap-4">
+            <div className="p-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </div>
+            <h1 className="font-medium truncate max-w-md">{book.title}</h1>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="reader-container h-screen w-screen flex flex-col">

@@ -1,6 +1,7 @@
 import { Link, type LoaderFunctionArgs } from "react-router";
 import { getCollection, getBooksInCollection } from "../actions/collections";
 import { BookGrid } from "../components/BookGrid";
+import { CollectionActions } from "../components/CollectionActions";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -43,10 +44,13 @@ export default function CollectionDetail({ loaderData }: { loaderData: LoaderDat
           </p>
         </div>
 
-        <div
-          className="w-4 h-16 rounded"
-          style={{ backgroundColor: collection.color || "#6366f1" }}
-        />
+        <div className="flex items-center gap-4">
+          <CollectionActions collection={collection} />
+          <div
+            className="w-4 h-16 rounded"
+            style={{ backgroundColor: collection.color || "#6366f1" }}
+          />
+        </div>
       </div>
 
       <BookGrid books={books} emptyMessage="No books in this collection yet" />

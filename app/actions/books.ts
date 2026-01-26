@@ -116,11 +116,22 @@ export async function updateBook(
     subtitle: string;
     authors: string;
     publisher: string;
+    publishedDate: string;
     description: string;
+    isbn: string;
+    isbn13: string;
+    isbn10: string;
+    language: string;
+    pageCount: number;
+    series: string;
+    seriesNumber: string;
     readingProgress: number;
     lastPosition: string;
   }>,
 ): Promise<Book | null> {
+  const book = await getBook(id);
+  if (!book) return null;
+
   const updateData: Record<string, unknown> = { ...data };
   updateData.updatedAt = sql`(unixepoch())`;
 
@@ -128,7 +139,28 @@ export async function updateBook(
     updateData.lastReadAt = sql`(unixepoch())`;
   }
 
+  // If title or authors changed, update the filename
+  if ("title" in data || "authors" in data) {
+    const newTitle = data.title || book.title;
+    const newAuthors = data.authors ? JSON.parse(data.authors) : (book.authors ? JSON.parse(book.authors) : []);
+    updateData.fileName = generateFileName(newTitle, newAuthors, book.format);
+  }
+
   await db.update(books).set(updateData).where(eq(books.id, id));
+
+  // Re-index for search if metadata changed
+  if ("title" in data || "authors" in data || "description" in data) {
+    const updatedBook = await getBook(id);
+    if (updatedBook) {
+      await removeBookIndex(id);
+      await indexBookMetadata(
+        updatedBook.id,
+        updatedBook.title,
+        updatedBook.authors || "",
+        updatedBook.description,
+      );
+    }
+  }
 
   return getBook(id);
 }

@@ -238,12 +238,12 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
           cbr: "application/vnd.comicbook-rar",
           cbz: "application/vnd.comicbook+zip",
         }[ext || ""] || "application/octet-stream";
-      const fileName = pathname.split("/").pop() || "book";
 
       return new Response(buffer, {
         headers: {
           "Content-Type": contentType,
-          "Content-Disposition": `attachment; filename="${fileName}"`,
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
         },
       });
     }
