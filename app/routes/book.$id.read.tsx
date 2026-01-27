@@ -13,7 +13,11 @@ export async function loader({ params }: LoaderFunctionArgs) {
   return { book };
 }
 
-export default function BookReader({ loaderData }: { loaderData: LoaderData }) {
+function BookReader({ loaderData }: { loaderData: LoaderData }) {
   const { book } = loaderData;
   return <ReaderContainer book={book} />;
 }
+
+// Export both Component and default for React Router compatibility
+export { BookReader as Component };
+export default BookReader;

@@ -9,6 +9,7 @@ interface AudiobookReaderProps {
   onPositionChange: (position: string, progress: number) => void;
   chapters?: AudioChapter[];
   duration?: number;
+  coverPath?: string;
 }
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -38,6 +39,7 @@ export function AudiobookReader({
   onPositionChange,
   chapters = [],
   duration: initialDuration,
+  coverPath,
 }: AudiobookReaderProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -366,6 +368,23 @@ export function AudiobookReader({
 
         {/* Player Content Area */}
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-8">
+          {/* Cover Art */}
+          {coverPath ? (
+            <div className="w-64 h-64 rounded-lg shadow-lg overflow-hidden flex-shrink-0">
+              <img
+                src={coverPath}
+                alt="Cover art"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          ) : (
+            <div className="w-64 h-64 rounded-lg bg-surface-elevated flex items-center justify-center flex-shrink-0">
+              <svg className="w-24 h-24 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+              </svg>
+            </div>
+          )}
+
           {/* Large centered play/pause area */}
           <div className="flex items-center gap-6">
             {/* Skip Back 15s */}

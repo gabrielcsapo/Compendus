@@ -58,7 +58,7 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
   if (!isMounted) {
     return (
       <div className="reader-container h-screen w-screen flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
+        <div className="flex items-center justify-between px-4 py-2 bg-surface border-b border-border">
           <div className="flex items-center gap-4">
             <div className="p-2">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -74,7 +74,7 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-foreground-muted border-t-foreground rounded-full animate-spin" />
         </div>
       </div>
     );
@@ -83,11 +83,11 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
   return (
     <div className="reader-container h-screen w-screen flex flex-col">
       {/* Reader header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface border-b border-border">
         <div className="flex items-center gap-4">
           <button
             onClick={handleClose}
-            className="p-2 hover:bg-gray-100 rounded"
+            className="p-2 hover:bg-surface-elevated rounded"
             title="Close reader"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -141,6 +141,7 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
             onPositionChange={handlePositionChange}
             chapters={book.chapters ? (JSON.parse(book.chapters) as AudioChapter[]) : undefined}
             duration={book.duration || undefined}
+            coverPath={book.coverPath ? `/covers/${book.id}.jpg` : undefined}
           />
         )}
       </div>
