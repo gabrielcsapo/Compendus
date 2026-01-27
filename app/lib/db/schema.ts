@@ -12,7 +12,7 @@ export const books = sqliteTable(
     fileName: text("file_name").notNull(),
     fileSize: integer("file_size").notNull(),
     fileHash: text("file_hash").notNull(),
-    format: text("format", { enum: ["pdf", "epub", "mobi", "cbr", "cbz"] }).notNull(),
+    format: text("format", { enum: ["pdf", "epub", "mobi", "cbr", "cbz", "m4b", "mp3", "m4a"] }).notNull(),
     mimeType: text("mime_type").notNull(),
 
     // Metadata
@@ -29,6 +29,11 @@ export const books = sqliteTable(
     pageCount: integer("page_count"),
     series: text("series"),
     seriesNumber: text("series_number"),
+
+    // Audiobook-specific fields
+    duration: integer("duration"),        // Duration in seconds
+    narrator: text("narrator"),           // Narrator name
+    chapters: text("chapters"),           // JSON array of AudioChapter
 
     // Cover image
     coverPath: text("cover_path"),

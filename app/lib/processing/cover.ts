@@ -5,6 +5,7 @@ import { createCanvas } from "canvas";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { extractEpubCover } from "./epub";
 import { extractMobiCover } from "./mobi";
+import { extractAudioCover } from "./audio";
 import { storeCoverImage } from "../storage";
 import type { BookFormat, CoverResult } from "../types";
 
@@ -128,6 +129,13 @@ export async function extractCover(
       case "pdf":
         coverBuffer = await extractPdfCover(buffer);
         break;
+      case "m4b":
+      case "m4a":
+      case "mp3": {
+        const result = await extractAudioCover(buffer);
+        coverBuffer = result?.buffer || null;
+        break;
+      }
     }
 
     if (!coverBuffer) {

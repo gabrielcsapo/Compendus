@@ -66,7 +66,7 @@ export function GlobalUploadDropzone() {
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
       const fileArray = Array.from(files);
-      const validExtensions = [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz"];
+      const validExtensions = [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz", ".m4b", ".m4a", ".mp3"];
 
       const validFiles = fileArray.filter((file) =>
         validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext)),
@@ -226,7 +226,7 @@ export function GlobalUploadDropzone() {
           <input
             type="file"
             multiple
-            accept=".pdf,.epub,.mobi,.azw,.azw3,.cbr,.cbz"
+            accept=".pdf,.epub,.mobi,.azw,.azw3,.cbr,.cbz,.m4b,.m4a,.mp3"
             className="hidden"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
@@ -259,7 +259,7 @@ export function GlobalUploadDropzone() {
                 </svg>
               </div>
               <p className="text-xl font-semibold text-foreground">Drop files to upload</p>
-              <p className="text-foreground-muted mt-1">PDF, EPUB, MOBI, CBR, CBZ</p>
+              <p className="text-foreground-muted mt-1">PDF, EPUB, MOBI, CBR, CBZ, M4B, MP3</p>
             </div>
           </div>
         </div>

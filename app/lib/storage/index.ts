@@ -16,6 +16,9 @@ const FORMAT_EXTENSIONS: Record<BookFormat, string> = {
   mobi: ".mobi",
   cbr: ".cbr",
   cbz: ".cbz",
+  m4b: ".m4b",
+  mp3: ".mp3",
+  m4a: ".m4a",
 };
 
 export function storeBookFile(buffer: Buffer, bookId: string, format: BookFormat): string {

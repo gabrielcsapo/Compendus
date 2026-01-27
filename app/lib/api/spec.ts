@@ -263,7 +263,7 @@ export const apiSpec: ApiSpec = {
           {
             name: "file",
             type: "file",
-            description: "Book file (PDF, EPUB, MOBI, CBR, CBZ)",
+            description: "Book file (PDF, EPUB, MOBI, CBR, CBZ) or audiobook (M4B, MP3, M4A)",
             required: true,
           },
         ],
@@ -479,7 +479,7 @@ export const apiSpec: ApiSpec = {
   pageCount: number | null;
   series: string | null;
   seriesNumber: string | null;
-  format: "pdf" | "epub" | "mobi" | "cbr" | "cbz";
+  format: "pdf" | "epub" | "mobi" | "cbr" | "cbz" | "m4b" | "mp3" | "m4a";
   coverUrl: string | null; // URL path: /covers/{id}.jpg
   addedAt: string;         // ISO timestamp
 }`,
@@ -599,13 +599,16 @@ export const apiSpec: ApiSpec = {
  */
 export const supportedFormats = {
   books: {
-    extensions: [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz"],
+    extensions: [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz", ".m4b", ".m4a", ".mp3"],
     mimeTypes: {
       pdf: "application/pdf",
       epub: "application/epub+zip",
       mobi: "application/x-mobipocket-ebook",
       cbr: "application/vnd.comicbook-rar",
       cbz: "application/vnd.comicbook+zip",
+      m4b: "audio/mp4",
+      m4a: "audio/mp4",
+      mp3: "audio/mpeg",
     },
   },
   covers: {

@@ -3,7 +3,12 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import { existsSync } from "fs";
 import { eq } from "drizzle-orm";
-import { apiSearchBooks, apiLookupByIsbn, apiGetBook, apiListBooks } from "../app/lib/api/search";
+import {
+  apiSearchBooks,
+  apiLookupByIsbn,
+  apiGetBook,
+  apiListBooks,
+} from "../app/lib/api/search";
 import { getComicPage, getComicPageCount } from "../app/lib/processing/comic";
 import { extractEpubResource } from "../app/lib/processing/epub";
 import { processBook } from "../app/lib/processing";
@@ -58,7 +63,11 @@ async function handleApiRequest(
     const offset = parseInt(searchParams.get("offset") || "0", 10);
     const searchContent = searchParams.get("content") === "true";
 
-    const result = await apiSearchBooks(query, { limit, offset, searchContent }, baseUrl);
+    const result = await apiSearchBooks(
+      query,
+      { limit, offset, searchContent },
+      baseUrl,
+    );
     return jsonResponse(result, result.success ? 200 : 400);
   }
 
@@ -88,13 +97,19 @@ async function handleApiRequest(
   }
 
   // POST /api/books/:id/cover - upload custom cover image
-  const coverUploadMatch = pathname.match(/^\/api\/books\/([a-f0-9-]+)\/cover$/);
+  const coverUploadMatch = pathname.match(
+    /^\/api\/books\/([a-f0-9-]+)\/cover$/,
+  );
   if (coverUploadMatch && request.method === "POST") {
     try {
       const bookId = coverUploadMatch[1];
 
       // Check if book exists
-      const book = await db.select().from(books).where(eq(books.id, bookId)).get();
+      const book = await db
+        .select()
+        .from(books)
+        .where(eq(books.id, bookId))
+        .get();
       if (!book) {
         return jsonResponse({ success: false, error: "book_not_found" }, 404);
       }
@@ -155,7 +170,18 @@ async function handleApiRequest(
       }
 
       // Validate file type
-      const validExtensions = [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz"];
+      const validExtensions = [
+        ".pdf",
+        ".epub",
+        ".mobi",
+        ".azw",
+        ".azw3",
+        ".cbr",
+        ".cbz",
+        ".m4b",
+        ".m4a",
+        ".mp3",
+      ];
       const hasValidExtension = validExtensions.some((ext) =>
         file.name.toLowerCase().endsWith(ext),
       );
@@ -166,7 +192,16 @@ async function handleApiRequest(
 
       // Extract optional metadata overrides from form data
       const metadata: Record<string, unknown> = {};
-      const metadataFields = ["title", "isbn", "isbn13", "isbn10", "publisher", "publishedDate", "description", "language"];
+      const metadataFields = [
+        "title",
+        "isbn",
+        "isbn13",
+        "isbn10",
+        "publisher",
+        "publishedDate",
+        "description",
+        "language",
+      ];
       for (const field of metadataFields) {
         const value = formData.get(field);
         if (value && typeof value === "string") {
@@ -199,9 +234,18 @@ async function handleApiRequest(
 
       if (result.success && result.bookId) {
         // Get the book to index it
-        const book = await db.select().from(books).where(eq(books.id, result.bookId)).get();
+        const book = await db
+          .select()
+          .from(books)
+          .where(eq(books.id, result.bookId))
+          .get();
         if (book) {
-          await indexBookMetadata(book.id, book.title, book.authors || "[]", book.description);
+          await indexBookMetadata(
+            book.id,
+            book.title,
+            book.authors || "[]",
+            book.description,
+          );
 
           return jsonResponse({
             success: true,
@@ -224,7 +268,11 @@ async function handleApiRequest(
   // GET /api/wishlist - get wishlist items
   if (pathname === "/api/wishlist" && request.method === "GET") {
     try {
-      const status = searchParams.get("status") as "wishlist" | "searching" | "ordered" | null;
+      const status = searchParams.get("status") as
+        | "wishlist"
+        | "searching"
+        | "ordered"
+        | null;
       const series = searchParams.get("series");
       const limitParam = searchParams.get("limit");
       const limit = limitParam ? parseInt(limitParam, 10) : undefined;
@@ -266,7 +314,11 @@ async function handleApiRequest(
     } catch (error) {
       console.error("Wishlist get error:", error);
       return jsonResponse(
-        { success: false, error: "Failed to retrieve wishlist", code: "WISHLIST_ERROR" },
+        {
+          success: false,
+          error: "Failed to retrieve wishlist",
+          code: "WISHLIST_ERROR",
+        },
         500,
       );
     }
@@ -310,7 +362,11 @@ async function handleApiRequest(
       }
 
       // Parse optional parameters from request body
-      let options: { status?: "wishlist" | "searching" | "ordered"; priority?: number; notes?: string } = {};
+      let options: {
+        status?: "wishlist" | "searching" | "ordered";
+        priority?: number;
+        notes?: string;
+      } = {};
       try {
         const contentType = request.headers.get("content-type");
         if (contentType?.includes("application/json")) {
@@ -342,7 +398,10 @@ async function handleApiRequest(
         },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to add book to wishlist";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to add book to wishlist";
 
       // Handle specific error cases
       if (message.includes("already in your wanted list")) {
@@ -366,66 +425,6 @@ async function handleApiRequest(
     }
   }
 
-  // POST /api/wishlist/download - Download books from wishlist via Anna's Archive
-  if (pathname === "/api/wishlist/download" && request.method === "POST") {
-    try {
-      const contentType = request.headers.get("content-type");
-      if (!contentType?.includes("application/json")) {
-        return jsonResponse(
-          { success: false, error: "Content-Type must be application/json", code: "INVALID_CONTENT_TYPE" },
-          400,
-        );
-      }
-
-      const body = await request.json();
-      const { key, limit } = body;
-
-      if (!key) {
-        return jsonResponse(
-          { success: false, error: "Anna's Archive API key is required", code: "MISSING_KEY" },
-          400,
-        );
-      }
-
-      // Import and run the processor
-      const { processWishlist } = await import("../app/lib/annas-archive");
-
-      const results: Array<{
-        success: boolean;
-        bookId?: string;
-        title?: string;
-        error?: string;
-        wishlistItemId?: string;
-      }> = [];
-
-      await processWishlist(key, baseUrl, {
-        limit: limit || undefined,
-        onResult: (result) => {
-          results.push(result);
-        },
-      });
-
-      const successful = results.filter(r => r.success);
-      const failed = results.filter(r => !r.success);
-
-      return jsonResponse({
-        success: true,
-        summary: {
-          total: results.length,
-          successful: successful.length,
-          failed: failed.length,
-        },
-        results,
-      });
-    } catch (error) {
-      console.error("Wishlist download error:", error);
-      return jsonResponse(
-        { success: false, error: error instanceof Error ? error.message : "Download failed", code: "DOWNLOAD_ERROR" },
-        500,
-      );
-    }
-  }
-
   // API endpoint not found (we already verified pathname starts with /api/)
   return jsonResponse(
     {
@@ -438,9 +437,12 @@ async function handleApiRequest(
         getBook: "GET /api/books/:id",
         lookupIsbn: "GET /api/books/isbn/:isbn",
         upload: "POST /api/upload (multipart/form-data with 'file' field)",
-        wishlist: "GET /api/wishlist?status=<status>&series=<series>&limit=<limit>",
-        wishlistByIsbn: "POST /api/wishlist/isbn/:isbn (optional JSON body: {status, priority, notes})",
-        wishlistDownload: "POST /api/wishlist/download (JSON body: {key, limit?})",
+        wishlist:
+          "GET /api/wishlist?status=<status>&series=<series>&limit=<limit>",
+        wishlistByIsbn:
+          "POST /api/wishlist/isbn/:isbn (optional JSON body: {status, priority, notes})",
+        wishlistDownload:
+          "POST /api/wishlist/download (JSON body: {key, limit?})",
       },
     },
     404,
@@ -462,6 +464,9 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
           mobi: "application/x-mobipocket-ebook",
           cbr: "application/vnd.comicbook-rar",
           cbz: "application/vnd.comicbook+zip",
+          m4b: "audio/mp4",
+          m4a: "audio/mp4",
+          mp3: "audio/mpeg",
         }[ext || ""] || "application/octet-stream";
 
       return new Response(buffer, {
@@ -486,11 +491,18 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
   }
 
   // Handle /comic/:id/page/:pageNum requests for comic book pages
-  const comicPageMatch = pathname.match(/^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/page\/(\d+)$/);
+  const comicPageMatch = pathname.match(
+    /^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/page\/(\d+)$/,
+  );
   if (comicPageMatch) {
     const [, bookId, format, pageNumStr] = comicPageMatch;
     const pageNum = parseInt(pageNumStr, 10);
-    const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.${format}`);
+    const bookPath = resolve(
+      process.cwd(),
+      "data",
+      "books",
+      `${bookId}.${format}`,
+    );
 
     if (existsSync(bookPath)) {
       try {
@@ -514,10 +526,17 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
   }
 
   // Handle /comic/:id/info requests for comic book metadata
-  const comicInfoMatch = pathname.match(/^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/info$/);
+  const comicInfoMatch = pathname.match(
+    /^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/info$/,
+  );
   if (comicInfoMatch) {
     const [, bookId, format] = comicInfoMatch;
-    const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.${format}`);
+    const bookPath = resolve(
+      process.cwd(),
+      "data",
+      "books",
+      `${bookId}.${format}`,
+    );
 
     if (existsSync(bookPath)) {
       try {
@@ -576,7 +595,11 @@ export default async function handler(request: Request) {
   const url = new URL(request.url);
 
   // Handle API requests
-  const apiResponse = await handleApiRequest(request, url.pathname, url.searchParams);
+  const apiResponse = await handleApiRequest(
+    request,
+    url.pathname,
+    url.searchParams,
+  );
   if (apiResponse) {
     return apiResponse;
   }
@@ -587,7 +610,9 @@ export default async function handler(request: Request) {
     return staticResponse;
   }
 
-  const ssr = await import.meta.viteRsc.loadModule<typeof import("./entry.ssr")>("ssr", "index");
+  const ssr = await import.meta.viteRsc.loadModule<
+    typeof import("./entry.ssr")
+  >("ssr", "index");
 
   return ssr.default(request, await fetchServer(request));
 }

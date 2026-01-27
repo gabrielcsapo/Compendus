@@ -186,7 +186,7 @@ export function ImportDropzone() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.epub,.mobi,.azw,.azw3,.cbr,.cbz"
+          accept=".pdf,.epub,.mobi,.azw,.azw3,.cbr,.cbz,.m4b,.m4a,.mp3"
           multiple
           onChange={handleFileChange}
           className="hidden"
@@ -258,7 +258,7 @@ export function ImportDropzone() {
             <p className="text-foreground text-center font-medium">Drop files here</p>
             <p className="text-foreground-muted text-sm mt-1">or click to browse</p>
             <p className="text-foreground-muted/60 text-xs mt-3">
-              Supports PDF, EPUB, MOBI, CBR, and CBZ
+              Supports PDF, EPUB, MOBI, CBR, CBZ, M4B, and MP3
             </p>
           </>
         )}

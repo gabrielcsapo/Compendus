@@ -6,6 +6,8 @@ import { PdfReader } from "./PdfReader";
 import { EpubReader } from "./EpubReader";
 import { MobiReader } from "./MobiReader";
 import { ComicReader } from "./ComicReader";
+import { AudiobookReader } from "./AudiobookReader";
+import type { AudioChapter } from "../../lib/types";
 import { updateBook } from "../../actions/books";
 import type { Book } from "../../lib/db/schema";
 
@@ -130,6 +132,15 @@ export function ReaderContainer({ book }: ReaderContainerProps) {
             format={book.format}
             position={book.lastPosition || undefined}
             onPositionChange={handlePositionChange}
+          />
+        )}
+        {(book.format === "m4b" || book.format === "mp3" || book.format === "m4a") && (
+          <AudiobookReader
+            bookPath={bookUrl}
+            position={book.lastPosition || undefined}
+            onPositionChange={handlePositionChange}
+            chapters={book.chapters ? (JSON.parse(book.chapters) as AudioChapter[]) : undefined}
+            duration={book.duration || undefined}
           />
         )}
       </div>

@@ -27,6 +27,7 @@
     "foliate-js": "^1.0.1",
     "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
+    "music-metadata": "^11.11.0",
     "node-unrar-js": "^2.0.2",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.530",

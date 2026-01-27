@@ -29,11 +29,28 @@ export async function importBook(formData: FormData): Promise<ImportResult> {
     "application/vnd.comicbook+zip",
     "application/x-cbr",
     "application/x-cbz",
+    "audio/mp4",
+    "audio/x-m4b",
+    "audio/mpeg",
+    "audio/mp3",
   ];
-  const validExtensions = [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz"];
+  const validExtensions = [
+    ".pdf",
+    ".epub",
+    ".mobi",
+    ".azw",
+    ".azw3",
+    ".cbr",
+    ".cbz",
+    ".m4b",
+    ".m4a",
+    ".mp3",
+  ];
 
   const hasValidType = validTypes.includes(file.type);
-  const hasValidExtension = validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+  const hasValidExtension = validExtensions.some((ext) =>
+    file.name.toLowerCase().endsWith(ext),
+  );
 
   if (!hasValidType && !hasValidExtension) {
     return { success: false, error: "invalid_format" };
@@ -50,7 +67,12 @@ export async function importBook(formData: FormData): Promise<ImportResult> {
     // Index metadata in FTS
     const book = await getBook(result.bookId);
     if (book) {
-      await indexBookMetadata(book.id, book.title, book.authors || "[]", book.description);
+      await indexBookMetadata(
+        book.id,
+        book.title,
+        book.authors || "[]",
+        book.description,
+      );
 
       return {
         ...result,
@@ -66,7 +88,9 @@ export async function importBook(formData: FormData): Promise<ImportResult> {
   return result;
 }
 
-export async function importMultipleBooks(formData: FormData): Promise<ImportResult[]> {
+export async function importMultipleBooks(
+  formData: FormData,
+): Promise<ImportResult[]> {
   const files = formData.getAll("files") as File[];
   const results: ImportResult[] = [];
 

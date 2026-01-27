@@ -255,6 +255,32 @@ export async function getBooksByFormat(): Promise<Array<{ format: string; count:
 }
 
 /**
+ * Get books with the same ISBN but different format (linked formats)
+ * Returns other formats of the same book (e.g., audiobook version of an ebook)
+ */
+export async function getLinkedFormats(bookId: string): Promise<Book[]> {
+  const book = await getBook(bookId);
+  if (!book) return [];
+
+  // Get all ISBNs for this book
+  const isbns = [book.isbn, book.isbn13, book.isbn10].filter(Boolean) as string[];
+  if (isbns.length === 0) return [];
+
+  // Find books with matching ISBN but different ID
+  const linkedBooks = await db
+    .select()
+    .from(books)
+    .where(
+      and(
+        sql`${books.id} != ${bookId}`,
+        sql`(${books.isbn} IN (${sql.join(isbns.map(i => sql`${i}`), sql`, `)}) OR ${books.isbn13} IN (${sql.join(isbns.map(i => sql`${i}`), sql`, `)}) OR ${books.isbn10} IN (${sql.join(isbns.map(i => sql`${i}`), sql`, `)}))`,
+      ),
+    );
+
+  return linkedBooks;
+}
+
+/**
  * Search for metadata matches from external sources (Google Books + Open Library)
  */
 export async function searchMetadata(

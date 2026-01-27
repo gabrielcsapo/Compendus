@@ -9,6 +9,7 @@ import { storeBookFile, storeCoverImage } from "../storage";
 import { extractPdfMetadata, extractPdfContent } from "./pdf";
 import { extractEpubMetadata, extractEpubContent } from "./epub";
 import { extractMobiMetadata, extractMobiContent } from "./mobi";
+import { extractAudioMetadata, extractAudioContent, type AudioMetadata } from "./audio";
 import { extractCover } from "./cover";
 import { suppressConsole, yieldToEventLoop, scheduleBackground } from "./utils";
 import type {
@@ -112,7 +113,7 @@ export async function processBook(
   }
 
   // For smaller files, do full processing synchronously (original behavior)
-  let metadata: BookMetadata;
+  let metadata: BookMetadata | AudioMetadata;
   try {
     metadata = await suppressConsole(() => extractMetadata(buffer, format));
   } catch {
@@ -121,6 +122,9 @@ export async function processBook(
       authors: [],
     };
   }
+
+  // Extract audio-specific fields if present
+  const audioMetadata = metadata as AudioMetadata;
 
   const coverResult = await suppressConsole(() => extractCover(buffer, format));
   const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
@@ -152,6 +156,10 @@ export async function processBook(
       pageCount: meta?.pageCount || metadata.pageCount,
       coverPath,
       coverColor: coverResult?.dominantColor,
+      // Audio-specific fields
+      duration: audioMetadata.duration,
+      narrator: audioMetadata.narrator,
+      chapters: audioMetadata.chapters ? JSON.stringify(audioMetadata.chapters) : null,
     });
   } catch (error: unknown) {
     // Handle UNIQUE constraint violation (race condition with duplicate upload)
@@ -192,6 +200,9 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
   if (ext === ".mobi" || ext === ".azw" || ext === ".azw3") return "mobi";
   if (ext === ".cbr") return "cbr";
   if (ext === ".cbz") return "cbz";
+  if (ext === ".m4b") return "m4b";
+  if (ext === ".m4a") return "m4a";
+  if (ext === ".mp3") return "mp3";
 
   // Check by magic bytes
   const header = buffer.subarray(0, 8);
@@ -222,6 +233,24 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
     return "mobi";
   }
 
+  // MP3: starts with ID3 tag or sync bytes (0xFF 0xFB/0xFA/0xF3/0xF2)
+  if (
+    (header[0] === 0x49 && header[1] === 0x44 && header[2] === 0x33) || // ID3
+    (header[0] === 0xff && (header[1] & 0xe0) === 0xe0) // Sync bytes
+  ) {
+    return "mp3";
+  }
+
+  // M4B/M4A: MP4 container with 'ftyp' atom
+  if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) {
+    // Check brand type to distinguish M4B from M4A
+    const brand = buffer.subarray(8, 12).toString();
+    if (brand === "M4B " || brand === "isom") {
+      return "m4b";
+    }
+    return "m4a";
+  }
+
   return null;
 }
 
@@ -238,6 +267,10 @@ async function extractMetadata(buffer: Buffer, format: BookFormat): Promise<Book
       // Comic book archives don't have embedded metadata
       // Title will be derived from filename
       return { title: null, authors: [] };
+    case "m4b":
+    case "m4a":
+    case "mp3":
+      return extractAudioMetadata(buffer);
     default:
       throw new Error(`Unsupported format: ${format}`);
   }
@@ -258,6 +291,11 @@ export async function extractContent(
     case "cbz":
       // Comic book archives are image-based, no text content to extract
       return { fullText: "", chapters: [], toc: [] };
+    case "m4b":
+    case "m4a":
+    case "mp3":
+      // Audio files don't have text content to extract
+      return extractAudioContent();
     default:
       throw new Error(`Unsupported format: ${format}`);
   }
@@ -272,12 +310,13 @@ function queueBackgroundProcessing(
 ) {
   scheduleBackground(async () => {
     // Extract metadata with console suppression (EPUB parser is verbose)
-    let metadata: BookMetadata;
+    let metadata: BookMetadata | AudioMetadata;
     try {
       metadata = await suppressConsole(() => extractMetadata(buffer, format));
     } catch {
       metadata = { title: null, authors: [] };
     }
+    const audioMeta = metadata as AudioMetadata;
 
     // Yield to event loop between heavy operations
     await yieldToEventLoop();
@@ -311,6 +350,13 @@ function queueBackgroundProcessing(
       if (coverResult?.dominantColor) {
         updateData.coverColor = coverResult.dominantColor;
       }
+    }
+
+    // Audio-specific fields
+    if (audioMeta.duration) updateData.duration = audioMeta.duration;
+    if (audioMeta.narrator) updateData.narrator = audioMeta.narrator;
+    if (audioMeta.chapters && audioMeta.chapters.length > 0) {
+      updateData.chapters = JSON.stringify(audioMeta.chapters);
     }
 
     await db.update(books).set(updateData).where(eq(books.id, bookId));

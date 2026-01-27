@@ -1,4 +1,4 @@
-export type BookFormat = "pdf" | "epub" | "mobi" | "cbr" | "cbz";
+export type BookFormat = "pdf" | "epub" | "mobi" | "cbr" | "cbz" | "m4b" | "mp3" | "m4a";
 
 export interface BookMetadata {
   title: string | null;
@@ -23,6 +23,13 @@ export interface TocItem {
   title: string;
   href: string;
   index: number;
+}
+
+export interface AudioChapter {
+  index: number;
+  title: string;
+  startTime: number; // Start time in seconds
+  endTime: number;   // End time in seconds
 }
 
 export interface ExtractedContent {
