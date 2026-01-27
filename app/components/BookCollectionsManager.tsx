@@ -62,9 +62,7 @@ export function BookCollectionsManager({
   };
 
   const currentCollectionIds = new Set(collections.map((c) => c.id));
-  const availableCollections = allCollections.filter(
-    (c) => !currentCollectionIds.has(c.id)
-  );
+  const availableCollections = allCollections.filter((c) => !currentCollectionIds.has(c.id));
 
   return (
     <div className="mb-6">
@@ -76,7 +74,12 @@ export function BookCollectionsManager({
             className="text-sm text-primary hover:text-primary-hover transition-colors flex items-center gap-1"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
             </svg>
             Add to Collection
           </button>
@@ -85,10 +88,7 @@ export function BookCollectionsManager({
           {isOpen && (
             <>
               {/* Backdrop to close */}
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setIsOpen(false)}
-              />
+              <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
               <div className="absolute right-0 top-full mt-1 w-64 bg-surface border border-border rounded-lg shadow-xl z-50 overflow-hidden">
                 {isLoading ? (
                   <div className="p-4 flex items-center justify-center">
@@ -111,7 +111,9 @@ export function BookCollectionsManager({
                       >
                         <div
                           className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: collection.color || "#6366f1" }}
+                          style={{
+                            backgroundColor: collection.color || "#6366f1",
+                          }}
                         />
                         <span className="flex-1 truncate text-foreground">
                           {collection.icon && <span className="mr-1">{collection.icon}</span>}
@@ -152,7 +154,12 @@ export function BookCollectionsManager({
                   <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
                 ) : (
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 )}
               </button>

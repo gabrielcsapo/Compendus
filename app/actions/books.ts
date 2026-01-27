@@ -142,7 +142,11 @@ export async function updateBook(
   // If title or authors changed, update the filename
   if ("title" in data || "authors" in data) {
     const newTitle = data.title || book.title;
-    const newAuthors = data.authors ? JSON.parse(data.authors) : (book.authors ? JSON.parse(book.authors) : []);
+    const newAuthors = data.authors
+      ? JSON.parse(data.authors)
+      : book.authors
+        ? JSON.parse(book.authors)
+        : [];
     updateData.fileName = generateFileName(newTitle, newAuthors, book.format);
   }
 
@@ -208,7 +212,9 @@ export async function getUnmatchedBooks(limit: number = 50): Promise<Book[]> {
   return db
     .select()
     .from(books)
-    .where(sql`${books.coverPath} IS NULL AND (${books.matchSkipped} IS NULL OR ${books.matchSkipped} = 0)`)
+    .where(
+      sql`${books.coverPath} IS NULL AND (${books.matchSkipped} IS NULL OR ${books.matchSkipped} = 0)`,
+    )
     .orderBy(desc(books.createdAt))
     .limit(limit);
 }
@@ -220,7 +226,9 @@ export async function getUnmatchedBooksCount(): Promise<number> {
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(books)
-    .where(sql`${books.coverPath} IS NULL AND (${books.matchSkipped} IS NULL OR ${books.matchSkipped} = 0)`)
+    .where(
+      sql`${books.coverPath} IS NULL AND (${books.matchSkipped} IS NULL OR ${books.matchSkipped} = 0)`,
+    )
     .get();
   return result?.count || 0;
 }
@@ -453,7 +461,8 @@ export async function applyMetadata(
 
   // Generate new filename based on metadata
   const newTitle = metadata.title || book.title;
-  const newAuthors = metadata.authors.length > 0 ? metadata.authors : (book.authors ? JSON.parse(book.authors) : []);
+  const newAuthors =
+    metadata.authors.length > 0 ? metadata.authors : book.authors ? JSON.parse(book.authors) : [];
   const newFileName = generateFileName(newTitle, newAuthors, book.format);
 
   const updateData: Record<string, unknown> = {

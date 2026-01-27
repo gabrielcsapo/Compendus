@@ -51,9 +51,11 @@ export function CoverUploadButton({ bookId, hasCover }: CoverUploadButtonProps) 
         // Refresh the page to show the new cover
         window.location.reload();
       } else {
-        setError(result.error === "processing_failed"
-          ? "Failed to process image. Make sure it's a valid book cover (portrait orientation)."
-          : "Failed to upload cover");
+        setError(
+          result.error === "processing_failed"
+            ? "Failed to process image. Make sure it's a valid book cover (portrait orientation)."
+            : "Failed to upload cover",
+        );
       }
     } catch {
       setError("Failed to upload cover");
@@ -99,9 +101,7 @@ export function CoverUploadButton({ bookId, hasCover }: CoverUploadButtonProps) 
           </>
         )}
       </button>
-      {error && (
-        <p className="mt-2 text-xs text-error text-center">{error}</p>
-      )}
+      {error && <p className="mt-2 text-xs text-error text-center">{error}</p>}
     </div>
   );
 }

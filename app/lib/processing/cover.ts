@@ -15,6 +15,96 @@ const COVER_WIDTH = 600; // Increased for better quality
 const COVER_HEIGHT = 900;
 const COVER_QUALITY = 90;
 
+/**
+ * Validate that a buffer contains a supported image format by checking magic bytes
+ */
+function isValidImageBuffer(buffer: Buffer): boolean {
+  if (!buffer || buffer.length < 8) return false;
+
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return true;
+  }
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return true;
+  }
+
+  // GIF: 47 49 46 38
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+    return true;
+  }
+
+  // WebP: 52 49 46 46 ... 57 45 42 50
+  if (
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer.length >= 12 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return true;
+  }
+
+  // BMP: 42 4D
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
+    return true;
+  }
+
+  // TIFF: 49 49 2A 00 or 4D 4D 00 2A
+  if (
+    (buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2a && buffer[3] === 0x00) ||
+    (buffer[0] === 0x4d && buffer[1] === 0x4d && buffer[2] === 0x00 && buffer[3] === 0x2a)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Validate that a buffer looks like a valid ZIP file by checking:
+ * 1. PK signature at the start
+ * 2. End of Central Directory signature somewhere in the file
+ */
+function isValidZipBuffer(buffer: Buffer): boolean {
+  // Check minimum size (ZIP needs at least 22 bytes for EOCD)
+  if (buffer.length < 22) return false;
+
+  // Check PK signature at start
+  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) return false;
+
+  // Check for End of Central Directory signature (PK\x05\x06)
+  // Search in the last 65KB + 22 bytes (max comment size + EOCD size)
+  const searchStart = Math.max(0, buffer.length - 65557);
+  for (let i = buffer.length - 22; i >= searchStart; i--) {
+    if (
+      buffer[i] === 0x50 &&
+      buffer[i + 1] === 0x4b &&
+      buffer[i + 2] === 0x05 &&
+      buffer[i + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function extractCover(
   buffer: Buffer,
   format: BookFormat,
@@ -41,6 +131,12 @@ export async function extractCover(
     }
 
     if (!coverBuffer) {
+      return null;
+    }
+
+    // Validate the buffer contains a supported image format before processing
+    if (!isValidImageBuffer(coverBuffer)) {
+      console.warn("Cover buffer is not a valid image format, skipping");
       return null;
     }
 
@@ -82,6 +178,11 @@ export async function processAndStoreCover(
   bookId: string,
 ): Promise<{ path: string | null; dominantColor: string | null }> {
   try {
+    // Validate the buffer contains a supported image format before processing
+    if (!isValidImageBuffer(buffer)) {
+      return { path: null, dominantColor: null };
+    }
+
     // Get image metadata to determine optimal processing
     const metadata = await sharp(buffer).metadata();
 
@@ -163,6 +264,12 @@ async function getDominantColor(buffer: Buffer): Promise<string | null> {
  * Returns the first image file sorted alphabetically
  */
 async function extractCbzCover(buffer: Buffer): Promise<Buffer | null> {
+  // Validate ZIP structure before parsing
+  if (!isValidZipBuffer(buffer)) {
+    console.error("CBZ file is not a valid ZIP archive");
+    return null;
+  }
+
   try {
     const zip = new AdmZip(buffer);
     const entries = zip.getEntries();
@@ -195,7 +302,10 @@ async function extractCbzCover(buffer: Buffer): Promise<Buffer | null> {
 async function extractCbrCover(buffer: Buffer): Promise<Buffer | null> {
   try {
     const extractor = await createExtractorFromData({
-      data: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer,
+      data: buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ) as ArrayBuffer,
     });
     const { files } = extractor.extract();
 

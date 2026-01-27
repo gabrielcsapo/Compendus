@@ -47,6 +47,11 @@ export const routes: unstable_RSCRouteConfigEntry[] = [
         lazy: () => import("./routes/unmatched"),
       },
       {
+        id: "discover",
+        path: "discover",
+        lazy: () => import("./routes/discover"),
+      },
+      {
         id: "about",
         path: "about",
         lazy: () => import("./routes/about"),

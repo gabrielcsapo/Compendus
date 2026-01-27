@@ -59,17 +59,38 @@ export async function processBook(
   // For large files, save immediately with basic info and process in background
   if (buffer.length > BACKGROUND_PROCESSING_THRESHOLD) {
     // Insert basic entry immediately
-    await db.insert(books).values({
-      id: bookId,
-      filePath: storedPath,
-      fileName: fileName,
-      fileSize: buffer.length,
-      fileHash,
-      format,
-      mimeType,
-      title: titleFromFilename,
-      authors: "[]",
-    });
+    // Use try-catch to handle race condition where another concurrent upload
+    // of the same file inserted between our duplicate check and this insert
+    try {
+      await db.insert(books).values({
+        id: bookId,
+        filePath: storedPath,
+        fileName: fileName,
+        fileSize: buffer.length,
+        fileHash,
+        format,
+        mimeType,
+        title: titleFromFilename,
+        authors: "[]",
+      });
+    } catch (error: unknown) {
+      // Handle UNIQUE constraint violation (race condition with duplicate upload)
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "SQLITE_CONSTRAINT_UNIQUE"
+      ) {
+        // Another concurrent upload of the same file succeeded first
+        const existing = await db.select().from(books).where(eq(books.fileHash, fileHash)).get();
+        return {
+          success: false,
+          error: "duplicate",
+          existingBookId: existing?.id,
+        };
+      }
+      throw error;
+    }
 
     // Queue heavy processing in background
     queueBackgroundProcessing(bookId, buffer, format, options);
@@ -95,27 +116,47 @@ export async function processBook(
   const coverResult = await suppressConsole(() => extractCover(buffer, format));
   const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
 
-  await db.insert(books).values({
-    id: bookId,
-    filePath: storedPath,
-    fileName: fileName,
-    fileSize: buffer.length,
-    fileHash,
-    format,
-    mimeType,
-    title: metadata.title || titleFromFilename,
-    subtitle: metadata.subtitle,
-    authors: JSON.stringify(metadata.authors || []),
-    publisher: metadata.publisher,
-    publishedDate: metadata.publishedDate,
-    description: metadata.description,
-    isbn: metadata.isbn,
-    isbn13: metadata.isbn13,
-    language: metadata.language,
-    pageCount: metadata.pageCount,
-    coverPath,
-    coverColor: coverResult?.dominantColor,
-  });
+  // Use try-catch to handle race condition where another concurrent upload
+  // of the same file inserted between our duplicate check and this insert
+  try {
+    await db.insert(books).values({
+      id: bookId,
+      filePath: storedPath,
+      fileName: fileName,
+      fileSize: buffer.length,
+      fileHash,
+      format,
+      mimeType,
+      title: metadata.title || titleFromFilename,
+      subtitle: metadata.subtitle,
+      authors: JSON.stringify(metadata.authors || []),
+      publisher: metadata.publisher,
+      publishedDate: metadata.publishedDate,
+      description: metadata.description,
+      isbn: metadata.isbn,
+      isbn13: metadata.isbn13,
+      language: metadata.language,
+      pageCount: metadata.pageCount,
+      coverPath,
+      coverColor: coverResult?.dominantColor,
+    });
+  } catch (error: unknown) {
+    // Handle UNIQUE constraint violation (race condition with duplicate upload)
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "SQLITE_CONSTRAINT_UNIQUE"
+    ) {
+      const existing = await db.select().from(books).where(eq(books.fileHash, fileHash)).get();
+      return {
+        success: false,
+        error: "duplicate",
+        existingBookId: existing?.id,
+      };
+    }
+    throw error;
+  }
 
   // Queue content indexing for small files
   if (!options.skipContentIndexing) {

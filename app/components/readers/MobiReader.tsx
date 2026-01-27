@@ -40,7 +40,7 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
 
         const arrayBuffer = await response.arrayBuffer();
         const { initMobiFile } = await import("@lingo-reader/mobi-parser");
-        const mobi = await initMobiFile(Buffer.from(arrayBuffer));
+        const mobi = await initMobiFile(new Uint8Array(arrayBuffer));
         mobiRef.current = mobi;
 
         const spine = mobi.getSpine();

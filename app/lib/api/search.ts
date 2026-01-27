@@ -115,7 +115,11 @@ export async function apiSearchBooks(
   }
 
   try {
-    const searchIn: ("title" | "authors" | "description" | "content")[] = ["title", "authors", "description"];
+    const searchIn: ("title" | "authors" | "description" | "content")[] = [
+      "title",
+      "authors",
+      "description",
+    ];
     if (searchContent) {
       searchIn.push("content");
     }
@@ -210,11 +214,7 @@ export async function apiGetBook(
   baseUrl: string,
 ): Promise<ApiBookResponse | ApiErrorResponse> {
   try {
-    const result = await db
-      .select()
-      .from(books)
-      .where(eq(books.id, id))
-      .get();
+    const result = await db.select().from(books).where(eq(books.id, id)).get();
 
     if (!result) {
       return {
@@ -259,11 +259,7 @@ export async function apiListBooks(
   }
 
   try {
-    const results = await db
-      .select()
-      .from(books)
-      .limit(limit)
-      .offset(offset);
+    const results = await db.select().from(books).limit(limit).offset(offset);
 
     return {
       success: true,

@@ -5,6 +5,35 @@ import type { BookFormat } from "../types";
 // Image extensions for comic book archives
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 
+/**
+ * Validate that a buffer looks like a valid ZIP file by checking:
+ * 1. PK signature at the start
+ * 2. End of Central Directory signature somewhere in the file
+ */
+function isValidZipBuffer(buffer: Buffer): boolean {
+  // Check minimum size (ZIP needs at least 22 bytes for EOCD)
+  if (buffer.length < 22) return false;
+
+  // Check PK signature at start
+  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) return false;
+
+  // Check for End of Central Directory signature (PK\x05\x06)
+  // Search in the last 65KB + 22 bytes (max comment size + EOCD size)
+  const searchStart = Math.max(0, buffer.length - 65557);
+  for (let i = buffer.length - 22; i >= searchStart; i--) {
+    if (
+      buffer[i] === 0x50 &&
+      buffer[i + 1] === 0x4b &&
+      buffer[i + 2] === 0x05 &&
+      buffer[i + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export interface ComicPage {
   index: number;
   name: string;
@@ -42,14 +71,26 @@ function isImageFile(filename: string): boolean {
 
 /**
  * Get sorted list of image entries from a CBZ file (without extracting data)
+ * Returns empty array if the archive is corrupted
  */
 function getCbzImageEntries(buffer: Buffer) {
-  const zip = new AdmZip(buffer);
-  const entries = zip.getEntries();
+  // Validate ZIP structure before parsing
+  if (!isValidZipBuffer(buffer)) {
+    console.error("CBZ file is not a valid ZIP archive");
+    return [];
+  }
 
-  return entries
-    .filter((entry) => !entry.isDirectory && isImageFile(entry.entryName))
-    .sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }));
+  try {
+    const zip = new AdmZip(buffer);
+    const entries = zip.getEntries();
+
+    return entries
+      .filter((entry) => !entry.isDirectory && isImageFile(entry.entryName))
+      .sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }));
+  } catch (error) {
+    console.error("Error reading CBZ archive:", error);
+    return [];
+  }
 }
 
 /**
@@ -96,54 +137,68 @@ export async function extractCbzPages(buffer: Buffer): Promise<ComicPage[]> {
  * Convert Buffer to ArrayBuffer for node-unrar-js
  */
 function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
-  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+  return buffer.buffer.slice(
+    buffer.byteOffset,
+    buffer.byteOffset + buffer.byteLength,
+  ) as ArrayBuffer;
 }
 
 /**
  * Get sorted list of image file names from a CBR file (without extracting data)
+ * Returns empty array if the archive is corrupted
  */
 async function getCbrImageFileList(buffer: Buffer): Promise<string[]> {
-  const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
-  const list = extractor.getFileList();
+  try {
+    const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
+    const list = extractor.getFileList();
 
-  const imageFiles: string[] = [];
-  for (const fileHeader of list.fileHeaders) {
-    if (fileHeader.flags.directory) continue;
-    if (!isImageFile(fileHeader.name)) continue;
-    imageFiles.push(fileHeader.name);
+    const imageFiles: string[] = [];
+    for (const fileHeader of list.fileHeaders) {
+      if (fileHeader.flags.directory) continue;
+      if (!isImageFile(fileHeader.name)) continue;
+      imageFiles.push(fileHeader.name);
+    }
+
+    return imageFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  } catch (error) {
+    console.error("Error reading CBR archive:", error);
+    return [];
   }
-
-  return imageFiles.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
 /**
  * Extract a single page from a CBR (RAR) file
  */
 export async function extractCbrPage(buffer: Buffer, pageIndex: number): Promise<ComicPage | null> {
-  const imageFiles = await getCbrImageFileList(buffer);
+  try {
+    const imageFiles = await getCbrImageFileList(buffer);
 
-  if (pageIndex < 0 || pageIndex >= imageFiles.length) {
+    if (pageIndex < 0 || pageIndex >= imageFiles.length) {
+      return null;
+    }
+
+    const targetFileName = imageFiles[pageIndex];
+
+    // Extract only the specific file we need
+    const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
+    const { files } = extractor.extract({ files: [targetFileName] });
+
+    for (const file of files) {
+      if (file.fileHeader.name === targetFileName && file.extraction) {
+        return {
+          index: pageIndex,
+          name: file.fileHeader.name,
+          data: Buffer.from(file.extraction),
+          mimeType: getMimeType(file.fileHeader.name),
+        };
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error extracting CBR page:", error);
     return null;
   }
-
-  const targetFileName = imageFiles[pageIndex];
-
-  // Extract only the specific file we need
-  const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
-  const { files } = extractor.extract({ files: [targetFileName] });
-
-  for (const file of files) {
-    if (file.fileHeader.name === targetFileName && file.extraction) {
-      return {
-        index: pageIndex,
-        name: file.fileHeader.name,
-        data: Buffer.from(file.extraction),
-        mimeType: getMimeType(file.fileHeader.name),
-      };
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -158,40 +213,42 @@ export async function getCbrPageCount(buffer: Buffer): Promise<number> {
  * Extract all pages from a CBR (RAR) file
  */
 export async function extractCbrPages(buffer: Buffer): Promise<ComicPage[]> {
-  const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
-  const { files } = extractor.extract();
+  try {
+    const extractor = await createExtractorFromData({ data: bufferToArrayBuffer(buffer) });
+    const { files } = extractor.extract();
 
-  const pages: ComicPage[] = [];
+    const pages: ComicPage[] = [];
 
-  // Collect all image files
-  for (const file of files) {
-    if (file.fileHeader.flags.directory) continue;
-    if (!isImageFile(file.fileHeader.name)) continue;
+    // Collect all image files
+    for (const file of files) {
+      if (file.fileHeader.flags.directory) continue;
+      if (!isImageFile(file.fileHeader.name)) continue;
 
-    pages.push({
-      index: 0, // Will be set after sorting
-      name: file.fileHeader.name,
-      data: Buffer.from(file.extraction!),
-      mimeType: getMimeType(file.fileHeader.name),
+      pages.push({
+        index: 0, // Will be set after sorting
+        name: file.fileHeader.name,
+        data: Buffer.from(file.extraction!),
+        mimeType: getMimeType(file.fileHeader.name),
+      });
+    }
+
+    // Sort alphabetically and update indices
+    pages.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    pages.forEach((page, index) => {
+      page.index = index;
     });
+
+    return pages;
+  } catch (error) {
+    console.error("Error extracting CBR pages:", error);
+    return [];
   }
-
-  // Sort alphabetically and update indices
-  pages.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  pages.forEach((page, index) => {
-    page.index = index;
-  });
-
-  return pages;
 }
 
 /**
  * Extract pages from a comic book archive (CBZ or CBR)
  */
-export async function extractComicPages(
-  buffer: Buffer,
-  format: BookFormat,
-): Promise<ComicPage[]> {
+export async function extractComicPages(buffer: Buffer, format: BookFormat): Promise<ComicPage[]> {
   switch (format) {
     case "cbz":
       return extractCbzPages(buffer);
@@ -223,10 +280,7 @@ export async function getComicPage(
 /**
  * Get the total number of pages in a comic book archive (optimized - doesn't extract image data)
  */
-export async function getComicPageCount(
-  buffer: Buffer,
-  format: BookFormat,
-): Promise<number> {
+export async function getComicPageCount(buffer: Buffer, format: BookFormat): Promise<number> {
   switch (format) {
     case "cbz":
       return getCbzPageCount(buffer);

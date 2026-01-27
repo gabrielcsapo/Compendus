@@ -96,7 +96,12 @@ export function CreateCollectionModal({ isOpen, onClose }: CreateCollectionModal
             className="text-foreground-muted hover:text-foreground disabled:opacity-50"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -157,7 +162,9 @@ export function CreateCollectionModal({ isOpen, onClose }: CreateCollectionModal
 
           {/* Icon */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-foreground mb-2">Icon (optional)</label>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Icon (optional)
+            </label>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -327,7 +334,12 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
             className="text-foreground-muted hover:text-foreground disabled:opacity-50"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -335,7 +347,8 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
         {showDeleteConfirm ? (
           <div className="p-6">
             <p className="text-foreground mb-4">
-              Are you sure you want to delete "{collection.name}"? This will not delete the books in the collection.
+              Are you sure you want to delete "{collection.name}"? This will not delete the books in
+              the collection.
             </p>
             <div className="flex gap-3">
               <button
@@ -380,7 +393,10 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
             </div>
 
             <div className="mb-4">
-              <label htmlFor="edit-description" className="block text-sm font-medium text-foreground mb-1">
+              <label
+                htmlFor="edit-description"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
                 Description
               </label>
               <textarea
@@ -402,7 +418,9 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
                     type="button"
                     onClick={() => setColor(c)}
                     className={`w-8 h-8 rounded-full transition-transform ${
-                      color === c ? "ring-2 ring-offset-2 ring-primary scale-110" : "hover:scale-105"
+                      color === c
+                        ? "ring-2 ring-offset-2 ring-primary scale-110"
+                        : "hover:scale-105"
                     }`}
                     style={{ backgroundColor: c }}
                     disabled={isSubmitting}
@@ -432,7 +450,9 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
                     type="button"
                     onClick={() => setIcon(i)}
                     className={`w-8 h-8 rounded-lg border text-lg flex items-center justify-center transition-colors ${
-                      icon === i ? "border-primary bg-primary-light" : "border-border hover:border-foreground-muted"
+                      icon === i
+                        ? "border-primary bg-primary-light"
+                        : "border-border hover:border-foreground-muted"
                     }`}
                     disabled={isSubmitting}
                   >

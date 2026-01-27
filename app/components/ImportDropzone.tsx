@@ -198,7 +198,12 @@ export function ImportDropzone() {
               {currentUpload.status === "processing" ? (
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               ) : (
-                <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-8 h-8 text-primary"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -252,7 +257,9 @@ export function ImportDropzone() {
             </div>
             <p className="text-foreground text-center font-medium">Drop files here</p>
             <p className="text-foreground-muted text-sm mt-1">or click to browse</p>
-            <p className="text-foreground-muted/60 text-xs mt-3">Supports PDF, EPUB, MOBI, CBR, and CBZ</p>
+            <p className="text-foreground-muted/60 text-xs mt-3">
+              Supports PDF, EPUB, MOBI, CBR, and CBZ
+            </p>
           </>
         )}
 

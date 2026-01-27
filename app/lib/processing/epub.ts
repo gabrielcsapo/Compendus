@@ -1,9 +1,56 @@
 import { initEpubFile } from "@lingo-reader/epub-parser";
 import type { BookMetadata, ExtractedContent, Chapter } from "../types";
 
+/**
+ * Validate that a buffer looks like a valid ZIP file by checking:
+ * 1. PK signature at the start
+ * 2. End of Central Directory signature somewhere in the file
+ */
+function isValidZipBuffer(buffer: Buffer): boolean {
+  // Check minimum size (ZIP needs at least 22 bytes for EOCD)
+  if (buffer.length < 22) return false;
+
+  // Check PK signature at start
+  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) return false;
+
+  // Check for End of Central Directory signature (PK\x05\x06)
+  // Search in the last 65KB + 22 bytes (max comment size + EOCD size)
+  const searchStart = Math.max(0, buffer.length - 65557);
+  for (let i = buffer.length - 22; i >= searchStart; i--) {
+    if (
+      buffer[i] === 0x50 &&
+      buffer[i + 1] === 0x4b &&
+      buffer[i + 2] === 0x05 &&
+      buffer[i + 3] === 0x06
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function extractEpubMetadata(buffer: Buffer): Promise<BookMetadata> {
-  const epub = await initEpubFile(buffer);
-  const metadata = epub.getMetadata();
+  // Validate ZIP structure before parsing to prevent JSZip crash
+  if (!isValidZipBuffer(buffer)) {
+    return { title: null, authors: [] };
+  }
+
+  let epub;
+  try {
+    epub = await initEpubFile(buffer);
+  } catch {
+    // Handle corrupted or non-standard EPUB files gracefully
+    // Common issues: malformed guide section, missing required elements
+    return { title: null, authors: [] };
+  }
+
+  let metadata;
+  try {
+    metadata = epub.getMetadata();
+  } catch {
+    return { title: null, authors: [] };
+  }
 
   // Extract authors from creator array
   const authors: string[] = [];
@@ -47,9 +94,30 @@ export async function extractEpubMetadata(buffer: Buffer): Promise<BookMetadata>
 }
 
 export async function extractEpubContent(buffer: Buffer): Promise<ExtractedContent> {
-  const epub = await initEpubFile(buffer);
-  const spine = epub.getSpine();
-  const toc = epub.getToc();
+  // Validate ZIP structure before parsing to prevent JSZip crash
+  if (!isValidZipBuffer(buffer)) {
+    return { fullText: "", chapters: [], toc: [] };
+  }
+
+  let epub;
+  try {
+    epub = await initEpubFile(buffer);
+  } catch {
+    // Handle corrupted or non-standard EPUB files gracefully
+    // Common issues: malformed guide section, missing required elements
+    // The book will still import, just without full-text search indexing
+    return { fullText: "", chapters: [], toc: [] };
+  }
+
+  let spine;
+  let toc;
+  try {
+    spine = epub.getSpine();
+    toc = epub.getToc();
+  } catch {
+    // Some EPUBs have malformed spine/toc - continue with empty content
+    return { fullText: "", chapters: [], toc: [] };
+  }
 
   const chapters: Chapter[] = [];
   let fullText = "";
@@ -87,6 +155,11 @@ export async function extractEpubContent(buffer: Buffer): Promise<ExtractedConte
 }
 
 export async function extractEpubCover(buffer: Buffer): Promise<Buffer | null> {
+  // Validate ZIP structure before parsing to prevent JSZip crash
+  if (!isValidZipBuffer(buffer)) {
+    return null;
+  }
+
   try {
     const epub = await initEpubFile(buffer);
     const coverPath = epub.getCoverImage();

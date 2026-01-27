@@ -43,7 +43,9 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
         }
 
         const blob = await response.blob();
-        const file = new File([blob], "book.epub", { type: "application/epub+zip" });
+        const file = new File([blob], "book.epub", {
+          type: "application/epub+zip",
+        });
         console.log("Loaded epub file, size:", file.size);
 
         if (destroyed) return;
@@ -57,11 +59,13 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
 
         // Get TOC
         const tocData = book.toc || [];
-        setToc(tocData.map((item: any, i: number) => ({
-          label: item.label || `Section ${i + 1}`,
-          href: item.href || String(i),
-          id: item.id,
-        })));
+        setToc(
+          tocData.map((item: any, i: number) => ({
+            label: item.label || `Section ${i + 1}`,
+            href: item.href || String(i),
+            id: item.id,
+          })),
+        );
 
         // Get sections
         const sections = book.sections || [];
@@ -158,33 +162,36 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
     };
   }, [bookPath, position, onPositionChange]);
 
-  const goToSection = useCallback(async (index: number) => {
-    if (!bookRef.current) return;
-    const sections = bookRef.current.sections || [];
-    if (index < 0 || index >= sections.length) return;
+  const goToSection = useCallback(
+    async (index: number) => {
+      if (!bookRef.current) return;
+      const sections = bookRef.current.sections || [];
+      if (index < 0 || index >= sections.length) return;
 
-    setLoading(true);
-    const section = sections[index];
+      setLoading(true);
+      const section = sections[index];
 
-    try {
-      const doc = await section.createDocument();
-      const content = doc.body?.innerHTML || doc.documentElement?.innerHTML || "";
+      try {
+        const doc = await section.createDocument();
+        const content = doc.body?.innerHTML || doc.documentElement?.innerHTML || "";
 
-      const iframe = containerRef.current?.querySelector("iframe");
-      const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
-      if (iframeDoc) {
-        iframeDoc.body.innerHTML = content;
-        iframeDoc.body.scrollTop = 0;
+        const iframe = containerRef.current?.querySelector("iframe");
+        const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.body.innerHTML = content;
+          iframeDoc.body.scrollTop = 0;
+        }
+
+        setCurrentSection(index);
+        const progress = (index + 1) / sections.length;
+        onPositionChange(JSON.stringify({ section: index }), progress);
+      } catch (err) {
+        console.error("Error loading section:", err);
       }
-
-      setCurrentSection(index);
-      const progress = (index + 1) / sections.length;
-      onPositionChange(JSON.stringify({ section: index }), progress);
-    } catch (err) {
-      console.error("Error loading section:", err);
-    }
-    setLoading(false);
-  }, [onPositionChange]);
+      setLoading(false);
+    },
+    [onPositionChange],
+  );
 
   const goPrev = useCallback(() => {
     goToSection(currentSection - 1);
@@ -250,7 +257,12 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
             title="Table of Contents"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
           <button

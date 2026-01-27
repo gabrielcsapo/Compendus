@@ -81,6 +81,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   Tags
                 </Link>
               </li>
+              <li>
+                <Link
+                  to="/discover"
+                  className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
+                >
+                  Discover
+                </Link>
+              </li>
               <li className="ml-auto">
                 <DarkModeToggle />
               </li>

@@ -159,13 +159,9 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
   };
 
   // Filter tags for dropdown (exclude already added)
-  const availableTags = allTags.filter(
-    (tag) => !bookTags.some((bt) => bt.id === tag.id)
-  );
+  const availableTags = allTags.filter((tag) => !bookTags.some((bt) => bt.id === tag.id));
   const filteredTags = newTagName
-    ? availableTags.filter((tag) =>
-        tag.name.toLowerCase().includes(newTagName.toLowerCase())
-      )
+    ? availableTags.filter((tag) => tag.name.toLowerCase().includes(newTagName.toLowerCase()))
     : availableTags;
 
   if (!isOpen) return null;
@@ -186,7 +182,12 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
             className="text-foreground-muted hover:text-foreground disabled:opacity-50"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -257,7 +258,10 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
 
             {/* Published Date */}
             <div>
-              <label htmlFor="publishedDate" className="block text-sm font-medium text-foreground mb-1">
+              <label
+                htmlFor="publishedDate"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
                 Published Date
               </label>
               <input
@@ -337,7 +341,10 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
 
             {/* Series Number */}
             <div>
-              <label htmlFor="seriesNumber" className="block text-sm font-medium text-foreground mb-1">
+              <label
+                htmlFor="seriesNumber"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
                 Series Number
               </label>
               <input
@@ -353,7 +360,10 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
 
             {/* Description */}
             <div className="md:col-span-2">
-              <label htmlFor="description" className="block text-sm font-medium text-foreground mb-1">
+              <label
+                htmlFor="description"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
                 Description
               </label>
               <textarea
@@ -378,8 +388,14 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
                     className="inline-flex items-center gap-1 px-3 py-1 text-sm rounded-full"
                     style={
                       tag.color
-                        ? { backgroundColor: tag.color + "20", color: tag.color }
-                        : { backgroundColor: "var(--color-surface-elevated)", color: "var(--color-foreground-muted)" }
+                        ? {
+                            backgroundColor: tag.color + "20",
+                            color: tag.color,
+                          }
+                        : {
+                            backgroundColor: "var(--color-surface-elevated)",
+                            color: "var(--color-foreground-muted)",
+                          }
                     }
                   >
                     {tag.name}
@@ -389,8 +405,18 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
                       className="ml-1 hover:opacity-70"
                       disabled={isSubmitting}
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M6 18L18 6M6 6l12 12"
+                        />
                       </svg>
                     </button>
                   </span>
@@ -429,18 +455,29 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
                 {/* Tag suggestions dropdown */}
                 {showTagDropdown && (newTagName || filteredTags.length > 0) && (
                   <div className="absolute z-10 w-full mt-1 bg-surface border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {newTagName && !allTags.some((t) => t.name.toLowerCase() === newTagName.toLowerCase()) && (
-                      <button
-                        type="button"
-                        onClick={() => handleAddTag(newTagName)}
-                        className="w-full px-3 py-2 text-left text-sm hover:bg-surface-elevated flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        Create "{newTagName}"
-                      </button>
-                    )}
+                    {newTagName &&
+                      !allTags.some((t) => t.name.toLowerCase() === newTagName.toLowerCase()) && (
+                        <button
+                          type="button"
+                          onClick={() => handleAddTag(newTagName)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-surface-elevated flex items-center gap-2"
+                        >
+                          <svg
+                            className="w-4 h-4 text-primary"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                          Create "{newTagName}"
+                        </button>
+                      )}
                     {filteredTags.slice(0, 10).map((tag) => (
                       <button
                         key={tag.id}
@@ -466,10 +503,7 @@ export function EditBookModal({ isOpen, onClose, book, currentTags }: EditBookMo
 
               {/* Click outside to close dropdown */}
               {showTagDropdown && (
-                <div
-                  className="fixed inset-0 z-0"
-                  onClick={() => setShowTagDropdown(false)}
-                />
+                <div className="fixed inset-0 z-0" onClick={() => setShowTagDropdown(false)} />
               )}
             </div>
           </div>

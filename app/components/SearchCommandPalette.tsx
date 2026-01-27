@@ -107,10 +107,7 @@ export function SearchCommandPalette() {
   if (!isOpen) return null;
 
   const modal = (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
-      onClick={close}
-    >
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={close}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
 
@@ -158,9 +155,7 @@ export function SearchCommandPalette() {
               <>
                 <ul className="py-2">
                   {results.map((book, index) => {
-                    const authors = book.authors
-                      ? JSON.parse(book.authors)
-                      : [];
+                    const authors = book.authors ? JSON.parse(book.authors) : [];
                     return (
                       <li key={book.id}>
                         <button
@@ -189,9 +184,7 @@ export function SearchCommandPalette() {
                           </div>
                           {/* Book info */}
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate text-foreground">
-                              {book.title}
-                            </div>
+                            <div className="font-medium truncate text-foreground">{book.title}</div>
                             {authors.length > 0 && (
                               <div className="text-sm text-foreground-muted truncate">
                                 {authors.join(", ")}

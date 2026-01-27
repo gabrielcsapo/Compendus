@@ -3,12 +3,7 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import { existsSync } from "fs";
 import { eq } from "drizzle-orm";
-import {
-  apiSearchBooks,
-  apiLookupByIsbn,
-  apiGetBook,
-  apiListBooks,
-} from "../app/lib/api/search";
+import { apiSearchBooks, apiLookupByIsbn, apiGetBook, apiListBooks } from "../app/lib/api/search";
 import { getComicPage, getComicPageCount } from "../app/lib/processing/comic";
 import { processBook } from "../app/lib/processing";
 import { processAndStoreCover } from "../app/lib/processing/cover";
@@ -60,11 +55,7 @@ async function handleApiRequest(
     const offset = parseInt(searchParams.get("offset") || "0", 10);
     const searchContent = searchParams.get("content") === "true";
 
-    const result = await apiSearchBooks(
-      query,
-      { limit, offset, searchContent },
-      baseUrl,
-    );
+    const result = await apiSearchBooks(query, { limit, offset, searchContent }, baseUrl);
     return jsonResponse(result, result.success ? 200 : 400);
   }
 
@@ -197,10 +188,7 @@ async function handleApiRequest(
       return jsonResponse(result, result.success ? 200 : 400);
     } catch (error) {
       console.error("Upload error:", error);
-      return jsonResponse(
-        { success: false, error: "upload_failed" },
-        500,
-      );
+      return jsonResponse({ success: false, error: "upload_failed" }, 500);
     }
   }
 
@@ -261,9 +249,7 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
   }
 
   // Handle /comic/:id/page/:pageNum requests for comic book pages
-  const comicPageMatch = pathname.match(
-    /^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/page\/(\d+)$/,
-  );
+  const comicPageMatch = pathname.match(/^\/comic\/([a-f0-9-]+)\/(cbr|cbz)\/page\/(\d+)$/);
   if (comicPageMatch) {
     const [, bookId, format, pageNumStr] = comicPageMatch;
     const pageNum = parseInt(pageNumStr, 10);
@@ -319,11 +305,7 @@ export default async function handler(request: Request) {
   const url = new URL(request.url);
 
   // Handle API requests
-  const apiResponse = await handleApiRequest(
-    request,
-    url.pathname,
-    url.searchParams,
-  );
+  const apiResponse = await handleApiRequest(request, url.pathname, url.searchParams);
   if (apiResponse) {
     return apiResponse;
   }
@@ -334,9 +316,7 @@ export default async function handler(request: Request) {
     return staticResponse;
   }
 
-  const ssr = await import.meta.viteRsc.loadModule<
-    typeof import("./entry.ssr")
-  >("ssr", "index");
+  const ssr = await import.meta.viteRsc.loadModule<typeof import("./entry.ssr")>("ssr", "index");
 
   return ssr.default(request, await fetchServer(request));
 }

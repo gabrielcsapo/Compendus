@@ -1,11 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  refreshMetadata,
-  searchMetadata,
-  applyMetadata,
-} from "../actions/books";
+import { refreshMetadata, searchMetadata, applyMetadata } from "../actions/books";
 import type { MetadataSearchResult } from "../lib/metadata";
 
 interface MetadataRefreshButtonProps {
@@ -22,9 +18,7 @@ export function MetadataRefreshButton({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [searchResults, setSearchResults] = useState<MetadataSearchResult[]>(
-    [],
-  );
+  const [searchResults, setSearchResults] = useState<MetadataSearchResult[]>([]);
   const [searchQuery, setSearchQuery] = useState(bookTitle);
 
   const handleAutoRefresh = async () => {
@@ -90,10 +84,7 @@ export function MetadataRefreshButton({
         >
           {loading ? "Loading..." : "Auto-Refresh Metadata"}
         </button>
-        <button
-          onClick={() => setShowSearch(!showSearch)}
-          className="btn btn-secondary text-sm"
-        >
+        <button onClick={() => setShowSearch(!showSearch)} className="btn btn-secondary text-sm">
           {showSearch ? "Hide Search" : "Search Metadata"}
         </button>
       </div>
@@ -142,36 +133,24 @@ export function MetadataRefreshButton({
                               : "bg-green-100 text-green-700"
                           }`}
                         >
-                          {result.source === "googlebooks"
-                            ? "Google"
-                            : "OpenLib"}
+                          {result.source === "googlebooks" ? "Google" : "OpenLib"}
                         </span>
                       </div>
                       {result.subtitle && (
-                        <p className="text-sm text-gray-500 truncate">
-                          {result.subtitle}
-                        </p>
+                        <p className="text-sm text-gray-500 truncate">{result.subtitle}</p>
                       )}
                       {result.authors.length > 0 && (
-                        <p className="text-sm text-gray-600">
-                          {result.authors.join(", ")}
-                        </p>
+                        <p className="text-sm text-gray-600">{result.authors.join(", ")}</p>
                       )}
                       <div className="flex items-center gap-2 mt-1">
                         {result.publishedDate && (
-                          <span className="text-xs text-gray-400">
-                            {result.publishedDate}
-                          </span>
+                          <span className="text-xs text-gray-400">{result.publishedDate}</span>
                         )}
                         {result.pageCount && (
-                          <span className="text-xs text-gray-400">
-                            {result.pageCount} pages
-                          </span>
+                          <span className="text-xs text-gray-400">{result.pageCount} pages</span>
                         )}
                         {result.series && (
-                          <span className="text-xs text-purple-600">
-                            {result.series}
-                          </span>
+                          <span className="text-xs text-purple-600">{result.series}</span>
                         )}
                       </div>
                       {result.description && (

@@ -109,10 +109,7 @@ export function UnmatchedBookCard({ book, position, total }: UnmatchedBookCardPr
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            to={`/book/${book.id}`}
-            className="text-sm text-primary hover:text-primary-hover"
-          >
+          <Link to={`/book/${book.id}`} className="text-sm text-primary hover:text-primary-hover">
             View Details
           </Link>
           <button
@@ -136,13 +133,9 @@ export function UnmatchedBookCard({ book, position, total }: UnmatchedBookCardPr
                 {book.title}
               </span>
             </div>
-            <h3 className="font-semibold text-foreground mt-3 line-clamp-2">
-              {book.title}
-            </h3>
+            <h3 className="font-semibold text-foreground mt-3 line-clamp-2">{book.title}</h3>
             {authors.length > 0 && (
-              <p className="text-sm text-foreground-muted mt-1">
-                {authors.join(", ")}
-              </p>
+              <p className="text-sm text-foreground-muted mt-1">{authors.join(", ")}</p>
             )}
           </div>
 
@@ -158,18 +151,12 @@ export function UnmatchedBookCard({ book, position, total }: UnmatchedBookCardPr
                 className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground"
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               />
-              <button
-                onClick={handleSearch}
-                disabled={searching}
-                className="btn btn-primary"
-              >
+              <button onClick={handleSearch} disabled={searching} className="btn btn-primary">
                 {searching ? "..." : "Search"}
               </button>
             </div>
 
-            {message && (
-              <p className="text-sm text-foreground-muted mb-4">{message}</p>
-            )}
+            {message && <p className="text-sm text-foreground-muted mb-4">{message}</p>}
 
             {/* Results */}
             {searching ? (

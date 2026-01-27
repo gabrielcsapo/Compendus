@@ -6,6 +6,7 @@ import { MetadataRefreshButton } from "../components/MetadataRefreshButton";
 import { CoverUploadButton } from "../components/CoverUploadButton";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
+import { DeleteBookButton } from "../components/DeleteBookButton";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -16,10 +17,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
     throw new Response("Book not found", { status: 404 });
   }
 
-  const [tags, collections] = await Promise.all([
-    getTagsForBook(id),
-    getCollectionsForBook(id),
-  ]);
+  const [tags, collections] = await Promise.all([getTagsForBook(id), getCollectionsForBook(id)]);
 
   return { book, tags, collections };
 }
@@ -85,6 +83,9 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
           {/* Edit button */}
           <EditBookButton book={book} tags={tags} />
 
+          {/* Delete button */}
+          <DeleteBookButton book={book} />
+
           {/* Progress */}
           {progressPercent > 0 && (
             <div className="mt-4">
@@ -104,19 +105,11 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
 
         {/* Details */}
         <div className="bg-surface border border-border rounded-xl p-6">
-          <h1 className="text-2xl font-bold mb-2 text-foreground">
-            {book.title}
-          </h1>
-          {book.subtitle && (
-            <p className="text-lg text-foreground-muted mb-4">
-              {book.subtitle}
-            </p>
-          )}
+          <h1 className="text-2xl font-bold mb-2 text-foreground">{book.title}</h1>
+          {book.subtitle && <p className="text-lg text-foreground-muted mb-4">{book.subtitle}</p>}
 
           {authors.length > 0 && (
-            <p className="text-foreground-muted mb-4">
-              by {authors.join(", ")}
-            </p>
+            <p className="text-foreground-muted mb-4">by {authors.join(", ")}</p>
           )}
 
           <div className="flex flex-wrap gap-2 mb-6">
@@ -137,9 +130,7 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
 
           {book.description && (
             <div className="mb-6">
-              <h2 className="font-semibold mb-2 text-foreground">
-                Description
-              </h2>
+              <h2 className="font-semibold mb-2 text-foreground">Description</h2>
               <p className="text-foreground-muted whitespace-pre-line leading-relaxed">
                 {book.description}
               </p>
@@ -204,27 +195,17 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
                 </>
               )}
               <dt className="text-foreground-muted">File Size</dt>
-              <dd className="text-foreground">
-                {formatFileSize(book.fileSize)}
-              </dd>
+              <dd className="text-foreground">{formatFileSize(book.fileSize)}</dd>
               <dt className="text-foreground-muted">Added</dt>
-              <dd className="text-foreground">
-                {book.importedAt?.toLocaleDateString()}
-              </dd>
+              <dd className="text-foreground">{book.importedAt?.toLocaleDateString()}</dd>
               <dt className="text-foreground-muted">Filename</dt>
               <dd className="text-foreground break-all">{book.fileName}</dd>
               <dt className="text-foreground-muted">Location</dt>
-              <dd className="text-foreground break-all font-mono text-xs">
-                {book.filePath}
-              </dd>
+              <dd className="text-foreground break-all font-mono text-xs">{book.filePath}</dd>
             </dl>
 
             {/* Metadata refresh */}
-            <MetadataRefreshButton
-              bookId={book.id}
-              bookTitle={book.title}
-              bookAuthors={authors}
-            />
+            <MetadataRefreshButton bookId={book.id} bookTitle={book.title} bookAuthors={authors} />
           </div>
         </div>
       </div>

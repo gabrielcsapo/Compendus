@@ -98,15 +98,15 @@ export function AddBooksToCollectionModal({
       <div className="relative bg-surface border border-border rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">
-            Add Books to "{collectionName}"
-          </h2>
-          <button
-            onClick={handleClose}
-            className="text-foreground-muted hover:text-foreground"
-          >
+          <h2 className="text-lg font-semibold text-foreground">Add Books to "{collectionName}"</h2>
+          <button onClick={handleClose} className="text-foreground-muted hover:text-foreground">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -145,9 +145,7 @@ export function AddBooksToCollectionModal({
               <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
           ) : search.trim() === "" ? (
-            <p className="text-center text-foreground-muted py-8">
-              Type to search for books
-            </p>
+            <p className="text-center text-foreground-muted py-8">Type to search for books</p>
           ) : availableBooks.length === 0 ? (
             <p className="text-center text-foreground-muted py-8">
               {searchResults.length === 0
@@ -206,15 +204,35 @@ export function AddBooksToCollectionModal({
                         </>
                       ) : isAdded ? (
                         <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                           Added
                         </>
                       ) : (
                         <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 4v16m8-8H4"
+                            />
                           </svg>
                           Add
                         </>

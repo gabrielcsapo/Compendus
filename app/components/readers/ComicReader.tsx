@@ -9,12 +9,7 @@ interface ComicReaderProps {
   onPositionChange?: (position: string, progress: number) => void;
 }
 
-export function ComicReader({
-  bookId,
-  format,
-  position,
-  onPositionChange,
-}: ComicReaderProps) {
+export function ComicReader({ bookId, format, position, onPositionChange }: ComicReaderProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);

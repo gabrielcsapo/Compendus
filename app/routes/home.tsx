@@ -1,13 +1,15 @@
 import { Link } from "react-router";
 import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount } from "../actions/books";
 import { BookGrid } from "../components/BookGrid";
-import { ImportDropzone } from "../components/ImportDropzone";
 import { SearchInput } from "../components/SearchInput";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 
 const BOOKS_PER_PAGE = 24;
 
-function getSortParams(sort: SortOption): { orderBy: "title" | "createdAt"; order: "asc" | "desc" } {
+function getSortParams(sort: SortOption): {
+  orderBy: "title" | "createdAt";
+  order: "asc" | "desc";
+} {
   switch (sort) {
     case "title-asc":
       return { orderBy: "title", order: "asc" };
@@ -124,7 +126,7 @@ function Pagination({
             >
               {page}
             </Link>
-          )
+          ),
         )}
       </div>
 
@@ -146,7 +148,8 @@ function Pagination({
 }
 
 export default function Home({ loaderData }: { loaderData: LoaderData }) {
-  const { books, totalCount, recentBooks, unmatchedCount, currentPage, totalPages, currentSort } = loaderData;
+  const { books, totalCount, recentBooks, unmatchedCount, currentPage, totalPages, currentSort } =
+    loaderData;
 
   return (
     <main className="container my-8 px-6 mx-auto">
@@ -177,11 +180,6 @@ export default function Home({ loaderData }: { loaderData: LoaderData }) {
           )}
           <SearchInput />
         </div>
-      </div>
-
-      {/* Import dropzone */}
-      <div className="mb-8">
-        <ImportDropzone />
       </div>
 
       {/* Recently read - only show on first page */}

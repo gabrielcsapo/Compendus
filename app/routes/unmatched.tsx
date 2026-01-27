@@ -2,7 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
-import { getUnmatchedBooks, getUnmatchedBooksCount, searchMetadata, applyMetadata, skipBookMatch } from "../actions/books";
+import {
+  getUnmatchedBooks,
+  getUnmatchedBooksCount,
+  searchMetadata,
+  applyMetadata,
+  skipBookMatch,
+} from "../actions/books";
 import type { Book } from "../lib/db/schema";
 import type { MetadataSearchResult } from "../lib/metadata";
 
@@ -32,10 +38,7 @@ export default function UnmatchedBooks() {
     setSearchResults([]);
 
     try {
-      const [books, count] = await Promise.all([
-        getUnmatchedBooks(1),
-        getUnmatchedBooksCount(),
-      ]);
+      const [books, count] = await Promise.all([getUnmatchedBooks(1), getUnmatchedBooksCount()]);
 
       if (books.length > 0) {
         setCurrentBook(books[0]);
@@ -119,10 +122,7 @@ export default function UnmatchedBooks() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <Link
-                to="/"
-                className="text-primary hover:text-primary-hover transition-colors"
-              >
+              <Link to="/" className="text-primary hover:text-primary-hover transition-colors">
                 &larr; Library
               </Link>
             </div>
@@ -147,9 +147,7 @@ export default function UnmatchedBooks() {
             </svg>
           </div>
           <h2 className="text-xl font-semibold text-foreground mb-2">All caught up!</h2>
-          <p className="text-foreground-muted mb-2">
-            All your books have cover images. Nice work!
-          </p>
+          <p className="text-foreground-muted mb-2">All your books have cover images. Nice work!</p>
           {processedCount > 0 && (
             <p className="text-sm text-foreground-muted mb-6">
               You processed {processedCount} {processedCount === 1 ? "book" : "books"} this session.
@@ -171,10 +169,7 @@ export default function UnmatchedBooks() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <Link
-              to="/"
-              className="text-primary hover:text-primary-hover transition-colors"
-            >
+            <Link to="/" className="text-primary hover:text-primary-hover transition-colors">
               &larr; Library
             </Link>
           </div>
@@ -237,14 +232,14 @@ export default function UnmatchedBooks() {
                   </p>
                 )}
                 {authors.length > 0 && (
-                  <p className="text-sm text-foreground-muted mt-1">
-                    by {authors.join(", ")}
-                  </p>
+                  <p className="text-sm text-foreground-muted mt-1">by {authors.join(", ")}</p>
                 )}
 
                 {/* File details */}
                 <div className="mt-4 pt-4 border-t border-border space-y-2">
-                  <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide">File Details</h4>
+                  <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide">
+                    File Details
+                  </h4>
                   <div className="text-xs space-y-1">
                     <p className="text-foreground-muted">
                       <span className="text-foreground">Filename:</span>{" "}
@@ -262,12 +257,18 @@ export default function UnmatchedBooks() {
                 </div>
 
                 {/* Existing metadata */}
-                {(currentBook.isbn || currentBook.isbn13 || currentBook.isbn10 ||
-                  currentBook.publisher || currentBook.publishedDate ||
-                  currentBook.pageCount || currentBook.language ||
+                {(currentBook.isbn ||
+                  currentBook.isbn13 ||
+                  currentBook.isbn10 ||
+                  currentBook.publisher ||
+                  currentBook.publishedDate ||
+                  currentBook.pageCount ||
+                  currentBook.language ||
                   currentBook.series) && (
                   <div className="mt-4 pt-4 border-t border-border space-y-2">
-                    <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide">Existing Metadata</h4>
+                    <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide">
+                      Existing Metadata
+                    </h4>
                     <div className="text-xs space-y-1">
                       {(currentBook.isbn || currentBook.isbn13 || currentBook.isbn10) && (
                         <p className="text-foreground-muted">
@@ -289,20 +290,17 @@ export default function UnmatchedBooks() {
                       )}
                       {currentBook.pageCount && (
                         <p className="text-foreground-muted">
-                          <span className="text-foreground">Pages:</span>{" "}
-                          {currentBook.pageCount}
+                          <span className="text-foreground">Pages:</span> {currentBook.pageCount}
                         </p>
                       )}
                       {currentBook.language && (
                         <p className="text-foreground-muted">
-                          <span className="text-foreground">Language:</span>{" "}
-                          {currentBook.language}
+                          <span className="text-foreground">Language:</span> {currentBook.language}
                         </p>
                       )}
                       {currentBook.series && (
                         <p className="text-foreground-muted">
-                          <span className="text-foreground">Series:</span>{" "}
-                          {currentBook.series}
+                          <span className="text-foreground">Series:</span> {currentBook.series}
                           {currentBook.seriesNumber && ` #${currentBook.seriesNumber}`}
                         </p>
                       )}
@@ -313,7 +311,9 @@ export default function UnmatchedBooks() {
                 {/* Description if available */}
                 {currentBook.description && (
                   <div className="mt-4 pt-4 border-t border-border">
-                    <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide mb-2">Description</h4>
+                    <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide mb-2">
+                      Description
+                    </h4>
                     <p className="text-xs text-foreground-muted line-clamp-4">
                       {currentBook.description}
                     </p>
@@ -333,35 +333,30 @@ export default function UnmatchedBooks() {
                     className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-foreground"
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   />
-                  <button
-                    onClick={handleSearch}
-                    disabled={searching}
-                    className="btn btn-primary"
-                  >
+                  <button onClick={handleSearch} disabled={searching} className="btn btn-primary">
                     {searching ? "..." : "Search"}
                   </button>
                 </div>
-                {(currentBook.isbn || currentBook.isbn13 || currentBook.isbn10) ? (
+                {currentBook.isbn || currentBook.isbn13 || currentBook.isbn10 ? (
                   <p className="text-xs text-foreground-muted mb-4">
                     Tip: Try searching with ISBN{" "}
                     <button
                       onClick={() => {
-                        const isbn = currentBook.isbn13 || currentBook.isbn10 || currentBook.isbn || "";
+                        const isbn =
+                          currentBook.isbn13 || currentBook.isbn10 || currentBook.isbn || "";
                         setSearchQuery(isbn);
                       }}
                       className="text-primary hover:underline"
                     >
                       {currentBook.isbn13 || currentBook.isbn10 || currentBook.isbn}
-                    </button>
-                    {" "}for more accurate results.
+                    </button>{" "}
+                    for more accurate results.
                   </p>
                 ) : (
                   <div className="mb-2" />
                 )}
 
-                {message && (
-                  <p className="text-sm text-foreground-muted mb-4">{message}</p>
-                )}
+                {message && <p className="text-sm text-foreground-muted mb-4">{message}</p>}
 
                 {/* Results */}
                 {searching ? (

@@ -196,6 +196,56 @@ export const readingSessions = sqliteTable(
   ],
 );
 
+// Wanted Books table - books the user wants but doesn't own yet
+export const wantedBooks = sqliteTable(
+  "wanted_books",
+  {
+    id: text("id").primaryKey(),
+
+    // Metadata from external APIs
+    title: text("title").notNull(),
+    subtitle: text("subtitle"),
+    authors: text("authors"), // JSON array
+    publisher: text("publisher"),
+    publishedDate: text("published_date"),
+    description: text("description"),
+    isbn: text("isbn"),
+    isbn13: text("isbn13"),
+    isbn10: text("isbn10"),
+    language: text("language"),
+    pageCount: integer("page_count"),
+    series: text("series"),
+    seriesNumber: text("series_number"),
+
+    // Cover from external source (URL, not local path)
+    coverUrl: text("cover_url"),
+
+    // External source tracking
+    source: text("source", { enum: ["openlibrary", "googlebooks", "manual"] }).notNull(),
+    sourceId: text("source_id"),
+
+    // Status tracking
+    status: text("status", { enum: ["wishlist", "searching", "ordered"] })
+      .notNull()
+      .default("wishlist"),
+    priority: integer("priority").default(0), // 0 = normal, 1 = high, 2 = critical
+    notes: text("notes"),
+
+    // Timestamps
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_wanted_books_series").on(table.series),
+    index("idx_wanted_books_status").on(table.status),
+    uniqueIndex("idx_wanted_books_source").on(table.source, table.sourceId),
+  ],
+);
+
 // Type exports
 export type Book = typeof books.$inferSelect;
 export type NewBook = typeof books.$inferInsert;
@@ -206,3 +256,5 @@ export type NewTag = typeof tags.$inferInsert;
 export type Bookmark = typeof bookmarks.$inferSelect;
 export type Highlight = typeof highlights.$inferSelect;
 export type ReadingSession = typeof readingSessions.$inferSelect;
+export type WantedBook = typeof wantedBooks.$inferSelect;
+export type NewWantedBook = typeof wantedBooks.$inferInsert;
