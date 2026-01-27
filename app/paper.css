@@ -317,6 +317,94 @@
 }
 
 /* ============================================
+   BADGES & STATUS INDICATORS
+   ============================================ */
+
+@utility badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+@utility badge-primary {
+  @apply bg-primary-light text-primary border border-primary/20;
+}
+
+@utility badge-success {
+  @apply bg-success-light text-success border border-success/20;
+}
+
+@utility badge-warning {
+  @apply bg-warning-light text-warning border border-warning/20;
+}
+
+@utility badge-danger {
+  @apply bg-danger-light text-danger border border-danger/20;
+}
+
+@utility badge-secondary {
+  @apply bg-secondary-light text-secondary border border-secondary/20;
+}
+
+@utility badge-accent {
+  @apply bg-accent-light text-accent border border-accent/20;
+}
+
+@utility badge-neutral {
+  @apply bg-surface-elevated text-foreground-muted border border-border;
+}
+
+/* ============================================
+   ALERTS & MESSAGES
+   ============================================ */
+
+@utility alert {
+  @apply p-4 rounded-lg border;
+}
+
+@utility alert-success {
+  @apply bg-success-light text-success border-success/20;
+}
+
+@utility alert-warning {
+  @apply bg-warning-light text-warning border-warning/20;
+}
+
+@utility alert-danger {
+  @apply bg-danger-light text-danger border-danger/20;
+}
+
+@utility alert-info {
+  @apply bg-primary-light text-primary border-primary/20;
+}
+
+/* ============================================
+   READER COMPONENTS
+   ============================================ */
+
+@utility reader-container {
+  @apply bg-surface text-foreground;
+}
+
+@utility reader-toolbar {
+  @apply bg-surface-elevated border-b border-border;
+}
+
+@utility reader-button {
+  @apply bg-surface border border-border text-foreground hover:bg-surface-elevated transition-colors;
+}
+
+@utility reader-sidebar {
+  @apply bg-surface-elevated border-r border-border;
+}
+
+/* ============================================
+   CODE BLOCKS
+   ============================================ */
+
+@utility code-block {
+  @apply bg-surface-elevated text-foreground p-4 rounded-lg overflow-x-auto text-sm font-mono border border-border;
+}
+
+/* ============================================
    PROSE/TYPOGRAPHY OVERRIDES
    ============================================ */
 

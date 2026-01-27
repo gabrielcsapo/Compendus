@@ -89,17 +89,17 @@ export function MetadataRefreshButton({
         </button>
       </div>
 
-      {message && <p className="mt-2 text-sm text-gray-600">{message}</p>}
+      {message && <p className="mt-2 text-sm text-foreground-muted">{message}</p>}
 
       {showSearch && (
-        <div className="mt-4 p-4 border rounded-lg">
+        <div className="mt-4 p-4 border border-border rounded-lg bg-surface">
           <div className="flex gap-2 mb-4">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by title..."
-              className="flex-1 px-3 py-2 border rounded"
+              className="input flex-1"
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
             />
             <button onClick={handleSearch} disabled={loading} className="btn">
@@ -112,7 +112,7 @@ export function MetadataRefreshButton({
               {searchResults.map((result, index) => (
                 <div
                   key={index}
-                  className="p-3 border rounded hover:bg-gray-50 cursor-pointer transition-colors"
+                  className="p-3 border border-border rounded hover:bg-surface-elevated cursor-pointer transition-colors"
                   onClick={() => handleApply(result)}
                 >
                   <div className="flex gap-3">
@@ -125,36 +125,36 @@ export function MetadataRefreshButton({
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h4 className="font-medium truncate">{result.title}</h4>
+                        <h4 className="font-medium truncate text-foreground">{result.title}</h4>
                         <span
                           className={`text-xs px-1.5 py-0.5 rounded ${
                             result.source === "googlebooks"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-green-100 text-green-700"
+                              ? "badge-primary"
+                              : "badge-success"
                           }`}
                         >
                           {result.source === "googlebooks" ? "Google" : "OpenLib"}
                         </span>
                       </div>
                       {result.subtitle && (
-                        <p className="text-sm text-gray-500 truncate">{result.subtitle}</p>
+                        <p className="text-sm text-foreground-muted truncate">{result.subtitle}</p>
                       )}
                       {result.authors.length > 0 && (
-                        <p className="text-sm text-gray-600">{result.authors.join(", ")}</p>
+                        <p className="text-sm text-foreground-muted">{result.authors.join(", ")}</p>
                       )}
                       <div className="flex items-center gap-2 mt-1">
                         {result.publishedDate && (
-                          <span className="text-xs text-gray-400">{result.publishedDate}</span>
+                          <span className="text-xs text-foreground-muted/70">{result.publishedDate}</span>
                         )}
                         {result.pageCount && (
-                          <span className="text-xs text-gray-400">{result.pageCount} pages</span>
+                          <span className="text-xs text-foreground-muted/70">{result.pageCount} pages</span>
                         )}
                         {result.series && (
-                          <span className="text-xs text-purple-600">{result.series}</span>
+                          <span className="text-xs text-accent">{result.series}</span>
                         )}
                       </div>
                       {result.description && (
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                        <p className="text-xs text-foreground-muted mt-1 line-clamp-2">
                           {result.description}
                         </p>
                       )}
@@ -163,13 +163,13 @@ export function MetadataRefreshButton({
                           {result.subjects.slice(0, 3).map((subject, i) => (
                             <span
                               key={i}
-                              className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded"
+                              className="text-xs bg-surface-elevated text-foreground-muted px-1.5 py-0.5 rounded"
                             >
                               {subject}
                             </span>
                           ))}
                           {result.subjects.length > 3 && (
-                            <span className="text-xs text-gray-400">
+                            <span className="text-xs text-foreground-muted/70">
                               +{result.subjects.length - 3} more
                             </span>
                           )}

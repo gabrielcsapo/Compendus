@@ -10,7 +10,10 @@ export async function getWantedBooks(options?: {
   status?: WantedBook["status"];
   series?: string;
   limit?: number;
-}): Promise<WantedBook[]> {
+  filterOwned?: boolean; // Default true - removes books now in library
+}): Promise<{ books: WantedBook[]; removed: number }> {
+  const filterOwned = options?.filterOwned !== false;
+
   let query = db.select().from(wantedBooks).$dynamic();
 
   const conditions = [];
@@ -31,7 +34,57 @@ export async function getWantedBooks(options?: {
     query = query.limit(options.limit);
   }
 
-  return query;
+  const allBooks = await query;
+
+  if (!filterOwned) {
+    return { books: allBooks, removed: 0 };
+  }
+
+  // Filter out books that are now in the library
+  const idsToRemove: string[] = [];
+  const filteredBooks: WantedBook[] = [];
+
+  for (const book of allBooks) {
+    let isOwned = false;
+
+    // First try matching by ISBN (most accurate)
+    const isbnConditions = [];
+    if (book.isbn13) isbnConditions.push(eq(books.isbn13, book.isbn13));
+    if (book.isbn10) isbnConditions.push(eq(books.isbn10, book.isbn10));
+    if (book.isbn) isbnConditions.push(eq(books.isbn, book.isbn));
+
+    if (isbnConditions.length > 0) {
+      const owned = await db
+        .select({ id: books.id })
+        .from(books)
+        .where(or(...isbnConditions))
+        .get();
+      isOwned = !!owned;
+    }
+
+    // Fallback: match by exact title (case-insensitive)
+    if (!isOwned && book.title) {
+      const ownedByTitle = await db
+        .select({ id: books.id })
+        .from(books)
+        .where(sql`lower(${books.title}) = lower(${book.title})`)
+        .get();
+      isOwned = !!ownedByTitle;
+    }
+
+    if (isOwned) {
+      idsToRemove.push(book.id);
+    } else {
+      filteredBooks.push(book);
+    }
+  }
+
+  // Remove owned books from wishlist
+  for (const id of idsToRemove) {
+    await db.delete(wantedBooks).where(eq(wantedBooks.id, id));
+  }
+
+  return { books: filteredBooks, removed: idsToRemove.length };
 }
 
 export async function getWantedBook(id: string): Promise<WantedBook | null> {

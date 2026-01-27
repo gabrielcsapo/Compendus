@@ -449,6 +449,7 @@ async function createTagsFromSubjects(bookId: string, subjects: string[]): Promi
 
 /**
  * Apply specific metadata from search results to a book
+ * Will also lookup additional metadata from other sources to fill in gaps
  */
 export async function applyMetadata(
   bookId: string,
@@ -459,27 +460,94 @@ export async function applyMetadata(
     return { success: false, message: "Book not found" };
   }
 
+  // If the selected metadata is missing ISBN, try to look it up from other sources
+  let enrichedMetadata = metadata;
+  if (!metadata.isbn13 && !metadata.isbn10) {
+    // Try to find ISBN using the title/author from the selected result
+    const { searchGoogleBooks, searchBookMetadata } = await import("../lib/metadata");
+
+    // Search the other source for additional metadata
+    if (metadata.source === "openlibrary") {
+      // Selected Open Library, try Google Books for ISBN
+      const googleResults = await searchGoogleBooks(
+        metadata.authors.length > 0
+          ? `${metadata.title} ${metadata.authors[0]}`
+          : metadata.title,
+      );
+      if (googleResults.length > 0 && (googleResults[0].isbn13 || googleResults[0].isbn10)) {
+        enrichedMetadata = {
+          ...metadata,
+          isbn: metadata.isbn || googleResults[0].isbn,
+          isbn13: metadata.isbn13 || googleResults[0].isbn13,
+          isbn10: metadata.isbn10 || googleResults[0].isbn10,
+        };
+      }
+    } else {
+      // Selected Google Books, try Open Library for ISBN
+      const olResults = await searchBookMetadata(metadata.title, metadata.authors[0]);
+      if (olResults.length > 0 && (olResults[0].isbn13 || olResults[0].isbn10)) {
+        enrichedMetadata = {
+          ...metadata,
+          isbn: metadata.isbn || olResults[0].isbn,
+          isbn13: metadata.isbn13 || olResults[0].isbn13,
+          isbn10: metadata.isbn10 || olResults[0].isbn10,
+          // Also grab other fields if missing
+          description: metadata.description || olResults[0].description,
+          series: metadata.series || olResults[0].series,
+          seriesNumber: metadata.seriesNumber || olResults[0].seriesNumber,
+        };
+      }
+    }
+  }
+
+  // If we now have an ISBN but are missing other data, do a direct ISBN lookup
+  const isbnToLookup = enrichedMetadata.isbn13 || enrichedMetadata.isbn10 || enrichedMetadata.isbn;
+  if (isbnToLookup && (!enrichedMetadata.description || !enrichedMetadata.series)) {
+    const { lookupByISBN, lookupGoogleBooksByISBN } = await import("../lib/metadata");
+
+    // Try both sources for the most complete data
+    const [olData, googleData] = await Promise.all([
+      lookupByISBN(isbnToLookup),
+      lookupGoogleBooksByISBN(isbnToLookup),
+    ]);
+
+    if (olData || googleData) {
+      enrichedMetadata = {
+        ...enrichedMetadata,
+        description: enrichedMetadata.description || olData?.description || googleData?.description || null,
+        series: enrichedMetadata.series || olData?.series || googleData?.series || null,
+        seriesNumber: enrichedMetadata.seriesNumber || olData?.seriesNumber || googleData?.seriesNumber || null,
+        publisher: enrichedMetadata.publisher || olData?.publisher || googleData?.publisher || null,
+        pageCount: enrichedMetadata.pageCount || olData?.pageCount || googleData?.pageCount || null,
+        language: enrichedMetadata.language || olData?.language || googleData?.language || null,
+        subjects: enrichedMetadata.subjects.length > 0
+          ? enrichedMetadata.subjects
+          : olData?.subjects || googleData?.subjects || [],
+      };
+    }
+  }
+
   // Generate new filename based on metadata
-  const newTitle = metadata.title || book.title;
+  const newTitle = enrichedMetadata.title || book.title;
   const newAuthors =
-    metadata.authors.length > 0 ? metadata.authors : book.authors ? JSON.parse(book.authors) : [];
+    enrichedMetadata.authors.length > 0 ? enrichedMetadata.authors : book.authors ? JSON.parse(book.authors) : [];
   const newFileName = generateFileName(newTitle, newAuthors, book.format);
 
   const updateData: Record<string, unknown> = {
     title: newTitle,
-    subtitle: metadata.subtitle || book.subtitle,
-    authors: metadata.authors.length > 0 ? JSON.stringify(metadata.authors) : book.authors,
-    publisher: metadata.publisher || book.publisher,
-    description: metadata.description || book.description,
-    pageCount: metadata.pageCount || book.pageCount,
-    language: metadata.language || book.language,
-    publishedDate: metadata.publishedDate || book.publishedDate,
-    isbn: metadata.isbn || book.isbn,
-    isbn13: metadata.isbn13 || book.isbn13,
-    isbn10: metadata.isbn10 || book.isbn10,
+    subtitle: enrichedMetadata.subtitle || book.subtitle,
+    authors: enrichedMetadata.authors.length > 0 ? JSON.stringify(enrichedMetadata.authors) : book.authors,
+    publisher: enrichedMetadata.publisher || book.publisher,
+    description: enrichedMetadata.description || book.description,
+    pageCount: enrichedMetadata.pageCount || book.pageCount,
+    language: enrichedMetadata.language || book.language,
+    publishedDate: enrichedMetadata.publishedDate || book.publishedDate,
+    isbn: enrichedMetadata.isbn || book.isbn,
+    isbn13: enrichedMetadata.isbn13 || book.isbn13,
+    isbn10: enrichedMetadata.isbn10 || book.isbn10,
     fileName: newFileName,
-    series: metadata.series || book.series,
-    seriesNumber: metadata.seriesNumber || book.seriesNumber,
+    series: enrichedMetadata.series || book.series,
+    seriesNumber: enrichedMetadata.seriesNumber || book.seriesNumber,
     updatedAt: sql`(unixepoch())`,
   };
 

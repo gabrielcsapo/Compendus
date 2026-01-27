@@ -1,7 +1,6 @@
 import { Link } from "react-router";
 import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount } from "../actions/books";
 import { BookGrid } from "../components/BookGrid";
-import { SearchInput } from "../components/SearchInput";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 
 const BOOKS_PER_PAGE = 24;
@@ -178,7 +177,6 @@ export default function Home({ loaderData }: { loaderData: LoaderData }) {
               <span className="font-medium">{unmatchedCount} need matching</span>
             </Link>
           )}
-          <SearchInput />
         </div>
       </div>
 

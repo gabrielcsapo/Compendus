@@ -23,7 +23,7 @@ export default function CollectionDetail({ loaderData }: { loaderData: LoaderDat
   return (
     <main className="container my-8 px-8 mx-auto">
       <div className="mb-6">
-        <Link to="/collections" className="text-blue-600 hover:underline">
+        <Link to="/collections" className="text-primary hover:underline">
           &larr; Back to Collections
         </Link>
       </div>
@@ -35,11 +35,11 @@ export default function CollectionDetail({ loaderData }: { loaderData: LoaderDat
             <div>
               <h1 className="text-2xl font-bold">{collection.name}</h1>
               {collection.description && (
-                <p className="text-gray-500 mt-1">{collection.description}</p>
+                <p className="text-foreground-muted mt-1">{collection.description}</p>
               )}
             </div>
           </div>
-          <p className="text-gray-400 mt-2">
+          <p className="text-foreground-muted/70 mt-2">
             {books.length} {books.length === 1 ? "book" : "books"}
           </p>
         </div>
@@ -48,7 +48,7 @@ export default function CollectionDetail({ loaderData }: { loaderData: LoaderDat
           <CollectionActions collection={collection} />
           <div
             className="w-4 h-16 rounded"
-            style={{ backgroundColor: collection.color || "#6366f1" }}
+            style={{ backgroundColor: collection.color || "var(--color-primary)" }}
           />
         </div>
       </div>

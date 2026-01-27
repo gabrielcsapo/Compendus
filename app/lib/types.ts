@@ -45,7 +45,22 @@ export interface ProcessingResult {
   processingTime?: number;
 }
 
+export interface MetadataOverrides {
+  title?: string;
+  authors?: string[];
+  isbn?: string;
+  isbn13?: string;
+  isbn10?: string;
+  publisher?: string;
+  publishedDate?: string;
+  description?: string;
+  language?: string;
+  pageCount?: number;
+  coverUrl?: string;
+}
+
 export interface ImportOptions {
   skipContentIndexing?: boolean;
   overwriteExisting?: boolean;
+  metadata?: MetadataOverrides;
 }

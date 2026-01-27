@@ -59,9 +59,9 @@ export function PdfReader({ bookPath, position, onPositionChange }: PdfReaderPro
   }, [currentPage, numPages, goToPage]);
 
   return (
-    <div className="pdf-reader flex flex-col h-full bg-gray-100">
+    <div className="pdf-reader flex flex-col h-full bg-surface-elevated">
       {/* Toolbar */}
-      <div className="pdf-toolbar flex items-center justify-between p-2 bg-white border-b shadow-sm">
+      <div className="pdf-toolbar flex items-center justify-between p-2 bg-surface border-b border-border shadow-sm">
         <div className="flex items-center gap-2">
           <button
             onClick={() => goToPage(currentPage - 1)}
@@ -114,10 +114,10 @@ export function PdfReader({ bookPath, position, onPositionChange }: PdfReaderPro
           onLoadSuccess={onDocumentLoadSuccess}
           loading={
             <div className="flex items-center justify-center h-full">
-              <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
             </div>
           }
-          error={<div className="text-center text-red-500 p-4">Failed to load PDF</div>}
+          error={<div className="text-center text-danger p-4">Failed to load PDF</div>}
         >
           <Page
             pageNumber={currentPage}

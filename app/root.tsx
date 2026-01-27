@@ -4,6 +4,7 @@ import { DumpError, GlobalNavigationLoadingBar } from "./routes/root.client";
 import { SearchCommandPalette } from "./components/SearchCommandPalette";
 import { DarkModeToggle } from "./components/DarkModeToggle.js";
 import { GlobalUploadDropzone } from "./components/GlobalUploadDropzone";
+import { SearchInput } from "./components/SearchInput";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -90,6 +91,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </Link>
               </li>
               <li className="ml-auto">
+                <SearchInput />
+              </li>
+              <li>
                 <DarkModeToggle />
               </li>
             </ul>

@@ -101,16 +101,16 @@ export function ComicReader({ bookId, format, position, onPositionChange }: Comi
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-900">
-        <div className="text-white">Loading comic...</div>
+      <div className="flex items-center justify-center h-full bg-surface">
+        <div className="text-foreground">Loading comic...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-900">
-        <div className="text-red-400">{error}</div>
+      <div className="flex items-center justify-center h-full bg-surface">
+        <div className="text-danger">{error}</div>
       </div>
     );
   }
@@ -122,14 +122,14 @@ export function ComicReader({ bookId, format, position, onPositionChange }: Comi
   }[fitMode];
 
   return (
-    <div className="flex flex-col h-full bg-gray-900">
+    <div className="flex flex-col h-full bg-surface">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 text-white">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface-elevated border-b border-border text-foreground">
         <div className="flex items-center gap-2">
           <button
             onClick={prevPage}
             disabled={currentPage === 0}
-            className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-600"
+            className="px-3 py-1 bg-surface border border-border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-elevated"
           >
             Prev
           </button>
@@ -139,18 +139,18 @@ export function ComicReader({ bookId, format, position, onPositionChange }: Comi
           <button
             onClick={nextPage}
             disabled={currentPage === totalPages - 1}
-            className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-600"
+            className="px-3 py-1 bg-surface border border-border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-elevated"
           >
             Next
           </button>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-400">Fit:</span>
+          <span className="text-sm text-foreground-muted">Fit:</span>
           <select
             value={fitMode}
             onChange={(e) => setFitMode(e.target.value as "width" | "height" | "page")}
-            className="bg-gray-700 text-white rounded px-2 py-1 text-sm"
+            className="select py-1 text-sm w-auto"
           >
             <option value="page">Fit Page</option>
             <option value="width">Fit Width</option>
@@ -184,10 +184,10 @@ export function ComicReader({ bookId, format, position, onPositionChange }: Comi
       >
         {/* Loading overlay */}
         {pageLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/50 z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-surface/50 z-10">
             <div className="flex flex-col items-center gap-2">
-              <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span className="text-white text-sm">Loading page...</span>
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-foreground text-sm">Loading page...</span>
             </div>
           </div>
         )}
@@ -204,7 +204,7 @@ export function ComicReader({ bookId, format, position, onPositionChange }: Comi
       </div>
 
       {/* Page indicator */}
-      <div className="bg-gray-800 text-gray-400 text-center py-1 text-sm">
+      <div className="bg-surface-elevated border-t border-border text-foreground-muted text-center py-1 text-sm">
         Use arrow keys, click left/right, or slider to navigate
       </div>
     </div>

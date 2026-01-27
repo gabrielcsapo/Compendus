@@ -121,6 +121,16 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
         containerRef.current.innerHTML = "";
         containerRef.current.appendChild(iframe);
 
+        // Check if dark mode is enabled
+        const isDarkMode = document.documentElement.classList.contains("dark");
+        const textColor = isDarkMode ? "#f1f5f9" : "#0f172a";
+        const bgColor = isDarkMode ? "#1a2332" : "#ffffff";
+
+        // Extract book ID from bookPath (e.g., /books/{id}.epub -> {id})
+        const bookIdMatch = bookPath.match(/\/books\/([a-f0-9-]+)\./);
+        const bookId = bookIdMatch ? bookIdMatch[1] : "";
+        const baseUrl = bookId ? `${window.location.origin}/book/${bookId}/` : "";
+
         const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
         if (iframeDoc) {
           iframeDoc.open();
@@ -128,6 +138,7 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
             <!DOCTYPE html>
             <html>
               <head>
+                ${baseUrl ? `<base href="${baseUrl}">` : ""}
                 <style>
                   body {
                     font-family: Georgia, serif;
@@ -135,7 +146,8 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
                     padding: 40px;
                     max-width: 800px;
                     margin: 0 auto;
-                    color: #333;
+                    color: ${textColor};
+                    background-color: ${bgColor};
                   }
                   img { max-width: 100%; height: auto; }
                   p { margin-bottom: 1em; }
@@ -203,10 +215,10 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
 
   if (error) {
     return (
-      <div className="h-full flex items-center justify-center bg-white">
+      <div className="h-full flex items-center justify-center bg-surface">
         <div className="text-center">
-          <p className="text-red-500 mb-2">{error}</p>
-          <p className="text-gray-500 text-sm">Try refreshing the page</p>
+          <p className="text-danger mb-2">{error}</p>
+          <p className="text-foreground-muted text-sm">Try refreshing the page</p>
         </div>
       </div>
     );
@@ -215,15 +227,15 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
   const totalSections = bookRef.current?.sections?.length || 0;
 
   return (
-    <div className="h-full flex bg-white">
+    <div className="h-full flex bg-surface">
       {/* TOC Sidebar */}
       {showToc && (
-        <div className="w-64 border-r bg-gray-50 flex flex-col flex-shrink-0">
-          <div className="p-4 border-b flex items-center justify-between">
-            <h3 className="font-bold">Contents</h3>
+        <div className="w-64 border-r border-border bg-surface-elevated flex flex-col flex-shrink-0">
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <h3 className="font-bold text-foreground">Contents</h3>
             <button
               onClick={() => setShowToc(false)}
-              className="text-gray-500 hover:text-gray-700 text-xl"
+              className="text-foreground-muted hover:text-foreground text-xl"
             >
               ×
             </button>
@@ -236,8 +248,8 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
                   goToSection(i);
                   setShowToc(false);
                 }}
-                className={`w-full text-left p-2 text-sm hover:bg-gray-100 rounded truncate ${
-                  i === currentSection ? "bg-blue-100 text-blue-700" : ""
+                className={`w-full text-left p-2 text-sm hover:bg-surface rounded truncate ${
+                  i === currentSection ? "bg-primary-light text-primary" : "text-foreground"
                 }`}
               >
                 {item.label}
@@ -250,10 +262,10 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Toolbar */}
-        <div className="flex items-center gap-2 p-2 border-b bg-white flex-shrink-0">
+        <div className="flex items-center gap-2 p-2 border-b border-border bg-surface flex-shrink-0">
           <button
             onClick={() => setShowToc(!showToc)}
-            className="p-2 hover:bg-gray-100 rounded"
+            className="p-2 hover:bg-surface-elevated rounded text-foreground"
             title="Table of Contents"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,17 +280,17 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
           <button
             onClick={goPrev}
             disabled={currentSection <= 0}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-sm border border-border rounded hover:bg-surface-elevated disabled:opacity-50 disabled:cursor-not-allowed text-foreground"
           >
             ← Prev
           </button>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-foreground-muted">
             {currentSection + 1} / {totalSections || "..."}
           </span>
           <button
             onClick={goNext}
             disabled={currentSection >= totalSections - 1}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 text-sm border border-border rounded hover:bg-surface-elevated disabled:opacity-50 disabled:cursor-not-allowed text-foreground"
           >
             Next →
           </button>
@@ -287,8 +299,8 @@ export function EpubReader({ bookPath, position, onPositionChange }: EpubReaderP
         {/* Reader area */}
         <div className="flex-1 relative overflow-hidden">
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
-              <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+            <div className="absolute inset-0 flex items-center justify-center bg-surface z-10">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
             </div>
           )}
           <div ref={containerRef} className="h-full w-full" />

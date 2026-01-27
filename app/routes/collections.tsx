@@ -41,7 +41,7 @@ export default function Collections({ loaderData }: { loaderData: LoaderData }) 
               to={`/collection/${collection.id}`}
               className="bg-surface border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
             >
-              <div className="h-2" style={{ backgroundColor: collection.color || "#4F46E5" }} />
+              <div className="h-2" style={{ backgroundColor: collection.color || "var(--color-primary)" }} />
               <div className="p-5">
                 <div className="flex items-center gap-2 mb-2">
                   {collection.icon && <span className="text-xl">{collection.icon}</span>}

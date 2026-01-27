@@ -5,17 +5,20 @@ import { existsSync } from "fs";
 import { eq } from "drizzle-orm";
 import { apiSearchBooks, apiLookupByIsbn, apiGetBook, apiListBooks } from "../app/lib/api/search";
 import { getComicPage, getComicPageCount } from "../app/lib/processing/comic";
+import { extractEpubResource } from "../app/lib/processing/epub";
 import { processBook } from "../app/lib/processing";
 import { processAndStoreCover } from "../app/lib/processing/cover";
 import { indexBookMetadata } from "../app/lib/search/indexer";
 import { db, books } from "../app/lib/db";
 import { sql } from "drizzle-orm";
 import type { BookFormat } from "../app/lib/types";
+import { lookupByISBN, lookupGoogleBooksByISBN } from "../app/lib/metadata";
+import { addToWantedList, getWantedBooks } from "../app/actions/wanted";
 
 // CORS headers for public API
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -161,12 +164,38 @@ async function handleApiRequest(
         return jsonResponse({ success: false, error: "invalid_format" }, 400);
       }
 
+      // Extract optional metadata overrides from form data
+      const metadata: Record<string, unknown> = {};
+      const metadataFields = ["title", "isbn", "isbn13", "isbn10", "publisher", "publishedDate", "description", "language"];
+      for (const field of metadataFields) {
+        const value = formData.get(field);
+        if (value && typeof value === "string") {
+          metadata[field] = value;
+        }
+      }
+      // Handle authors as JSON array
+      const authorsStr = formData.get("authors");
+      if (authorsStr && typeof authorsStr === "string") {
+        try {
+          metadata.authors = JSON.parse(authorsStr);
+        } catch {
+          metadata.authors = [authorsStr];
+        }
+      }
+      // Handle pageCount as number
+      const pageCountStr = formData.get("pageCount");
+      if (pageCountStr && typeof pageCountStr === "string") {
+        metadata.pageCount = parseInt(pageCountStr, 10);
+      }
+
       // Convert File to Buffer
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      // Process the book
-      const result = await processBook(buffer, file.name);
+      // Process the book with metadata overrides
+      const result = await processBook(buffer, file.name, {
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      });
 
       if (result.success && result.bookId) {
         // Get the book to index it
@@ -192,6 +221,211 @@ async function handleApiRequest(
     }
   }
 
+  // GET /api/wishlist - get wishlist items
+  if (pathname === "/api/wishlist" && request.method === "GET") {
+    try {
+      const status = searchParams.get("status") as "wishlist" | "searching" | "ordered" | null;
+      const series = searchParams.get("series");
+      const limitParam = searchParams.get("limit");
+      const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+
+      // getWantedBooks now handles filtering out owned books automatically
+      const result = await getWantedBooks({
+        status: status || undefined,
+        series: series || undefined,
+        limit,
+      });
+
+      return jsonResponse({
+        success: true,
+        total: result.books.length,
+        removed: result.removed,
+        books: result.books.map((book) => ({
+          id: book.id,
+          title: book.title,
+          subtitle: book.subtitle,
+          authors: book.authors ? JSON.parse(book.authors) : [],
+          publisher: book.publisher,
+          publishedDate: book.publishedDate,
+          description: book.description,
+          isbn: book.isbn,
+          isbn13: book.isbn13,
+          isbn10: book.isbn10,
+          language: book.language,
+          pageCount: book.pageCount,
+          series: book.series,
+          seriesNumber: book.seriesNumber,
+          coverUrl: book.coverUrl,
+          status: book.status,
+          priority: book.priority,
+          notes: book.notes,
+          source: book.source,
+          createdAt: book.createdAt?.toISOString(),
+        })),
+      });
+    } catch (error) {
+      console.error("Wishlist get error:", error);
+      return jsonResponse(
+        { success: false, error: "Failed to retrieve wishlist", code: "WISHLIST_ERROR" },
+        500,
+      );
+    }
+  }
+
+  // POST /api/wishlist/isbn/:isbn - add book to wishlist by ISBN
+  const wishlistIsbnMatch = pathname.match(/^\/api\/wishlist\/isbn\/(.+)$/);
+  if (wishlistIsbnMatch && request.method === "POST") {
+    try {
+      const isbn = wishlistIsbnMatch[1].replace(/[-\s]/g, "");
+
+      // Validate ISBN format (10 or 13 digits)
+      if (!/^(\d{10}|\d{13})$/.test(isbn)) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "Invalid ISBN format. Must be 10 or 13 digits.",
+            code: "INVALID_ISBN",
+          },
+          400,
+        );
+      }
+
+      // Look up book metadata from external sources
+      // Try Google Books first for better covers, then Open Library
+      let metadata = await lookupGoogleBooksByISBN(isbn);
+
+      if (!metadata) {
+        metadata = await lookupByISBN(isbn);
+      }
+
+      if (!metadata) {
+        return jsonResponse(
+          {
+            success: false,
+            error: "Book not found. Could not find metadata for this ISBN.",
+            code: "BOOK_NOT_FOUND",
+          },
+          404,
+        );
+      }
+
+      // Parse optional parameters from request body
+      let options: { status?: "wishlist" | "searching" | "ordered"; priority?: number; notes?: string } = {};
+      try {
+        const contentType = request.headers.get("content-type");
+        if (contentType?.includes("application/json")) {
+          const body = await request.json();
+          if (body.status) options.status = body.status;
+          if (body.priority !== undefined) options.priority = body.priority;
+          if (body.notes) options.notes = body.notes;
+        }
+      } catch {
+        // Ignore body parsing errors, use defaults
+      }
+
+      // Add to wanted list
+      const wantedBook = await addToWantedList(metadata, options);
+
+      return jsonResponse({
+        success: true,
+        book: {
+          id: wantedBook.id,
+          title: wantedBook.title,
+          authors: wantedBook.authors ? JSON.parse(wantedBook.authors) : [],
+          isbn: wantedBook.isbn,
+          isbn13: wantedBook.isbn13,
+          isbn10: wantedBook.isbn10,
+          coverUrl: wantedBook.coverUrl,
+          status: wantedBook.status,
+          priority: wantedBook.priority,
+          source: wantedBook.source,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to add book to wishlist";
+
+      // Handle specific error cases
+      if (message.includes("already in your wanted list")) {
+        return jsonResponse(
+          { success: false, error: message, code: "ALREADY_IN_WISHLIST" },
+          409,
+        );
+      }
+      if (message.includes("already own this book")) {
+        return jsonResponse(
+          { success: false, error: message, code: "ALREADY_OWNED" },
+          409,
+        );
+      }
+
+      console.error("Wishlist add error:", error);
+      return jsonResponse(
+        { success: false, error: message, code: "WISHLIST_ERROR" },
+        500,
+      );
+    }
+  }
+
+  // POST /api/wishlist/download - Download books from wishlist via Anna's Archive
+  if (pathname === "/api/wishlist/download" && request.method === "POST") {
+    try {
+      const contentType = request.headers.get("content-type");
+      if (!contentType?.includes("application/json")) {
+        return jsonResponse(
+          { success: false, error: "Content-Type must be application/json", code: "INVALID_CONTENT_TYPE" },
+          400,
+        );
+      }
+
+      const body = await request.json();
+      const { key, limit } = body;
+
+      if (!key) {
+        return jsonResponse(
+          { success: false, error: "Anna's Archive API key is required", code: "MISSING_KEY" },
+          400,
+        );
+      }
+
+      // Import and run the processor
+      const { processWishlist } = await import("../app/lib/annas-archive");
+
+      const results: Array<{
+        success: boolean;
+        bookId?: string;
+        title?: string;
+        error?: string;
+        wishlistItemId?: string;
+      }> = [];
+
+      await processWishlist(key, baseUrl, {
+        limit: limit || undefined,
+        onResult: (result) => {
+          results.push(result);
+        },
+      });
+
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+
+      return jsonResponse({
+        success: true,
+        summary: {
+          total: results.length,
+          successful: successful.length,
+          failed: failed.length,
+        },
+        results,
+      });
+    } catch (error) {
+      console.error("Wishlist download error:", error);
+      return jsonResponse(
+        { success: false, error: error instanceof Error ? error.message : "Download failed", code: "DOWNLOAD_ERROR" },
+        500,
+      );
+    }
+  }
+
   // API endpoint not found (we already verified pathname starts with /api/)
   return jsonResponse(
     {
@@ -204,6 +438,9 @@ async function handleApiRequest(
         getBook: "GET /api/books/:id",
         lookupIsbn: "GET /api/books/isbn/:isbn",
         upload: "POST /api/upload (multipart/form-data with 'file' field)",
+        wishlist: "GET /api/wishlist?status=<status>&series=<series>&limit=<limit>",
+        wishlistByIsbn: "POST /api/wishlist/isbn/:isbn (optional JSON body: {status, priority, notes})",
+        wishlistDownload: "POST /api/wishlist/download (JSON body: {key, limit?})",
       },
     },
     404,
@@ -296,6 +533,40 @@ async function serveStaticFile(pathname: string): Promise<Response | null> {
     }
 
     return new Response("Comic not found", { status: 404 });
+  }
+
+  // Handle /book/:id/* requests for EPUB internal resources (images, css, etc.)
+  // These requests come from relative URLs in EPUB content rendered in iframes
+  const epubResourceMatch = pathname.match(/^\/book\/([a-f0-9-]+)\/(.+)$/);
+  if (epubResourceMatch) {
+    const [, bookId, resourcePath] = epubResourceMatch;
+
+    // Skip if this looks like a route (e.g., /book/:id/read)
+    if (resourcePath === "read" || resourcePath === "edit") {
+      return null;
+    }
+
+    const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
+
+    if (existsSync(bookPath)) {
+      try {
+        const buffer = await readFile(bookPath);
+        const resource = await extractEpubResource(buffer, resourcePath);
+
+        if (resource) {
+          return new Response(new Uint8Array(resource.data), {
+            headers: {
+              "Content-Type": resource.mimeType,
+              "Cache-Control": "public, max-age=31536000",
+            },
+          });
+        }
+      } catch (error) {
+        console.error("Error extracting EPUB resource:", error);
+      }
+    }
+
+    return new Response("Resource not found", { status: 404 });
   }
 
   return null;

@@ -189,8 +189,8 @@ export function UnmatchedBookCard({ book, position, total }: UnmatchedBookCardPr
                           <span
                             className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
                               result.source === "googlebooks"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-green-100 text-green-700"
+                                ? "badge-primary"
+                                : "badge-success"
                             }`}
                           >
                             {result.source === "googlebooks" ? "Google" : "OpenLib"}

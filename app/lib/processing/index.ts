@@ -58,9 +58,10 @@ export async function processBook(
 
   // For large files, save immediately with basic info and process in background
   if (buffer.length > BACKGROUND_PROCESSING_THRESHOLD) {
-    // Insert basic entry immediately
+    // Insert basic entry immediately with any provided metadata overrides
     // Use try-catch to handle race condition where another concurrent upload
     // of the same file inserted between our duplicate check and this insert
+    const meta = options.metadata;
     try {
       await db.insert(books).values({
         id: bookId,
@@ -70,8 +71,16 @@ export async function processBook(
         fileHash,
         format,
         mimeType,
-        title: titleFromFilename,
-        authors: "[]",
+        title: meta?.title || titleFromFilename,
+        authors: meta?.authors ? JSON.stringify(meta.authors) : "[]",
+        isbn: meta?.isbn,
+        isbn13: meta?.isbn13,
+        isbn10: meta?.isbn10,
+        publisher: meta?.publisher,
+        publishedDate: meta?.publishedDate,
+        description: meta?.description,
+        language: meta?.language,
+        pageCount: meta?.pageCount,
       });
     } catch (error: unknown) {
       // Handle UNIQUE constraint violation (race condition with duplicate upload)
@@ -116,6 +125,9 @@ export async function processBook(
   const coverResult = await suppressConsole(() => extractCover(buffer, format));
   const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
 
+  // Merge extracted metadata with overrides (overrides take precedence)
+  const meta = options.metadata;
+
   // Use try-catch to handle race condition where another concurrent upload
   // of the same file inserted between our duplicate check and this insert
   try {
@@ -127,16 +139,17 @@ export async function processBook(
       fileHash,
       format,
       mimeType,
-      title: metadata.title || titleFromFilename,
+      title: meta?.title || metadata.title || titleFromFilename,
       subtitle: metadata.subtitle,
-      authors: JSON.stringify(metadata.authors || []),
-      publisher: metadata.publisher,
-      publishedDate: metadata.publishedDate,
-      description: metadata.description,
-      isbn: metadata.isbn,
-      isbn13: metadata.isbn13,
-      language: metadata.language,
-      pageCount: metadata.pageCount,
+      authors: meta?.authors ? JSON.stringify(meta.authors) : JSON.stringify(metadata.authors || []),
+      publisher: meta?.publisher || metadata.publisher,
+      publishedDate: meta?.publishedDate || metadata.publishedDate,
+      description: meta?.description || metadata.description,
+      isbn: meta?.isbn || metadata.isbn,
+      isbn13: meta?.isbn13 || metadata.isbn13,
+      isbn10: meta?.isbn10,
+      language: meta?.language || metadata.language,
+      pageCount: meta?.pageCount || metadata.pageCount,
       coverPath,
       coverColor: coverResult?.dominantColor,
     });

@@ -50,11 +50,33 @@ export const routes: unstable_RSCRouteConfigEntry[] = [
         id: "discover",
         path: "discover",
         lazy: () => import("./routes/discover"),
+        children: [
+          {
+            id: "discover-index",
+            index: true,
+            lazy: () => import("./routes/discover._index"),
+          },
+          {
+            id: "discover-wishlist",
+            path: "wishlist",
+            lazy: () => import("./routes/discover.wishlist"),
+          },
+          {
+            id: "discover-series",
+            path: "series",
+            lazy: () => import("./routes/discover.series"),
+          },
+        ],
       },
       {
         id: "about",
         path: "about",
         lazy: () => import("./routes/about"),
+      },
+      {
+        id: "docs",
+        path: "docs",
+        lazy: () => import("./routes/docs"),
       },
     ],
   },

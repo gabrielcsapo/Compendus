@@ -125,20 +125,20 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-red-500">{error}</p>
+      <div className="flex items-center justify-center h-full bg-surface">
+        <p className="text-danger">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="mobi-reader h-full flex bg-white">
+    <div className="mobi-reader h-full flex bg-surface">
       {/* TOC sidebar */}
       <div
-        className={`${showToc ? "w-64" : "w-0"} transition-all overflow-hidden border-r bg-gray-50`}
+        className={`${showToc ? "w-64" : "w-0"} transition-all overflow-hidden border-r border-border bg-surface-elevated`}
       >
         <div className="p-4 w-64">
-          <h3 className="font-bold mb-4">Chapters</h3>
+          <h3 className="font-bold mb-4 text-foreground">Chapters</h3>
           {chapters.map((chapter) => (
             <button
               key={chapter.index}
@@ -146,8 +146,8 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
                 loadChapter(chapter.index);
                 setShowToc(false);
               }}
-              className={`w-full text-left p-2 text-sm hover:bg-gray-100 rounded ${
-                chapter.index === currentChapter ? "bg-blue-100 text-blue-700" : ""
+              className={`w-full text-left p-2 text-sm hover:bg-surface rounded ${
+                chapter.index === currentChapter ? "bg-primary-light text-primary" : "text-foreground"
               }`}
             >
               {chapter.title}
@@ -159,7 +159,7 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
       {/* Main content */}
       <div className="flex-1 flex flex-col">
         {/* Toolbar */}
-        <div className="flex items-center gap-4 p-2 bg-white border-b shadow-sm">
+        <div className="flex items-center gap-4 p-2 bg-surface border-b border-border shadow-sm">
           <button
             onClick={() => setShowToc(!showToc)}
             className="btn px-3 py-1 text-sm"
@@ -183,7 +183,7 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
             Previous
           </button>
 
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-foreground-muted">
             Chapter {currentChapter + 1} of {chapters.length}
           </span>
 
@@ -198,11 +198,11 @@ export function MobiReader({ bookPath, position, onPositionChange }: MobiReaderP
 
         {/* Content area */}
         {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+          <div className="flex-1 flex items-center justify-center bg-surface">
+            <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
           </div>
         ) : (
-          <div ref={contentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+          <div ref={contentRef} onScroll={handleScroll} className="flex-1 overflow-y-auto bg-surface">
             <div
               className="max-w-2xl mx-auto p-8 prose prose-lg"
               dangerouslySetInnerHTML={{ __html: content }}

@@ -193,7 +193,7 @@ export function AddBooksToCollectionModal({
                       disabled={isAdding || isAdded}
                       className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
                         isAdded
-                          ? "bg-green-500/10 text-green-600"
+                          ? "bg-success-light text-success"
                           : "bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
                       }`}
                     >

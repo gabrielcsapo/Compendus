@@ -184,3 +184,82 @@ function stripHtml(html: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/**
+ * Extract a resource (image, css, etc.) from an EPUB file by path
+ */
+export async function extractEpubResource(buffer: Buffer, resourcePath: string): Promise<{ data: Buffer; mimeType: string } | null> {
+  // Validate ZIP structure before parsing
+  if (!isValidZipBuffer(buffer)) {
+    return null;
+  }
+
+  try {
+    // Use JSZip directly to extract the resource
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(buffer);
+
+    // Try to find the resource - EPUBs often have resources in OEBPS/ or OPS/ subdirectories
+    const possiblePaths = [
+      resourcePath,
+      `OEBPS/${resourcePath}`,
+      `OPS/${resourcePath}`,
+      `EPUB/${resourcePath}`,
+      // Also try without leading slashes
+      resourcePath.replace(/^\/+/, ''),
+      `OEBPS/${resourcePath.replace(/^\/+/, '')}`,
+      `OPS/${resourcePath.replace(/^\/+/, '')}`,
+      `EPUB/${resourcePath.replace(/^\/+/, '')}`,
+    ];
+
+    for (const path of possiblePaths) {
+      const file = zip.file(path);
+      if (file) {
+        const data = await file.async("nodebuffer");
+        const mimeType = getMimeType(path);
+        return { data, mimeType };
+      }
+    }
+
+    // If not found by exact path, try to find by filename
+    const fileName = resourcePath.split('/').pop();
+    if (fileName) {
+      const files = Object.keys(zip.files);
+      const matchingFile = files.find(f => f.endsWith(`/${fileName}`) || f === fileName);
+      if (matchingFile) {
+        const file = zip.file(matchingFile);
+        if (file) {
+          const data = await file.async("nodebuffer");
+          const mimeType = getMimeType(matchingFile);
+          return { data, mimeType };
+        }
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error("Failed to extract EPUB resource:", err);
+    return null;
+  }
+}
+
+function getMimeType(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'webp': 'image/webp',
+    'css': 'text/css',
+    'html': 'text/html',
+    'xhtml': 'application/xhtml+xml',
+    'xml': 'application/xml',
+    'ttf': 'font/ttf',
+    'otf': 'font/otf',
+    'woff': 'font/woff',
+    'woff2': 'font/woff2',
+  };
+  return mimeTypes[ext || ''] || 'application/octet-stream';
+}

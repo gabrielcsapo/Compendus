@@ -25,6 +25,7 @@
     "drizzle-orm": "^0.45.1",
     "epubjs": "^0.3.93",
     "foliate-js": "^1.0.1",
+    "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
     "node-unrar-js": "^2.0.2",
     "pdf-parse": "^2.4.5",
