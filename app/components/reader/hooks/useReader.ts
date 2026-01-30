@@ -131,15 +131,21 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
         const data = await getReaderInfo(bookId, viewportConfig);
 
         if (data) {
-          setBookInfo(data);
-          setError(null);
+          // Check if the response contains an error (e.g., parsing failure)
+          if (data.error) {
+            setError(data.error);
+            setBookInfo(null);
+          } else {
+            setBookInfo(data);
+            setError(null);
 
-          // Apply initial position if not yet applied
-          if (!initialPositionApplied.current && initialPosition > 0) {
-            initialPositionApplied.current = true;
-            const posData = await getReaderPageForPosition(bookId, initialPosition, viewportConfig);
-            if (posData) {
-              setCurrentPage(posData.pageNum);
+            // Apply initial position if not yet applied
+            if (!initialPositionApplied.current && initialPosition > 0) {
+              initialPositionApplied.current = true;
+              const posData = await getReaderPageForPosition(bookId, initialPosition, viewportConfig);
+              if (posData) {
+                setCurrentPage(posData.pageNum);
+              }
             }
           }
         } else {

@@ -30,6 +30,8 @@ export interface TextContent extends BaseNormalizedContent {
   chapters: NormalizedChapter[];
   totalCharacters: number;
   toc: TocEntry[];
+  // Error message if parsing failed
+  error?: string;
 }
 
 // PDF content (native pages)
@@ -106,6 +108,8 @@ export interface ReaderInfoResponse {
   chapters?: AudioChapter[];
   // Cover
   coverPath?: string;
+  // Error message (when book loads but content parsing failed)
+  error?: string;
 }
 
 export interface ReaderPageResponse {

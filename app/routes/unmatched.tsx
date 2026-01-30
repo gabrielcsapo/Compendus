@@ -8,7 +8,11 @@ import {
   searchMetadata,
   applyMetadata,
   skipBookMatch,
+  deleteBook,
 } from "../actions/books";
+import { getReaderInfo, getReaderPage } from "../actions/reader";
+import type { PageContent } from "../lib/reader/types";
+import { THEMES } from "../lib/reader/settings";
 import { ClickableCoverPlaceholder } from "../components/CoverExtractButton";
 import type { Book } from "../lib/db/schema";
 import type { MetadataSearchResult } from "../lib/metadata";
@@ -32,6 +36,14 @@ export default function UnmatchedBooks() {
   const [searchQuery, setSearchQuery] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+
+  // Reader preview state
+  const [previewContent, setPreviewContent] = useState<PageContent | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Delete state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const loadNextBook = useCallback(async () => {
     setLoading(true);
@@ -65,6 +77,34 @@ export default function UnmatchedBooks() {
     if (currentBook && searchQuery) {
       handleSearch();
     }
+  }, [currentBook?.id]);
+
+  // Load reader preview when book changes
+  useEffect(() => {
+    if (!currentBook) {
+      setPreviewContent(null);
+      return;
+    }
+
+    const loadPreview = async () => {
+      setPreviewLoading(true);
+      try {
+        const viewport = { width: 400, height: 300, dpr: 1 };
+        const info = await getReaderInfo(currentBook.id, viewport);
+        if (info && info.totalPages > 0) {
+          const page = await getReaderPage(currentBook.id, 1, viewport);
+          if (page) {
+            setPreviewContent(page.content);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load preview:", error);
+      } finally {
+        setPreviewLoading(false);
+      }
+    };
+
+    loadPreview();
   }, [currentBook?.id]);
 
   const handleSearch = async () => {
@@ -114,6 +154,25 @@ export default function UnmatchedBooks() {
     await skipBookMatch(currentBook.id);
     setProcessedCount((prev) => prev + 1);
     await loadNextBook();
+  };
+
+  const handleDelete = async () => {
+    if (!currentBook) return;
+    setDeleting(true);
+    try {
+      const success = await deleteBook(currentBook.id);
+      if (success) {
+        setShowDeleteConfirm(false);
+        setProcessedCount((prev) => prev + 1);
+        await loadNextBook();
+      } else {
+        setMessage("Failed to delete book");
+      }
+    } catch (error) {
+      setMessage("Failed to delete book");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // All done state
@@ -202,6 +261,13 @@ export default function UnmatchedBooks() {
               >
                 View Details
               </Link>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={applying || deleting}
+                className="text-sm text-danger hover:text-danger/80 disabled:opacity-50"
+              >
+                Delete
+              </button>
               <button
                 onClick={handleSkip}
                 disabled={applying}
@@ -322,8 +388,83 @@ export default function UnmatchedBooks() {
                 )}
               </div>
 
-              {/* Search and results */}
+              {/* Reader Preview and Search */}
               <div className="min-w-0 overflow-hidden">
+                {/* Reader Preview */}
+                <div className="mb-4 border border-border rounded-lg overflow-hidden">
+                  <div className="bg-surface-elevated px-3 py-2 border-b border-border">
+                    <h4 className="text-xs font-semibold text-foreground-muted uppercase tracking-wide">
+                      Content Preview
+                    </h4>
+                  </div>
+                  <div className="h-64 overflow-hidden">
+                    {previewLoading ? (
+                      <div className="flex items-center justify-center h-full bg-gray-50">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                          <span className="text-xs text-foreground-muted">Loading preview...</span>
+                        </div>
+                      </div>
+                    ) : previewContent ? (
+                      <div className="h-full overflow-auto">
+                        {previewContent.type === "text" && previewContent.html ? (
+                          <div
+                            className="p-4 prose prose-sm max-w-none text-xs"
+                            style={{
+                              fontSize: "11px",
+                              lineHeight: 1.4,
+                              backgroundColor: THEMES.light.background,
+                              color: THEMES.light.foreground,
+                            }}
+                            // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
+                            dangerouslySetInnerHTML={{ __html: previewContent.html }}
+                          />
+                        ) : previewContent.type === "image" && previewContent.imageUrl ? (
+                          <div className="h-full flex items-center justify-center bg-gray-100">
+                            <img
+                              src={previewContent.imageUrl}
+                              alt="Page preview"
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          </div>
+                        ) : previewContent.type === "audio" ? (
+                          <div className="flex items-center justify-center h-full bg-gray-50">
+                            <div className="text-center">
+                              <svg
+                                className="w-12 h-12 mx-auto mb-2 text-foreground-muted"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={1.5}
+                                  d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                />
+                              </svg>
+                              <p className="text-sm text-foreground-muted">Audiobook</p>
+                              {previewContent.chapterTitle && (
+                                <p className="text-xs text-foreground-muted/70 mt-1">
+                                  {previewContent.chapterTitle}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-full bg-gray-50">
+                            <p className="text-sm text-foreground-muted">No preview available</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full bg-gray-50">
+                        <p className="text-sm text-foreground-muted">No preview available</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Search bar */}
                 <div className="flex gap-2 mb-2">
                   <input
@@ -429,6 +570,38 @@ export default function UnmatchedBooks() {
           </div>
         </div>
       ) : null}
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && currentBook && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-surface border border-border rounded-xl p-6 max-w-sm w-full">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Delete Book?</h3>
+            <p className="text-foreground-muted mb-2">
+              This will permanently delete "{currentBook.title}" and its file from your library.
+            </p>
+            <p className="text-sm text-danger mb-6">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 text-foreground-muted hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 bg-danger text-white rounded-lg hover:bg-danger/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting && (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

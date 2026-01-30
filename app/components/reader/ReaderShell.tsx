@@ -84,16 +84,52 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: Re
 
   // Error state
   if (reader.error) {
+    // Check if error contains a URL to make it clickable
+    const urlMatch = reader.error.match(/(https?:\/\/[^\s)]+)/);
+    const errorParts = urlMatch ? reader.error.split(urlMatch[0]) : [reader.error];
+
     return (
       <div
-        className="h-screen flex items-center justify-center"
+        className="h-screen flex items-center justify-center p-4"
         style={{ backgroundColor: theme.background, color: theme.foreground }}
       >
-        <div className="text-center">
-          <p className="text-red-500 mb-4">Error: {reader.error}</p>
+        <div className="text-center max-w-md">
+          <div className="text-red-500 mb-6">
+            <svg
+              className="w-16 h-16 mx-auto mb-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <p className="text-lg">
+              {urlMatch ? (
+                <>
+                  {errorParts[0]}
+                  <a
+                    href={urlMatch[0]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:no-underline text-blue-500"
+                  >
+                    Calibre
+                  </a>
+                  {errorParts[1]}
+                </>
+              ) : (
+                reader.error
+              )}
+            </p>
+          </div>
           <button
             onClick={handleClose}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
           >
             Go Back
           </button>

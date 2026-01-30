@@ -175,9 +175,11 @@ async function tryMobiParser(buffer: Uint8Array, resourceDir: string): Promise<E
   try {
     const mobi = await initMobiFile(buffer, resourceDir);
     const spine = mobi.getSpine();
+    console.log(`[MOBI Parser] MOBI spine length: ${spine.length}`);
     if (spine.length > 0) {
       return mobi as unknown as EbookParser;
     }
+    console.log(`[MOBI Parser] MOBI parser returned empty spine`);
     return null;
   } catch (error) {
     console.log(`[MOBI Parser] MOBI parser failed:`, error);
@@ -244,6 +246,8 @@ function extractContent(
  */
 export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFormat): Promise<TextContent> {
   try {
+    console.log(`[MOBI Parser] Book ${bookId}: Parsing ${format ?? 'mobi'} file, buffer size: ${buffer.length} bytes`);
+
     // Create book-specific directory for extracted resources
     const resourceDir = resolve(process.cwd(), "images", bookId);
     mkdirSync(resourceDir, { recursive: true });
@@ -290,7 +294,11 @@ export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFor
     }
 
     if (!bestResult || bestResult.chapters.length === 0) {
-      return createEmptyContent(bookId);
+      console.error(`[MOBI Parser] Book ${bookId}: No content extracted. MOBI result: ${mobiResult?.chapters.length ?? 'null'} chapters, KF8 result: ${kf8Result?.chapters.length ?? 'null'} chapters`);
+      return createEmptyContent(
+        bookId,
+        "This MOBI file uses an older format that cannot be parsed. Please convert it to EPUB using Calibre (https://calibre-ebook.com) and re-upload.",
+      );
     }
 
     // Build TOC with normalized positions
@@ -306,7 +314,10 @@ export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFor
     };
   } catch (error) {
     console.error(`[MOBI Parser] Book ${bookId}: Parse failed:`, error);
-    return createEmptyContent(bookId);
+    return createEmptyContent(
+      bookId,
+      "This MOBI file uses an older format that cannot be parsed. Please convert it to EPUB using Calibre (https://calibre-ebook.com) and re-upload.",
+    );
   }
 }
 
@@ -334,7 +345,7 @@ function buildToc(
 /**
  * Create empty content structure for failed parses
  */
-function createEmptyContent(bookId: string): TextContent {
+function createEmptyContent(bookId: string, error?: string): TextContent {
   return {
     bookId,
     format: "mobi",
@@ -342,5 +353,6 @@ function createEmptyContent(bookId: string): TextContent {
     chapters: [],
     totalCharacters: 0,
     toc: [],
+    error,
   };
 }

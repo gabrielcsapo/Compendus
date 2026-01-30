@@ -180,6 +180,17 @@ export async function getReaderInfo(
   // For text content, check both totalCharacters and chapters length (image-based books have chapters but 0 chars)
   if (content.type === "text" && content.totalCharacters === 0 && content.chapters.length === 0) {
     console.error(`[Reader] Empty content for book ${bookId} (format: ${book.format})`);
+    // If there's a specific error message from the parser, return it
+    if (content.error) {
+      return {
+        id: book.id,
+        title: book.title,
+        format: book.format as BookFormat,
+        totalPages: 0,
+        toc: [],
+        error: content.error,
+      };
+    }
     return null;
   }
 

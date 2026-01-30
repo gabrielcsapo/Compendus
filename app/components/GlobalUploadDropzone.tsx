@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Link } from "react-router";
 
 interface UploadItem {
   id: string;
@@ -9,6 +10,7 @@ interface UploadItem {
   progress: number;
   status: "uploading" | "processing" | "done" | "error";
   error?: string;
+  bookId?: number;
 }
 
 function formatFileSize(bytes: number): string {
@@ -21,7 +23,7 @@ function formatFileSize(bytes: number): string {
 function uploadFileWithProgress(
   file: File,
   onProgress: (progress: number) => void,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; book?: { id: number; title: string; format: string } }> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -116,7 +118,7 @@ export function GlobalUploadDropzone() {
           });
 
           if (result.success) {
-            updateUpload(uploadId, { status: "done", progress: 100 });
+            updateUpload(uploadId, { status: "done", progress: 100, bookId: result.book?.id });
           } else if (result.error === "duplicate") {
             updateUpload(uploadId, { status: "error", error: "Already in library" });
           } else {
@@ -173,6 +175,13 @@ export function GlobalUploadDropzone() {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
       dragCounterRef.current++;
+
+      // Check if drag target is within a no-global-drop zone
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-no-global-drop]")) {
+        return;
+      }
+
       if (e.dataTransfer?.types.includes("Files")) {
         setIsDragging(true);
       }
@@ -188,12 +197,24 @@ export function GlobalUploadDropzone() {
 
     const handleDragOver = (e: DragEvent) => {
       e.preventDefault();
+
+      // Hide overlay when dragging over a no-global-drop zone
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-no-global-drop]")) {
+        setIsDragging(false);
+      }
     };
 
     const handleDrop = (e: DragEvent) => {
       e.preventDefault();
       dragCounterRef.current = 0;
       setIsDragging(false);
+
+      // Check if drop target is within a no-global-drop zone
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-no-global-drop]")) {
+        return;
+      }
 
       const files = e.dataTransfer?.files;
       if (files && files.length > 0) {
@@ -368,7 +389,16 @@ export function GlobalUploadDropzone() {
 
                 {/* File info */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground truncate">{upload.fileName}</p>
+                  {upload.status === "done" && upload.bookId ? (
+                    <Link
+                      to={`/book/${upload.bookId}`}
+                      className="text-sm text-foreground truncate block hover:text-primary hover:underline transition-colors"
+                    >
+                      {upload.fileName}
+                    </Link>
+                  ) : (
+                    <p className="text-sm text-foreground truncate">{upload.fileName}</p>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-foreground-muted">
                       {formatFileSize(upload.fileSize)}

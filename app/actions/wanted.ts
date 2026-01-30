@@ -182,6 +182,11 @@ export async function removeFromWantedList(id: string): Promise<boolean> {
   return true;
 }
 
+export async function clearWantedList(): Promise<number> {
+  const result = await db.delete(wantedBooks).returning({ id: wantedBooks.id });
+  return result.length;
+}
+
 export async function getWantedBooksCount(status?: WantedBook["status"]): Promise<number> {
   let query = db
     .select({ count: sql<number>`count(*)` })
