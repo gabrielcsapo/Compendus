@@ -371,7 +371,7 @@ function queueBackgroundProcessing(
     const { indexBookMetadata } = await import("../search/indexer");
     const book = await db.select().from(books).where(eq(books.id, bookId)).get();
     if (book) {
-      await indexBookMetadata(book.id, book.title, book.authors || "[]", book.description);
+      await indexBookMetadata(book.id, book.title, book.subtitle, book.authors || "[]", book.description);
     }
 
     // Content indexing for files under the size limit

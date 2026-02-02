@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { mkdirSync } from "fs";
 import type { TextContent, NormalizedChapter, TocEntry } from "../types";
 import type { BookFormat } from "../../types";
+import { yieldToEventLoop } from "../../processing/utils";
 
 /**
  * Strip HTML tags and normalize whitespace
@@ -192,8 +193,9 @@ async function tryMobiParser(buffer: Uint8Array, resourceDir: string): Promise<E
 
 /**
  * Extract content from a parser and return the result
+ * Made async to yield to event loop and prevent blocking the server
  */
-function extractContent(parser: EbookParser, parserType: string, bookId: string): ParseResult {
+async function extractContent(parser: EbookParser, parserType: string, bookId: string): Promise<ParseResult> {
   const spine = parser.getSpine();
   const toc = parser.getToc();
   const chapters: NormalizedChapter[] = [];
@@ -233,6 +235,11 @@ function extractContent(parser: EbookParser, parserType: string, bookId: string)
     } catch {
       // Skip chapters that fail
     }
+
+    // Yield to event loop every 5 chapters to prevent blocking
+    if (i % 5 === 4) {
+      await yieldToEventLoop();
+    }
   }
 
   return { parser, parserType, chapters, totalCharacters, spine, toc };
@@ -267,11 +274,11 @@ export async function parseMobi(
     let kf8Result: ParseResult | null = null;
 
     if (mobiParser) {
-      mobiResult = extractContent(mobiParser, "MOBI", bookId);
+      mobiResult = await extractContent(mobiParser, "MOBI", bookId);
     }
 
     if (kf8Parser) {
-      kf8Result = extractContent(kf8Parser, "KF8", bookId);
+      kf8Result = await extractContent(kf8Parser, "KF8", bookId);
     }
 
     // Choose the better result - consider both text content and number of chapters (for image-based books)

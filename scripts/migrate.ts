@@ -23,11 +23,21 @@ migrate(db, { migrationsFolder: "./app/lib/db/migrations" });
 // Create FTS5 virtual tables (not supported by Drizzle schema)
 console.log("Setting up FTS5 full-text search tables...");
 
+// Check if books_fts needs to be recreated with subtitle column
+const ftsInfo = sqlite.prepare("PRAGMA table_info(books_fts)").all() as Array<{ name: string }>;
+const hasSubtitle = ftsInfo.some((col) => col.name === "subtitle");
+
+if (!hasSubtitle && ftsInfo.length > 0) {
+  console.log("Recreating books_fts table to add subtitle column...");
+  sqlite.exec(`DROP TABLE IF EXISTS books_fts`);
+}
+
 sqlite.exec(`
   -- Full-text search virtual table for book metadata
   CREATE VIRTUAL TABLE IF NOT EXISTS books_fts USING fts5(
     book_id UNINDEXED,
     title,
+    subtitle,
     authors,
     description,
     tokenize='porter unicode61 remove_diacritics 2'

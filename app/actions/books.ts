@@ -155,13 +155,14 @@ export async function updateBook(
   await db.update(books).set(updateData).where(eq(books.id, id));
 
   // Re-index for search if metadata changed
-  if ("title" in data || "authors" in data || "description" in data) {
+  if ("title" in data || "subtitle" in data || "authors" in data || "description" in data) {
     const updatedBook = await getBook(id);
     if (updatedBook) {
       await removeBookIndex(id);
       await indexBookMetadata(
         updatedBook.id,
         updatedBook.title,
+        updatedBook.subtitle,
         updatedBook.authors || "",
         updatedBook.description,
       );
@@ -444,6 +445,7 @@ export async function refreshMetadata(
       await indexBookMetadata(
         updatedBook.id,
         updatedBook.title,
+        updatedBook.subtitle,
         updatedBook.authors || "",
         updatedBook.description,
       );
@@ -688,6 +690,7 @@ export async function applyMetadata(
     await indexBookMetadata(
       updatedBook.id,
       updatedBook.title,
+      updatedBook.subtitle,
       updatedBook.authors || "",
       updatedBook.description,
     );

@@ -22,15 +22,16 @@ export async function indexContent(bookId: string, content: ExtractedContent): P
 export async function indexBookMetadata(
   bookId: string,
   title: string,
+  subtitle: string | null,
   authors: string,
   description: string | null,
 ): Promise<void> {
   rawDb
     .prepare(
-      `INSERT INTO books_fts (book_id, title, authors, description)
-       VALUES (?, ?, ?, ?)`,
+      `INSERT INTO books_fts (book_id, title, subtitle, authors, description)
+       VALUES (?, ?, ?, ?, ?)`,
     )
-    .run(bookId, title, authors, description || "");
+    .run(bookId, title, subtitle || "", authors, description || "");
 }
 
 export async function removeBookIndex(bookId: string): Promise<void> {

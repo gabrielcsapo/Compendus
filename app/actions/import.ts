@@ -103,7 +103,7 @@ export async function importBook(formData: FormData): Promise<ImportResult> {
     // Index metadata in FTS
     const book = await getBook(result.bookId);
     if (book) {
-      await indexBookMetadata(book.id, book.title, book.authors || "[]", book.description);
+      await indexBookMetadata(book.id, book.title, book.subtitle, book.authors || "[]", book.description);
 
       return {
         ...result,

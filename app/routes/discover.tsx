@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, Outlet, useLocation } from "react-router";
-import { getWantedBooks } from "../actions/wanted";
+import { getWantedBooks } from "../actions/wanted.js";
 
 export function Component() {
   const location = useLocation();
@@ -42,7 +42,9 @@ export function Component() {
             &larr; Back to Library
           </Link>
           <h1 className="text-2xl font-bold mt-2 text-foreground">Discover</h1>
-          <p className="text-foreground-muted">Find new books and complete your series</p>
+          <p className="text-foreground-muted">
+            Find new books and complete your series
+          </p>
         </div>
         {wantedCount > 0 && (
           <div className="text-sm text-foreground-muted">

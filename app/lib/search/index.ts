@@ -6,7 +6,7 @@ export interface SearchOptions {
   query: string;
   limit?: number;
   offset?: number;
-  searchIn?: ("title" | "authors" | "description" | "content")[];
+  searchIn?: ("title" | "subtitle" | "authors" | "description" | "content")[];
 }
 
 export interface SearchResult {
@@ -14,6 +14,7 @@ export interface SearchResult {
   relevance: number;
   highlights: {
     title?: string;
+    subtitle?: string;
     authors?: string;
     description?: string;
     content?: string;
@@ -22,20 +23,22 @@ export interface SearchResult {
 }
 
 export async function searchBooks(options: SearchOptions): Promise<SearchResult[]> {
-  const { query, limit = 20, offset = 0, searchIn = ["title", "authors", "description"] } = options;
+  const { query, limit = 20, offset = 0, searchIn = ["title", "subtitle", "authors", "description"] } = options;
 
   const ftsQuery = buildFtsQuery(query);
   if (!ftsQuery) return [];
 
   // Search metadata FTS
+  // Column indices: 1=title, 2=subtitle, 3=authors, 4=description
   const metadataResults = rawDb
     .prepare(
       `SELECT
         book_id,
         bm25(books_fts) as relevance,
         highlight(books_fts, 1, '<mark>', '</mark>') as title_highlight,
-        highlight(books_fts, 2, '<mark>', '</mark>') as authors_highlight,
-        snippet(books_fts, 3, '<mark>', '</mark>', '...', 32) as description_snippet
+        highlight(books_fts, 2, '<mark>', '</mark>') as subtitle_highlight,
+        highlight(books_fts, 3, '<mark>', '</mark>') as authors_highlight,
+        snippet(books_fts, 4, '<mark>', '</mark>', '...', 32) as description_snippet
       FROM books_fts
       WHERE books_fts MATCH ?
       ORDER BY relevance
@@ -45,6 +48,7 @@ export async function searchBooks(options: SearchOptions): Promise<SearchResult[
     book_id: string;
     relevance: number;
     title_highlight: string;
+    subtitle_highlight: string;
     authors_highlight: string;
     description_snippet: string;
   }>;
@@ -94,6 +98,7 @@ export async function searchBooks(options: SearchOptions): Promise<SearchResult[
       relevance: r.relevance,
       highlights: {
         title: r.title_highlight,
+        subtitle: r.subtitle_highlight,
         authors: r.authors_highlight,
         description: r.description_snippet,
       },
