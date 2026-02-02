@@ -5,6 +5,7 @@ import { getCollectionsForBook } from "../actions/collections";
 import { MetadataRefreshButton } from "../components/MetadataRefreshButton";
 import { CoverUploadButton } from "../components/CoverUploadButton";
 import { CoverExtractButton } from "../components/CoverExtractButton";
+import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
 import { DeleteBookButton } from "../components/DeleteBookButton";
@@ -46,31 +47,20 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
       <div className="grid md:grid-cols-[300px_1fr] gap-8">
         {/* Cover */}
         <div>
-          <div
-            className="aspect-[2/3] w-full overflow-hidden rounded-xl bg-surface-elevated"
-            style={{ backgroundColor: book.coverColor || undefined }}
-          >
-            {book.coverPath ? (
-              <img
-                src={`/covers/${book.id}.jpg`}
-                alt={book.title}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center p-8 bg-gradient-to-br from-primary-light to-accent-light">
-                <span className="text-center text-foreground-muted text-lg font-medium">
-                  {book.title}
-                </span>
-              </div>
-            )}
-          </div>
+          <CoverDropZone
+            bookId={book.id}
+            coverPath={book.coverPath}
+            coverColor={book.coverColor}
+            title={book.title}
+          />
+          <p className="text-xs text-foreground-muted text-center mt-2">
+            Drop image or <kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">⌘/Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">V</kbd> to paste
+          </p>
 
           {/* Cover actions */}
-          {!book.coverPath && (
-            <div className="mt-3">
-              <CoverExtractButton bookId={book.id} bookFormat={book.format} />
-            </div>
-          )}
+          <div className="mt-3">
+            <CoverExtractButton bookId={book.id} bookFormat={book.format} />
+          </div>
           <CoverUploadButton bookId={book.id} hasCover={!!book.coverPath} />
 
           {/* Read button */}

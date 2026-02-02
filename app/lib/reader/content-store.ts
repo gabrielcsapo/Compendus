@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import { eq } from "drizzle-orm";
 
 import { db, books } from "../db";
+import { suppressConsole } from "../processing/utils";
 import type { NormalizedContent } from "./types";
 import type { BookFormat } from "../types";
 
@@ -64,7 +65,7 @@ async function parseByFormat(
   switch (format) {
     case "epub": {
       const { parseEpub } = await import("./parsers/epub");
-      return parseEpub(buffer, bookId);
+      return suppressConsole(() => parseEpub(buffer, bookId));
     }
     case "pdf": {
       const { parsePdf } = await import("./parsers/pdf");

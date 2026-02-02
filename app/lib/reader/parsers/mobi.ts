@@ -57,15 +57,20 @@ function sanitizeHtml(html: string, bookId: string): string {
       // Use a function to find and replace img src attributes
       .replace(/<img\s+([^>]*)>/gi, (match, attributes) => {
         // Extract src attribute value
-        const srcMatch = attributes.match(/src\s*=\s*["']([^"']+)["']/i) ||
-                         attributes.match(/src\s*=\s*([^\s>]+)/i);
+        const srcMatch =
+          attributes.match(/src\s*=\s*["']([^"']+)["']/i) ||
+          attributes.match(/src\s*=\s*([^\s>]+)/i);
         if (!srcMatch) return match;
 
         const src = srcMatch[1];
 
         // Skip absolute URLs and data URIs
-        if (src.startsWith("http://") || src.startsWith("https://") ||
-            src.startsWith("data:") || src.startsWith("/mobi-images/")) {
+        if (
+          src.startsWith("http://") ||
+          src.startsWith("https://") ||
+          src.startsWith("data:") ||
+          src.startsWith("/mobi-images/")
+        ) {
           return match;
         }
 
@@ -74,13 +79,9 @@ function sanitizeHtml(html: string, bookId: string): string {
         const newSrc = `/mobi-images/${bookId}/${filename}`;
 
         // Replace the src in the attributes
-        const newAttributes = attributes.replace(
-          /src\s*=\s*(["'])[^"']+\1/i,
-          `src="${newSrc}"`
-        ).replace(
-          /src\s*=\s*[^\s>"']+/i,
-          `src="${newSrc}"`
-        );
+        const newAttributes = attributes
+          .replace(/src\s*=\s*(["'])[^"']+\1/i, `src="${newSrc}"`)
+          .replace(/src\s*=\s*[^\s>"']+/i, `src="${newSrc}"`);
 
         return `<img ${newAttributes}>`;
       })
@@ -103,7 +104,8 @@ function sanitizeHtml(html: string, bookId: string): string {
       )
       // Remove href from anchor tags linking to internal images/resources
       // These cause React Router navigation errors and aren't useful in a web reader
-      .replace(/<a\s+([^>]*href\s*=\s*["'][^"']*\.(jpe?g|png|gif|webp|svg|bmp)["'][^>]*)>/gi,
+      .replace(
+        /<a\s+([^>]*href\s*=\s*["'][^"']*\.(jpe?g|png|gif|webp|svg|bmp)["'][^>]*)>/gi,
         (_match, attributes) => {
           // Remove the href attribute to prevent navigation
           const newAttributes = attributes.replace(/href\s*=\s*["'][^"']*["']/gi, "");
@@ -111,7 +113,8 @@ function sanitizeHtml(html: string, bookId: string): string {
         },
       )
       // Also remove anchor links to internal ebook resources (not external URLs)
-      .replace(/<a\s+([^>]*href\s*=\s*["'](?!https?:\/\/|mailto:|#)[^"']+["'][^>]*)>/gi,
+      .replace(
+        /<a\s+([^>]*href\s*=\s*["'](?!https?:\/\/|mailto:|#)[^"']+["'][^>]*)>/gi,
         (_match, attributes) => {
           // Check if this is an internal link (not http/https/mailto/anchor)
           const hrefMatch = attributes.match(/href\s*=\s*["']([^"']+)["']/i);
@@ -190,11 +193,7 @@ async function tryMobiParser(buffer: Uint8Array, resourceDir: string): Promise<E
 /**
  * Extract content from a parser and return the result
  */
-function extractContent(
-  parser: EbookParser,
-  parserType: string,
-  bookId: string,
-): ParseResult {
+function extractContent(parser: EbookParser, parserType: string, bookId: string): ParseResult {
   const spine = parser.getSpine();
   const toc = parser.getToc();
   const chapters: NormalizedChapter[] = [];
@@ -244,9 +243,15 @@ function extractContent(
  * Many Amazon files are dual-format (MOBI7 + KF8), so we try both parsers
  * and use the one that extracts more content.
  */
-export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFormat): Promise<TextContent> {
+export async function parseMobi(
+  buffer: Buffer,
+  bookId: string,
+  format?: BookFormat,
+): Promise<TextContent> {
   try {
-    console.log(`[MOBI Parser] Book ${bookId}: Parsing ${format ?? 'mobi'} file, buffer size: ${buffer.length} bytes`);
+    console.log(
+      `[MOBI Parser] Book ${bookId}: Parsing ${format ?? "mobi"} file, buffer size: ${buffer.length} bytes`,
+    );
 
     // Create book-specific directory for extracted resources
     const resourceDir = resolve(process.cwd(), "images", bookId);
@@ -276,8 +281,10 @@ export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFor
       // Both parsers succeeded - use the one with more content
       // For text-based books, prefer more characters
       // For image-based books (0 text chars), prefer more chapters
-      const mobiScore = mobiResult.totalCharacters > 0 ? mobiResult.totalCharacters : mobiResult.chapters.length;
-      const kf8Score = kf8Result.totalCharacters > 0 ? kf8Result.totalCharacters : kf8Result.chapters.length;
+      const mobiScore =
+        mobiResult.totalCharacters > 0 ? mobiResult.totalCharacters : mobiResult.chapters.length;
+      const kf8Score =
+        kf8Result.totalCharacters > 0 ? kf8Result.totalCharacters : kf8Result.chapters.length;
 
       if (kf8Score > mobiScore) {
         bestResult = kf8Result;
@@ -294,7 +301,9 @@ export async function parseMobi(buffer: Buffer, bookId: string, format?: BookFor
     }
 
     if (!bestResult || bestResult.chapters.length === 0) {
-      console.error(`[MOBI Parser] Book ${bookId}: No content extracted. MOBI result: ${mobiResult?.chapters.length ?? 'null'} chapters, KF8 result: ${kf8Result?.chapters.length ?? 'null'} chapters`);
+      console.error(
+        `[MOBI Parser] Book ${bookId}: No content extracted. MOBI result: ${mobiResult?.chapters.length ?? "null"} chapters, KF8 result: ${kf8Result?.chapters.length ?? "null"} chapters`,
+      );
       return createEmptyContent(
         bookId,
         "This MOBI file uses an older format that cannot be parsed. Please convert it to EPUB using Calibre (https://calibre-ebook.com) and re-upload.",

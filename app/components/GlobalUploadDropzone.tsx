@@ -23,7 +23,11 @@ function formatFileSize(bytes: number): string {
 function uploadFileWithProgress(
   file: File,
   onProgress: (progress: number) => void,
-): Promise<{ success: boolean; error?: string; book?: { id: number; title: string; format: string } }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  book?: { id: number; title: string; format: string };
+}> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();

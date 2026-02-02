@@ -142,7 +142,11 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
             // Apply initial position if not yet applied
             if (!initialPositionApplied.current && initialPosition > 0) {
               initialPositionApplied.current = true;
-              const posData = await getReaderPageForPosition(bookId, initialPosition, viewportConfig);
+              const posData = await getReaderPageForPosition(
+                bookId,
+                initialPosition,
+                viewportConfig,
+              );
               if (posData) {
                 setCurrentPage(posData.pageNum);
               }

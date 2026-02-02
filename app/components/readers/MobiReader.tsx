@@ -6,30 +6,32 @@ import { useState, useEffect, useCallback, useRef } from "react";
  * Strip XML declarations, Kindle-specific URLs, and clean up HTML content for rendering
  */
 function cleanHtmlContent(html: string): string {
-  return html
-    // Remove XML declaration - handle BOM, whitespace, and various formats
-    .replace(/^\s*<\?xml[^?]*\?>\s*/gi, "")
-    .replace(/<\?xml[^?]*\?>/gi, "")
-    // Remove any XML processing instructions
-    .replace(/<\?[^?]*\?>/gi, "")
-    // Remove DOCTYPE declarations
-    .replace(/<!DOCTYPE[^>]*>/gi, "")
-    // Remove XML declaration fragments - aggressively match anything starting with version= and ending with ?>
-    .replace(/^\s*version\s*=\s*["'][^"']*["'][^?]*\?>/gi, "")
-    .replace(/version\s*=\s*["'][^"']*["'][^?]*\?>/gi, "")
-    // Remove link tags with kindle: URLs (AZW3/KF8 internal stylesheets)
-    .replace(/<link[^>]*href=["']kindle:[^"']*["'][^>]*\/?>/gi, "")
-    // Remove any remaining link tags pointing to internal resources
-    .replace(/<link[^>]*href=["']flow:[^"']*["'][^>]*\/?>/gi, "")
-    // Remove style tags that might reference kindle: URLs
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    // Remove html/head/body wrapper tags if present (keep content)
-    .replace(/<html[^>]*>/gi, "")
-    .replace(/<\/html>/gi, "")
-    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, "")
-    .replace(/<body[^>]*>/gi, "")
-    .replace(/<\/body>/gi, "")
-    .trim();
+  return (
+    html
+      // Remove XML declaration - handle BOM, whitespace, and various formats
+      .replace(/^\s*<\?xml[^?]*\?>\s*/gi, "")
+      .replace(/<\?xml[^?]*\?>/gi, "")
+      // Remove any XML processing instructions
+      .replace(/<\?[^?]*\?>/gi, "")
+      // Remove DOCTYPE declarations
+      .replace(/<!DOCTYPE[^>]*>/gi, "")
+      // Remove XML declaration fragments - aggressively match anything starting with version= and ending with ?>
+      .replace(/^\s*version\s*=\s*["'][^"']*["'][^?]*\?>/gi, "")
+      .replace(/version\s*=\s*["'][^"']*["'][^?]*\?>/gi, "")
+      // Remove link tags with kindle: URLs (AZW3/KF8 internal stylesheets)
+      .replace(/<link[^>]*href=["']kindle:[^"']*["'][^>]*\/?>/gi, "")
+      // Remove any remaining link tags pointing to internal resources
+      .replace(/<link[^>]*href=["']flow:[^"']*["'][^>]*\/?>/gi, "")
+      // Remove style tags that might reference kindle: URLs
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      // Remove html/head/body wrapper tags if present (keep content)
+      .replace(/<html[^>]*>/gi, "")
+      .replace(/<\/html>/gi, "")
+      .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, "")
+      .replace(/<body[^>]*>/gi, "")
+      .replace(/<\/body>/gi, "")
+      .trim()
+  );
 }
 
 interface MobiReaderProps {

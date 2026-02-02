@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { useReader } from "./hooks/useReader";
 import { ReaderContent } from "./ReaderContent";
@@ -24,6 +24,20 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: Re
   const handleClose = useCallback(() => {
     navigate(returnUrl);
   }, [navigate, returnUrl]);
+
+  // Close reader on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleClose]);
+
   const reader = useReader({ bookId, initialPosition });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"toc" | "bookmarks" | "search">("toc");

@@ -1,6 +1,7 @@
 import { initEpubFile } from "@lingo-reader/epub-parser";
 import { resolve } from "path";
 import { mkdirSync, writeFileSync } from "fs";
+import { yieldToEventLoop } from "../../processing/utils";
 import type { TextContent, NormalizedChapter, TocEntry } from "../types";
 
 /**
@@ -107,7 +108,6 @@ function sanitizeHtml(html: string, bookId: string): string {
 export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextContent> {
   // Validate ZIP structure
   if (!isValidZipBuffer(buffer)) {
-    console.error(`[EPUB Parser] Book ${bookId}: Invalid ZIP structure`);
     return createEmptyContent(bookId);
   }
 
@@ -118,10 +118,8 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
   let epub;
   try {
     epub = await initEpubFile(buffer, resourceDir);
-  } catch (error) {
-    console.error(`[EPUB Parser] Book ${bookId}: Failed to init EPUB file:`, error);
+  } catch {
     // Try fallback parser for EPUBs with malformed navigation
-    console.log(`[EPUB Parser] Book ${bookId}: Trying fallback parser...`);
     const fallbackResult = await parseEpubFallback(buffer, bookId, resourceDir);
     if (fallbackResult) {
       return fallbackResult;
@@ -134,8 +132,7 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
   try {
     spine = epub.getSpine();
     toc = epub.getToc();
-  } catch (error) {
-    console.error(`[EPUB Parser] Book ${bookId}: Failed to get spine/toc:`, error);
+  } catch {
     return createEmptyContent(bookId);
   }
 
@@ -165,6 +162,11 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
       totalCharacters += text.length;
     } catch {
       // Skip chapters that fail to load
+    }
+
+    // Yield to event loop every 5 chapters to prevent blocking
+    if (i % 5 === 4) {
+      await yieldToEventLoop();
     }
   }
 
@@ -218,7 +220,11 @@ function buildToc(
  * Fallback EPUB parser using JSZip for EPUBs with malformed navigation
  * This handles cases where the @lingo-reader/epub-parser fails due to invalid NCX
  */
-async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: string): Promise<TextContent | null> {
+async function parseEpubFallback(
+  buffer: Buffer,
+  bookId: string,
+  resourceDir: string,
+): Promise<TextContent | null> {
   try {
     const JSZip = (await import("jszip")).default;
     const zip = await JSZip.loadAsync(buffer);
@@ -226,14 +232,12 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
     // Find container.xml to get the root file path
     const containerXml = await zip.file("META-INF/container.xml")?.async("string");
     if (!containerXml) {
-      console.error(`[EPUB Fallback] Book ${bookId}: No container.xml found`);
       return null;
     }
 
     // Extract root file path from container.xml
     const rootFileMatch = containerXml.match(/full-path="([^"]+)"/);
     if (!rootFileMatch) {
-      console.error(`[EPUB Fallback] Book ${bookId}: Could not find root file path`);
       return null;
     }
     const rootFilePath = rootFileMatch[1];
@@ -242,7 +246,6 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
     // Read the OPF file
     const opfContent = await zip.file(rootFilePath)?.async("string");
     if (!opfContent) {
-      console.error(`[EPUB Fallback] Book ${bookId}: Could not read OPF file at ${rootFilePath}`);
       return null;
     }
 
@@ -272,7 +275,6 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
     }
 
     if (spineItems.length === 0) {
-      console.error(`[EPUB Fallback] Book ${bookId}: No spine items found`);
       return null;
     }
 
@@ -280,6 +282,7 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
     let totalCharacters = 0;
 
     // Extract images to resource directory
+    let imageCount = 0;
     for (const [, item] of manifestItems) {
       if (item.mediaType.startsWith("image/")) {
         const imagePath = rootDir + item.href;
@@ -289,6 +292,11 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
             const imageData = await imageFile.async("nodebuffer");
             const filename = item.href.split("/").pop() || item.href;
             writeFileSync(resolve(resourceDir, filename), imageData);
+            imageCount++;
+            // Yield every 10 images to prevent blocking
+            if (imageCount % 10 === 0) {
+              await yieldToEventLoop();
+            }
           } catch {
             // Skip failed image extractions
           }
@@ -303,8 +311,8 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
       if (!item || !item.mediaType.includes("html")) continue;
 
       const filePath = rootDir + item.href;
-      const fileContent = await zip.file(filePath)?.async("string") ||
-                          await zip.file(item.href)?.async("string");
+      const fileContent =
+        (await zip.file(filePath)?.async("string")) || (await zip.file(item.href)?.async("string"));
 
       if (!fileContent) continue;
 
@@ -321,6 +329,11 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
       });
 
       totalCharacters += text.length;
+
+      // Yield to event loop every 5 chapters to prevent blocking
+      if (i % 5 === 4) {
+        await yieldToEventLoop();
+      }
     }
 
     if (chapters.length === 0) {
@@ -335,8 +348,7 @@ async function parseEpubFallback(buffer: Buffer, bookId: string, resourceDir: st
       totalCharacters,
       toc: [], // No TOC available in fallback mode
     };
-  } catch (error) {
-    console.error(`[EPUB Fallback] Book ${bookId}: Fallback parser failed:`, error);
+  } catch {
     return null;
   }
 }

@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
-import { getWantedBooks, removeFromWantedList, updateWantedBook, clearWantedList } from "../actions/wanted";
+import {
+  getWantedBooks,
+  removeFromWantedList,
+  updateWantedBook,
+  clearWantedList,
+} from "../actions/wanted";
 import type { WantedBook } from "../lib/db/schema";
 
 // Upload a file with metadata from wishlist item
@@ -87,7 +92,10 @@ export function Component() {
       const count = await clearWantedList();
       setWantedBooksState([]);
       setShowClearConfirm(false);
-      setMessage({ type: "success", text: `Removed ${count} book${count !== 1 ? "s" : ""} from wishlist` });
+      setMessage({
+        type: "success",
+        text: `Removed ${count} book${count !== 1 ? "s" : ""} from wishlist`,
+      });
     } catch (error) {
       setMessage({ type: "error", text: "Failed to clear wishlist" });
     }
@@ -194,7 +202,8 @@ export function Component() {
           <div className="bg-surface border border-border rounded-xl p-6 max-w-sm w-full">
             <h3 className="text-lg font-semibold text-foreground mb-2">Clear Wishlist?</h3>
             <p className="text-foreground-muted mb-6">
-              This will remove all {wantedBooks.length} book{wantedBooks.length !== 1 ? "s" : ""} from your wishlist. This action cannot be undone.
+              This will remove all {wantedBooks.length} book{wantedBooks.length !== 1 ? "s" : ""}{" "}
+              from your wishlist. This action cannot be undone.
             </p>
             <div className="flex gap-3 justify-end">
               <button
@@ -267,8 +276,21 @@ function WantedBookCard({
     const file = e.dataTransfer.files[0];
     if (file) {
       // Validate file type
-      const validExtensions = [".pdf", ".epub", ".mobi", ".azw", ".azw3", ".cbr", ".cbz", ".m4b", ".m4a", ".mp3"];
-      const hasValidExtension = validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext));
+      const validExtensions = [
+        ".pdf",
+        ".epub",
+        ".mobi",
+        ".azw",
+        ".azw3",
+        ".cbr",
+        ".cbz",
+        ".m4b",
+        ".m4a",
+        ".mp3",
+      ];
+      const hasValidExtension = validExtensions.some((ext) =>
+        file.name.toLowerCase().endsWith(ext),
+      );
       if (hasValidExtension) {
         onUpload(file);
       }
@@ -278,9 +300,7 @@ function WantedBookCard({
   return (
     <div
       className={`relative bg-surface border-2 rounded-xl p-4 flex gap-4 transition-colors ${
-        isDragging
-          ? "border-primary bg-primary-light"
-          : "border-border hover:border-border"
+        isDragging ? "border-primary bg-primary-light" : "border-border hover:border-border"
       }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

@@ -1,5 +1,6 @@
 import { initEpubFile } from "@lingo-reader/epub-parser";
 import type { BookMetadata, ExtractedContent, Chapter } from "../types";
+import { yieldToEventLoop } from "./utils";
 
 /**
  * Validate that a buffer looks like a valid ZIP file by checking:
@@ -141,6 +142,11 @@ export async function extractEpubContent(buffer: Buffer): Promise<ExtractedConte
     } catch {
       // Skip chapters that fail to load
     }
+
+    // Yield to event loop every 5 chapters to prevent blocking
+    if (i % 5 === 4) {
+      await yieldToEventLoop();
+    }
   }
 
   return {
@@ -197,8 +203,7 @@ export async function extractEpubCover(buffer: Buffer): Promise<Buffer | null> {
     }
 
     return null;
-  } catch (err) {
-    console.error("Error extracting EPUB cover:", err);
+  } catch {
     return null;
   }
 }
@@ -267,8 +272,7 @@ export async function extractEpubResource(
     }
 
     return null;
-  } catch (err) {
-    console.error("Failed to extract EPUB resource:", err);
+  } catch {
     return null;
   }
 }

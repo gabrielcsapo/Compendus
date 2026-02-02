@@ -2,10 +2,11 @@
 
 import { db, books, booksTags, booksCollections, tags } from "../lib/db";
 import { eq, desc, asc, like, inArray, sql, and } from "drizzle-orm";
-import { deleteBookFile, deleteCoverImage } from "../lib/storage";
+import { deleteBookFile, deleteCoverImage, getBookFilePath } from "../lib/storage";
 import { removeBookIndex, indexBookMetadata } from "../lib/search/indexer";
 import { findBestMetadata, searchAllSources, type MetadataSearchResult } from "../lib/metadata";
 import { processAndStoreCover } from "../lib/processing/cover";
+import { writeMetadataToFile } from "../lib/processing/metadata-writer";
 import type { Book } from "../lib/db/schema";
 import type { BookFormat } from "../lib/types";
 import { v4 as uuid } from "uuid";
@@ -164,6 +165,30 @@ export async function updateBook(
         updatedBook.authors || "",
         updatedBook.description,
       );
+
+      // Write metadata to the actual book file if title/authors changed
+      if ("title" in data || "authors" in data) {
+        try {
+          const format = updatedBook.format as BookFormat;
+          const filePath = getBookFilePath(id, format);
+          const authors = updatedBook.authors ? JSON.parse(updatedBook.authors) : [];
+
+          await writeMetadataToFile(filePath, format, {
+            title: updatedBook.title,
+            authors,
+            publisher: updatedBook.publisher,
+            description: updatedBook.description,
+            isbn: updatedBook.isbn13 || updatedBook.isbn10 || updatedBook.isbn,
+            language: updatedBook.language,
+            series: updatedBook.series,
+            seriesNumber: updatedBook.seriesNumber,
+            publishedDate: updatedBook.publishedDate,
+          });
+        } catch (error) {
+          // Don't fail the operation if file metadata update fails
+          console.error(`Error writing embedded metadata for book ${id}:`, error);
+        }
+      }
     }
   }
 
@@ -620,6 +645,36 @@ export async function applyMetadata(
   }
 
   await db.update(books).set(updateData).where(eq(books.id, bookId));
+
+  // Write metadata to the actual book file (EPUB, PDF)
+  // This makes the file the source of truth for backups/migrations
+  try {
+    const format = book.format as BookFormat;
+    const filePath = getBookFilePath(bookId, format);
+
+    const writeResult = await writeMetadataToFile(filePath, format, {
+      title: newTitle,
+      authors: newAuthors,
+      publisher: enrichedMetadata.publisher,
+      description: enrichedMetadata.description,
+      isbn: enrichedMetadata.isbn13 || enrichedMetadata.isbn10 || enrichedMetadata.isbn,
+      language: enrichedMetadata.language,
+      series: enrichedMetadata.series,
+      seriesNumber: enrichedMetadata.seriesNumber,
+      publishedDate: enrichedMetadata.publishedDate,
+    });
+
+    if (
+      !writeResult.success &&
+      writeResult.error &&
+      !writeResult.error.includes("does not support")
+    ) {
+      console.warn(`Failed to update embedded metadata for book ${bookId}:`, writeResult.error);
+    }
+  } catch (error) {
+    // Don't fail the operation if file metadata update fails
+    console.error(`Error writing embedded metadata for book ${bookId}:`, error);
+  }
 
   // Auto-create tags from subjects
   if (metadata.subjects.length > 0) {

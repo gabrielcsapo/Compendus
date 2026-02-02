@@ -9,11 +9,7 @@ import { storeBookFile, storeCoverImage } from "../storage";
 import { extractPdfMetadata, extractPdfContent } from "./pdf";
 import { extractEpubMetadata, extractEpubContent } from "./epub";
 import { extractMobiMetadata, extractMobiContent } from "./mobi";
-import {
-  extractAudioMetadata,
-  extractAudioContent,
-  type AudioMetadata,
-} from "./audio";
+import { extractAudioMetadata, extractAudioContent, type AudioMetadata } from "./audio";
 import { extractCover } from "./cover";
 import { suppressConsole, yieldToEventLoop, scheduleBackground } from "./utils";
 import type {
@@ -39,11 +35,7 @@ export async function processBook(
   const fileHash = createHash("sha256").update(buffer).digest("hex");
 
   // Step 2: Check for duplicates
-  const existing = await db
-    .select()
-    .from(books)
-    .where(eq(books.fileHash, fileHash))
-    .get();
+  const existing = await db.select().from(books).where(eq(books.fileHash, fileHash)).get();
 
   if (existing && !options.overwriteExisting) {
     return {
@@ -99,11 +91,7 @@ export async function processBook(
         error.code === "SQLITE_CONSTRAINT_UNIQUE"
       ) {
         // Another concurrent upload of the same file succeeded first
-        const existing = await db
-          .select()
-          .from(books)
-          .where(eq(books.fileHash, fileHash))
-          .get();
+        const existing = await db.select().from(books).where(eq(books.fileHash, fileHash)).get();
         return {
           success: false,
           error: "duplicate",
@@ -138,9 +126,7 @@ export async function processBook(
   const audioMetadata = metadata as AudioMetadata;
 
   const coverResult = await suppressConsole(() => extractCover(buffer, format));
-  const coverPath = coverResult
-    ? storeCoverImage(coverResult.buffer, bookId)
-    : null;
+  const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
 
   // Merge extracted metadata with overrides (overrides take precedence)
   const meta = options.metadata;
@@ -173,9 +159,7 @@ export async function processBook(
       // Audio-specific fields
       duration: audioMetadata.duration,
       narrator: audioMetadata.narrator,
-      chapters: audioMetadata.chapters
-        ? JSON.stringify(audioMetadata.chapters)
-        : null,
+      chapters: audioMetadata.chapters ? JSON.stringify(audioMetadata.chapters) : null,
     });
   } catch (error: unknown) {
     // Handle UNIQUE constraint violation (race condition with duplicate upload)
@@ -185,11 +169,7 @@ export async function processBook(
       "code" in error &&
       error.code === "SQLITE_CONSTRAINT_UNIQUE"
     ) {
-      const existing = await db
-        .select()
-        .from(books)
-        .where(eq(books.fileHash, fileHash))
-        .get();
+      const existing = await db.select().from(books).where(eq(books.fileHash, fileHash)).get();
       return {
         success: false,
         error: "duplicate",
@@ -229,12 +209,7 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
   const header = buffer.subarray(0, 8);
 
   // PDF: %PDF
-  if (
-    header[0] === 0x25 &&
-    header[1] === 0x50 &&
-    header[2] === 0x44 &&
-    header[3] === 0x46
-  ) {
+  if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) {
     return "pdf";
   }
 
@@ -249,12 +224,7 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
   }
 
   // CBR: RAR archive (Rar!)
-  if (
-    header[0] === 0x52 &&
-    header[1] === 0x61 &&
-    header[2] === 0x72 &&
-    header[3] === 0x21
-  ) {
+  if (header[0] === 0x52 && header[1] === 0x61 && header[2] === 0x72 && header[3] === 0x21) {
     return "cbr";
   }
 
@@ -273,12 +243,7 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
   }
 
   // M4B/M4A: MP4 container with 'ftyp' atom
-  if (
-    header[4] === 0x66 &&
-    header[5] === 0x74 &&
-    header[6] === 0x79 &&
-    header[7] === 0x70
-  ) {
+  if (header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70) {
     // Check brand type to distinguish M4B from M4A
     const brand = buffer.subarray(8, 12).toString();
     if (brand === "M4B " || brand === "isom") {
@@ -290,10 +255,7 @@ function detectFormat(fileName: string, buffer: Buffer): BookFormat | null {
   return null;
 }
 
-async function extractMetadata(
-  buffer: Buffer,
-  format: BookFormat,
-): Promise<BookMetadata> {
+async function extractMetadata(buffer: Buffer, format: BookFormat): Promise<BookMetadata> {
   switch (format) {
     case "pdf":
       return extractPdfMetadata(buffer);
@@ -363,12 +325,8 @@ function queueBackgroundProcessing(
     await yieldToEventLoop();
 
     // Extract cover
-    const coverResult = await suppressConsole(() =>
-      extractCover(buffer, format),
-    );
-    const coverPath = coverResult
-      ? storeCoverImage(coverResult.buffer, bookId)
-      : null;
+    const coverResult = await suppressConsole(() => extractCover(buffer, format));
+    const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
 
     // Yield again before database operations
     await yieldToEventLoop();
@@ -384,8 +342,7 @@ function queueBackgroundProcessing(
       updateData.authors = JSON.stringify(metadata.authors);
     }
     if (metadata.publisher) updateData.publisher = metadata.publisher;
-    if (metadata.publishedDate)
-      updateData.publishedDate = metadata.publishedDate;
+    if (metadata.publishedDate) updateData.publishedDate = metadata.publishedDate;
     if (metadata.description) updateData.description = metadata.description;
     if (metadata.isbn) updateData.isbn = metadata.isbn;
     if (metadata.isbn13) updateData.isbn13 = metadata.isbn13;
@@ -412,41 +369,23 @@ function queueBackgroundProcessing(
 
     // Index metadata for search
     const { indexBookMetadata } = await import("../search/indexer");
-    const book = await db
-      .select()
-      .from(books)
-      .where(eq(books.id, bookId))
-      .get();
+    const book = await db.select().from(books).where(eq(books.id, bookId)).get();
     if (book) {
-      await indexBookMetadata(
-        book.id,
-        book.title,
-        book.authors || "[]",
-        book.description,
-      );
+      await indexBookMetadata(book.id, book.title, book.authors || "[]", book.description);
     }
 
     // Content indexing for files under the size limit
-    if (
-      !options.skipContentIndexing &&
-      buffer.length <= MAX_SIZE_FOR_CONTENT_INDEXING
-    ) {
+    if (!options.skipContentIndexing && buffer.length <= MAX_SIZE_FOR_CONTENT_INDEXING) {
       await yieldToEventLoop();
       const { indexContent } = await import("../search/indexer");
-      const content = await suppressConsole(() =>
-        extractContent(buffer, format),
-      );
+      const content = await suppressConsole(() => extractContent(buffer, format));
       await indexContent(bookId, content);
     }
   });
 }
 
 // Background content indexing for small files
-function queueContentIndexing(
-  bookId: string,
-  buffer: Buffer,
-  format: BookFormat,
-) {
+function queueContentIndexing(bookId: string, buffer: Buffer, format: BookFormat) {
   scheduleBackground(async () => {
     const { indexContent } = await import("../search/indexer");
     const content = await suppressConsole(() => extractContent(buffer, format));
