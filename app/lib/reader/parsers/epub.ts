@@ -1,8 +1,8 @@
 import { initEpubFile } from "@lingo-reader/epub-parser";
 import { resolve } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import { yieldToEventLoop } from "../../processing/utils";
-import type { TextContent, NormalizedChapter, TocEntry } from "../types";
+import { yieldToEventLoop } from "../../processing/utils.js";
+import type { TextContent, NormalizedChapter, TocEntry } from "../types.js";
 
 /**
  * Validate that a buffer looks like a valid ZIP file
@@ -61,7 +61,11 @@ function sanitizeHtml(html: string, bookId: string): string {
         /(<img[^>]*\s+src\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
         (match, before, src, after) => {
           // Skip absolute URLs and data URIs
-          if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
+          if (
+            src.startsWith("http://") ||
+            src.startsWith("https://") ||
+            src.startsWith("data:")
+          ) {
             return match;
           }
           // Handle absolute filesystem paths (from epub-parser extracting to disk)
@@ -105,7 +109,10 @@ function sanitizeHtml(html: string, bookId: string): string {
 /**
  * Parse EPUB file into normalized content for the reader
  */
-export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextContent> {
+export async function parseEpub(
+  buffer: Buffer,
+  bookId: string,
+): Promise<TextContent> {
   // Validate ZIP structure
   if (!isValidZipBuffer(buffer)) {
     return createEmptyContent(bookId);
@@ -194,8 +201,12 @@ function buildToc(
 ): TocEntry[] {
   return rawToc.map((item) => {
     // Find the chapter that matches this TOC entry
-    const chapter = chapters.find((ch) => ch.id.includes(item.href) || item.href.includes(ch.id));
-    const position = chapter ? chapter.characterStart / Math.max(1, totalCharacters) : 0;
+    const chapter = chapters.find(
+      (ch) => ch.id.includes(item.href) || item.href.includes(ch.id),
+    );
+    const position = chapter
+      ? chapter.characterStart / Math.max(1, totalCharacters)
+      : 0;
 
     const entry: TocEntry = {
       title: item.label,
@@ -203,9 +214,17 @@ function buildToc(
       level,
     };
 
-    if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+    if (
+      item.children &&
+      Array.isArray(item.children) &&
+      item.children.length > 0
+    ) {
       entry.children = buildToc(
-        item.children as Array<{ label: string; href: string; children?: unknown[] }>,
+        item.children as Array<{
+          label: string;
+          href: string;
+          children?: unknown[];
+        }>,
         chapters,
         totalCharacters,
         level + 1,
@@ -230,7 +249,9 @@ async function parseEpubFallback(
     const zip = await JSZip.loadAsync(buffer);
 
     // Find container.xml to get the root file path
-    const containerXml = await zip.file("META-INF/container.xml")?.async("string");
+    const containerXml = await zip
+      .file("META-INF/container.xml")
+      ?.async("string");
     if (!containerXml) {
       return null;
     }
@@ -241,7 +262,10 @@ async function parseEpubFallback(
       return null;
     }
     const rootFilePath = rootFileMatch[1];
-    const rootDir = rootFilePath.substring(0, rootFilePath.lastIndexOf("/") + 1);
+    const rootDir = rootFilePath.substring(
+      0,
+      rootFilePath.lastIndexOf("/") + 1,
+    );
 
     // Read the OPF file
     const opfContent = await zip.file(rootFilePath)?.async("string");
@@ -250,7 +274,10 @@ async function parseEpubFallback(
     }
 
     // Parse manifest items - extract each <item> tag and then parse its attributes
-    const manifestItems = new Map<string, { href: string; mediaType: string }>();
+    const manifestItems = new Map<
+      string,
+      { href: string; mediaType: string }
+    >();
     const itemTagMatches = opfContent.matchAll(/<item\s+([^>]+)\/?>/gi);
     for (const tagMatch of itemTagMatches) {
       const attrs = tagMatch[1];
@@ -262,13 +289,17 @@ async function parseEpubFallback(
       if (idMatch && hrefMatch) {
         manifestItems.set(idMatch[1], {
           href: hrefMatch[1],
-          mediaType: mediaTypeMatch ? mediaTypeMatch[1] : "application/xhtml+xml",
+          mediaType: mediaTypeMatch
+            ? mediaTypeMatch[1]
+            : "application/xhtml+xml",
         });
       }
     }
 
     // Parse spine
-    const spineMatches = opfContent.matchAll(/<itemref\s+[^>]*idref="([^"]+)"[^>]*\/?>/gi);
+    const spineMatches = opfContent.matchAll(
+      /<itemref\s+[^>]*idref="([^"]+)"[^>]*\/?>/gi,
+    );
     const spineItems: string[] = [];
     for (const match of spineMatches) {
       spineItems.push(match[1]);
@@ -312,7 +343,8 @@ async function parseEpubFallback(
 
       const filePath = rootDir + item.href;
       const fileContent =
-        (await zip.file(filePath)?.async("string")) || (await zip.file(item.href)?.async("string"));
+        (await zip.file(filePath)?.async("string")) ||
+        (await zip.file(item.href)?.async("string"));
 
       if (!fileContent) continue;
 

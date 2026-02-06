@@ -1,6 +1,7 @@
 import { Link, type LoaderFunctionArgs } from "react-router";
 import { searchBooks } from "../actions/search";
 import { SearchInput } from "../components/SearchInput";
+import { AuthorLinks } from "../components/AuthorLink";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -222,12 +223,13 @@ function SearchResultCard({
           }}
         />
         {authors.length > 0 && (
-          <p
-            className="text-sm text-foreground-muted mb-2"
-            dangerouslySetInnerHTML={{
-              __html: highlights.authors || authors.join(", "),
-            }}
-          />
+          <p className="text-sm text-foreground-muted mb-2">
+            {highlights.authors ? (
+              <span dangerouslySetInnerHTML={{ __html: highlights.authors }} />
+            ) : (
+              <AuthorLinks authors={authors} asSpan />
+            )}
+          </p>
         )}
         {highlights.description && (
           <p

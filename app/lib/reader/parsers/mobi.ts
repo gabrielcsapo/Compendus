@@ -3,7 +3,7 @@ import { resolve } from "path";
 import { mkdirSync } from "fs";
 import type { TextContent, NormalizedChapter, TocEntry } from "../types";
 import type { BookFormat } from "../../types";
-import { yieldToEventLoop } from "../../processing/utils";
+import { yieldToEventLoop } from "../../processing/utils.js";
 
 /**
  * Strip HTML tags and normalize whitespace
@@ -109,7 +109,10 @@ function sanitizeHtml(html: string, bookId: string): string {
         /<a\s+([^>]*href\s*=\s*["'][^"']*\.(jpe?g|png|gif|webp|svg|bmp)["'][^>]*)>/gi,
         (_match, attributes) => {
           // Remove the href attribute to prevent navigation
-          const newAttributes = attributes.replace(/href\s*=\s*["'][^"']*["']/gi, "");
+          const newAttributes = attributes.replace(
+            /href\s*=\s*["'][^"']*["']/gi,
+            "",
+          );
           return `<a ${newAttributes.trim()}>`;
         },
       )
@@ -123,7 +126,10 @@ function sanitizeHtml(html: string, bookId: string): string {
             const href = hrefMatch[1];
             // Keep anchor links (#something) but remove file links
             if (!href.startsWith("#")) {
-              const newAttributes = attributes.replace(/href\s*=\s*["'][^"']*["']/gi, "");
+              const newAttributes = attributes.replace(
+                /href\s*=\s*["'][^"']*["']/gi,
+                "",
+              );
               return `<a ${newAttributes.trim()}>`;
             }
           }
@@ -158,7 +164,10 @@ interface ParseResult {
 /**
  * Try to parse with KF8 parser (for AZW3/KF8 format)
  */
-async function tryKf8Parser(buffer: Uint8Array, resourceDir: string): Promise<EbookParser | null> {
+async function tryKf8Parser(
+  buffer: Uint8Array,
+  resourceDir: string,
+): Promise<EbookParser | null> {
   try {
     const kf8 = await initKf8File(buffer, resourceDir);
     const spine = kf8.getSpine();
@@ -175,7 +184,10 @@ async function tryKf8Parser(buffer: Uint8Array, resourceDir: string): Promise<Eb
 /**
  * Try to parse with MOBI parser (for standard MOBI format)
  */
-async function tryMobiParser(buffer: Uint8Array, resourceDir: string): Promise<EbookParser | null> {
+async function tryMobiParser(
+  buffer: Uint8Array,
+  resourceDir: string,
+): Promise<EbookParser | null> {
   try {
     const mobi = await initMobiFile(buffer, resourceDir);
     const spine = mobi.getSpine();
@@ -195,7 +207,11 @@ async function tryMobiParser(buffer: Uint8Array, resourceDir: string): Promise<E
  * Extract content from a parser and return the result
  * Made async to yield to event loop and prevent blocking the server
  */
-async function extractContent(parser: EbookParser, parserType: string, bookId: string): Promise<ParseResult> {
+async function extractContent(
+  parser: EbookParser,
+  parserType: string,
+  bookId: string,
+): Promise<ParseResult> {
   const spine = parser.getSpine();
   const toc = parser.getToc();
   const chapters: NormalizedChapter[] = [];
@@ -289,9 +305,13 @@ export async function parseMobi(
       // For text-based books, prefer more characters
       // For image-based books (0 text chars), prefer more chapters
       const mobiScore =
-        mobiResult.totalCharacters > 0 ? mobiResult.totalCharacters : mobiResult.chapters.length;
+        mobiResult.totalCharacters > 0
+          ? mobiResult.totalCharacters
+          : mobiResult.chapters.length;
       const kf8Score =
-        kf8Result.totalCharacters > 0 ? kf8Result.totalCharacters : kf8Result.chapters.length;
+        kf8Result.totalCharacters > 0
+          ? kf8Result.totalCharacters
+          : kf8Result.chapters.length;
 
       if (kf8Score > mobiScore) {
         bestResult = kf8Result;
@@ -318,7 +338,11 @@ export async function parseMobi(
     }
 
     // Build TOC with normalized positions
-    const normalizedToc = buildToc(bestResult.toc, bestResult.chapters, bestResult.totalCharacters);
+    const normalizedToc = buildToc(
+      bestResult.toc,
+      bestResult.chapters,
+      bestResult.totalCharacters,
+    );
 
     return {
       bookId,
@@ -347,8 +371,12 @@ function buildToc(
 ): TocEntry[] {
   return rawToc.map((item) => {
     const href = item.href || "";
-    const chapter = chapters.find((ch) => ch.id.includes(href) || href.includes(ch.id));
-    const position = chapter ? chapter.characterStart / Math.max(1, totalCharacters) : 0;
+    const chapter = chapters.find(
+      (ch) => ch.id.includes(href) || href.includes(ch.id),
+    );
+    const position = chapter
+      ? chapter.characterStart / Math.max(1, totalCharacters)
+      : 0;
 
     return {
       title: item.label,

@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import type { Book } from "../lib/db/schema";
+import { AuthorLinks } from "./AuthorLink";
 
 interface BookCardProps {
   book: Book;
@@ -38,7 +39,9 @@ export function BookCard({ book }: BookCardProps) {
       <div className="p-4">
         <h3 className="font-semibold text-sm line-clamp-2 mb-1 text-foreground">{book.title}</h3>
         {authors.length > 0 && (
-          <p className="text-xs text-foreground-muted line-clamp-1">{authors.join(", ")}</p>
+          <p className="text-xs text-foreground-muted line-clamp-1">
+            <AuthorLinks authors={authors} asSpan />
+          </p>
         )}
 
         {/* Progress bar */}

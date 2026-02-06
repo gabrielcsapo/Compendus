@@ -282,6 +282,20 @@ export async function getBooksByFormat(): Promise<Array<{ format: string; count:
 }
 
 /**
+ * Get all books by a specific author
+ * Searches for exact author name within the JSON array
+ */
+export async function getBooksByAuthor(authorName: string): Promise<Book[]> {
+  // Escape special characters for LIKE pattern and JSON string matching
+  const escapedName = authorName.replace(/["\\%_]/g, (char) => "\\" + char);
+  return db
+    .select()
+    .from(books)
+    .where(like(books.authors, `%"${escapedName}"%`))
+    .orderBy(asc(books.title));
+}
+
+/**
  * Get books with the same ISBN but different format (linked formats)
  * Returns other formats of the same book (e.g., audiobook version of an ebook)
  */

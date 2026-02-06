@@ -8,6 +8,8 @@ export default [
   route("book/:id", "routes/book.$id.tsx"),
   route("book/:id/read", "routes/book.$id.read.tsx"),
 
+  route("author/:name", "routes/author.$name.tsx"),
+
   route("collections", "routes/collections.tsx"),
   route("collection/:id", "routes/collection.$id.tsx"),
 

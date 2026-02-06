@@ -9,6 +9,7 @@ import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
 import { DeleteBookButton } from "../components/DeleteBookButton";
+import { AuthorLinks } from "../components/AuthorLink";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -158,7 +159,9 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
           {book.subtitle && <p className="text-lg text-foreground-muted mb-4">{book.subtitle}</p>}
 
           {authors.length > 0 && (
-            <p className="text-foreground-muted mb-4">by {authors.join(", ")}</p>
+            <p className="text-foreground-muted mb-4">
+              by <AuthorLinks authors={authors} className="text-primary hover:text-primary-hover" />
+            </p>
           )}
 
           <div className="flex flex-wrap gap-2 mb-6">

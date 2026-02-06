@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsx scripts/build-worker.ts && vite build",
+    "build:worker": "tsx scripts/build-worker.ts",
     "preview": "vite preview",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
@@ -30,7 +31,7 @@
     "foliate-js": "^1.0.1",
     "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
-    "music-metadata": "^11.11.1",
+    "music-metadata": "^11.11.2",
     "node-id3": "^0.2.9",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",
@@ -46,7 +47,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.22.1",
+    "@cloudflare/vite-plugin": "^1.23.1",
     "@react-router/dev": "^7.13.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
@@ -55,22 +56,23 @@
     "@types/dompurify": "^3.2.0",
     "@types/mime-types": "^3.0.1",
     "@types/pdf-parse": "^1.1.5",
-    "@types/react": "^19.2.10",
+    "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^11.0.0",
-    "@typescript/native-preview": "7.0.0-dev.20260201.1",
+    "@typescript/native-preview": "7.0.0-dev.20260206.1",
     "@vitejs/plugin-react": "latest",
     "@vitejs/plugin-rsc": "latest",
     "drizzle-kit": "^0.31.8",
-    "oxfmt": "0.27.0",
-    "oxlint": "1.42.0",
-    "puppeteer": "^24.36.1",
+    "esbuild": "^0.27.3",
+    "oxfmt": "0.28.0",
+    "oxlint": "1.43.0",
+    "puppeteer": "^24.37.2",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18",
-    "wrangler": "^4.61.1"
+    "wrangler": "^4.63.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
