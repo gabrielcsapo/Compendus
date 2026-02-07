@@ -10,7 +10,10 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(ServerConfig.self) private var serverConfig
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.deepLinkBookId) private var deepLinkBookId
     @State private var selectedTab = 0
+    @State private var deepLinkedBook: DownloadedBook?
 
     var body: some View {
         Group {
@@ -34,10 +37,34 @@ struct ContentView: View {
                         }
                         .tag(2)
                 }
+                .onChange(of: deepLinkBookId.wrappedValue) { _, newBookId in
+                    if let bookId = newBookId {
+                        openBookFromDeepLink(bookId)
+                    }
+                }
+                .fullScreenCover(item: $deepLinkedBook) { book in
+                    ReaderContainerView(book: book)
+                }
             } else {
                 ServerSetupView()
             }
         }
+    }
+
+    private func openBookFromDeepLink(_ bookId: String) {
+        // Find the downloaded book
+        let descriptor = FetchDescriptor<DownloadedBook>(
+            predicate: #Predicate { $0.id == bookId }
+        )
+
+        if let book = try? modelContext.fetch(descriptor).first {
+            deepLinkedBook = book
+            // Switch to downloads tab
+            selectedTab = 1
+        }
+
+        // Clear the deep link
+        deepLinkBookId.wrappedValue = nil
     }
 }
 

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import WidgetKit
 
 struct ReaderContainerView: View {
     let book: DownloadedBook
@@ -45,8 +46,27 @@ struct ReaderContainerView: View {
                 // Save reading progress
                 book.lastReadAt = Date()
                 try? modelContext.save()
+
+                // Update widget data
+                updateWidgetData()
             }
         }
+    }
+
+    private func updateWidgetData() {
+        let widgetBook = WidgetBook(
+            id: book.id,
+            title: book.title,
+            author: book.authorsDisplay,
+            format: book.format,
+            progress: book.readingProgress,
+            coverData: book.coverData,
+            lastReadAt: book.lastReadAt ?? Date()
+        )
+        WidgetDataManager.shared.saveCurrentBook(widgetBook)
+
+        // Reload widget timeline
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }
 

@@ -26,6 +26,7 @@ struct CompendusApp: App {
     @State private var serverConfig = ServerConfig()
     @State private var storageManager = StorageManager()
     @State private var comicExtractor = ComicExtractor()
+    @State private var deepLinkBookId: String?
 
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
@@ -49,7 +50,35 @@ struct CompendusApp: App {
                 .environment(comicExtractor)
                 .environment(apiService)
                 .environment(downloadManager)
+                .environment(\.deepLinkBookId, $deepLinkBookId)
+                .onOpenURL { url in
+                    handleDeepLink(url)
+                }
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        // Handle compendus://book/{bookId}
+        guard url.scheme == "compendus",
+              url.host == "book",
+              let bookId = url.pathComponents.dropFirst().first else {
+            return
+        }
+
+        deepLinkBookId = bookId
+    }
+}
+
+// MARK: - Deep Link Environment Key
+
+struct DeepLinkBookIdKey: EnvironmentKey {
+    static let defaultValue: Binding<String?> = .constant(nil)
+}
+
+extension EnvironmentValues {
+    var deepLinkBookId: Binding<String?> {
+        get { self[DeepLinkBookIdKey.self] }
+        set { self[DeepLinkBookIdKey.self] = newValue }
     }
 }
