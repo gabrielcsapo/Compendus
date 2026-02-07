@@ -45,6 +45,7 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var hasMore = true
     @State private var offset = 0
+    @State private var totalCount: Int = 0
     @State private var selectedBook: Book?
     @State private var selectedFilter: BookFilter = .all
 
@@ -77,14 +78,14 @@ struct LibraryView: View {
                 } else {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 16) {
-                            ForEach(books) { book in
+                            ForEach(Array(books.enumerated()), id: \.element.id) { index, book in
                                 BookGridItem(book: book)
                                     .onTapGesture {
                                         selectedBook = book
                                     }
                                     .onAppear {
-                                        // Load more when reaching the end
-                                        if book == books.last && hasMore && !isLoading {
+                                        // Load more when nearing the end (within last 10 items)
+                                        if index >= books.count - 10 && hasMore && !isLoading {
                                             Task { await loadMoreBooks() }
                                         }
                                     }
@@ -99,7 +100,7 @@ struct LibraryView: View {
                     }
                 }
             }
-            .navigationTitle("Library")
+            .navigationTitle(totalCount > 0 ? "Library (\(totalCount))" : "Library")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -155,6 +156,7 @@ struct LibraryView: View {
         do {
             let response = try await apiService.fetchBooks(limit: limit, offset: 0, type: selectedFilter.apiType)
             books = response.books
+            totalCount = response.totalCount ?? response.books.count
             hasMore = response.books.count >= limit
             offset = response.books.count
         } catch {
@@ -197,6 +199,7 @@ struct LibraryView: View {
         do {
             let response = try await apiService.searchBooks(query: query)
             books = response.books  // Use computed property that extracts books from results
+            totalCount = response.books.count  // Show search result count
             hasMore = false  // Search doesn't support pagination
         } catch {
             errorMessage = error.localizedDescription

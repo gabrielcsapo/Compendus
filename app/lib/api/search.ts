@@ -1,5 +1,5 @@
 import { db, books } from "../db";
-import { eq, or, inArray } from "drizzle-orm";
+import { eq, or, inArray, sql } from "drizzle-orm";
 import { searchBooks as searchBooksLib } from "../search";
 import type { Book } from "../db/schema";
 
@@ -54,6 +54,7 @@ interface ApiSearchResponse {
   success: true;
   query: string;
   total: number;
+  totalCount?: number;  // Total items in database (for pagination)
   limit: number;
   offset: number;
   results: ApiSearchResult[];
@@ -286,6 +287,7 @@ export async function apiListBooks(
 
   try {
     let query = db.select().from(books).$dynamic();
+    let countQuery = db.select({ count: sql<number>`count(*)` }).from(books).$dynamic();
 
     // Filter by type if specified
     if (type) {
@@ -297,15 +299,23 @@ export async function apiListBooks(
       const formats = formatMap[type];
       if (formats) {
         query = query.where(inArray(books.format, formats));
+        countQuery = countQuery.where(inArray(books.format, formats));
       }
     }
 
-    const results = await query.limit(limit).offset(offset);
+    // Run both queries in parallel
+    const [results, countResult] = await Promise.all([
+      query.limit(limit).offset(offset),
+      countQuery.get(),
+    ]);
+
+    const totalCount = countResult?.count ?? 0;
 
     return {
       success: true,
       query: "",
       total: results.length,
+      totalCount,
       limit,
       offset,
       results: results.map((book) => ({

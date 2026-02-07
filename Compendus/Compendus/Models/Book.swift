@@ -197,6 +197,7 @@ struct BooksResponse: Codable {
     let success: Bool
     let query: String
     let total: Int
+    let totalCount: Int?  // Total items in database (for pagination)
     let limit: Int
     let offset: Int
     let results: [SearchResult]
