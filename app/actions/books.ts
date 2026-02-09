@@ -191,6 +191,17 @@ export async function updateBook(
           const filePath = getBookFilePath(id, format);
           const authors = updatedBook.authors ? JSON.parse(updatedBook.authors) : [];
 
+          // Load cover image for embedding if available
+          let coverImage: Buffer | null = null;
+          if (updatedBook.coverPath) {
+            try {
+              const { readFile } = await import("fs/promises");
+              coverImage = await readFile(updatedBook.coverPath);
+            } catch {
+              // Cover file not found, proceed without embedding
+            }
+          }
+
           await writeMetadataToFile(filePath, format, {
             title: updatedBook.title,
             authors,
@@ -201,6 +212,8 @@ export async function updateBook(
             series: updatedBook.series,
             seriesNumber: updatedBook.seriesNumber,
             publishedDate: updatedBook.publishedDate,
+            coverImage,
+            coverMimeType: "image/jpeg",
           });
         } catch (error) {
           // Don't fail the operation if file metadata update fails
@@ -535,6 +548,43 @@ export async function refreshMetadata(
         updatedBook.authors || "",
         updatedBook.description,
       );
+
+      // Write metadata to the actual book file
+      // This makes the file the source of truth for backups/migrations
+      try {
+        const format = updatedBook.format as BookFormat;
+        const filePath = getBookFilePath(bookId, format);
+        const authors = updatedBook.authors ? JSON.parse(updatedBook.authors) : [];
+
+        // Load cover image for embedding if available
+        let coverImage: Buffer | null = null;
+        if (updatedBook.coverPath) {
+          try {
+            const { readFile } = await import("fs/promises");
+            coverImage = await readFile(updatedBook.coverPath);
+          } catch {
+            // Cover file not found, proceed without embedding
+          }
+        }
+
+        await writeMetadataToFile(filePath, format, {
+          title: updatedBook.title,
+          authors,
+          publisher: updatedBook.publisher,
+          description: updatedBook.description,
+          isbn: updatedBook.isbn13 || updatedBook.isbn10 || updatedBook.isbn,
+          language: updatedBook.language,
+          series: updatedBook.series,
+          seriesNumber: updatedBook.seriesNumber,
+          publishedDate: updatedBook.publishedDate,
+          coverImage,
+          coverMimeType: "image/jpeg",
+        });
+      } catch (error) {
+        // Don't fail the operation if file metadata update fails
+        console.error(`Error writing embedded metadata for book ${bookId}:`, error);
+      }
+
       return {
         success: true,
         message: `Updated ${Object.keys(updateData).length - 1} field(s) from external sources`,
@@ -734,11 +784,22 @@ export async function applyMetadata(
 
   await db.update(books).set(updateData).where(eq(books.id, bookId));
 
-  // Write metadata to the actual book file (EPUB, PDF)
+  // Write metadata to the actual book file (EPUB, PDF, audio)
   // This makes the file the source of truth for backups/migrations
   try {
     const format = book.format as BookFormat;
     const filePath = getBookFilePath(bookId, format);
+
+    // Load cover image for embedding if available
+    let coverImage: Buffer | null = null;
+    if (updateData.coverPath) {
+      try {
+        const { readFile } = await import("fs/promises");
+        coverImage = await readFile(updateData.coverPath as string);
+      } catch {
+        // Cover file not found, proceed without embedding
+      }
+    }
 
     const writeResult = await writeMetadataToFile(filePath, format, {
       title: newTitle,
@@ -750,6 +811,8 @@ export async function applyMetadata(
       series: enrichedMetadata.series,
       seriesNumber: enrichedMetadata.seriesNumber,
       publishedDate: enrichedMetadata.publishedDate,
+      coverImage,
+      coverMimeType: "image/jpeg",
     });
 
     if (

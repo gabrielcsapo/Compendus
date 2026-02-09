@@ -14,6 +14,8 @@ interface WritableMetadata {
   series?: string | null;
   seriesNumber?: string | null;
   publishedDate?: string | null;
+  coverImage?: Buffer | null;
+  coverMimeType?: string; // Default: "image/jpeg"
 }
 
 /**
@@ -23,6 +25,7 @@ interface MetadataWriteResult {
   success: boolean;
   error?: string;
   format: BookFormat;
+  coverEmbedded?: boolean;
 }
 
 /**
@@ -113,12 +116,30 @@ async function writeEpubMetadata(
   }
 
   // Step 4: Update metadata in OPF
-  const updatedOpf = updateOpfMetadata(opfContent, metadata);
+  let updatedOpf = updateOpfMetadata(opfContent, metadata);
 
-  // Step 5: Write the updated OPF back to the ZIP
+  // Step 5: Embed cover if provided
+  let coverEmbedded = false;
+  if (metadata.coverImage) {
+    // Determine the directory where OPF lives to place cover alongside it
+    const opfDir = opfPath.includes("/")
+      ? opfPath.substring(0, opfPath.lastIndexOf("/"))
+      : "";
+    const coverFileName = "cover.jpg";
+    const coverPath = opfDir ? `${opfDir}/${coverFileName}` : coverFileName;
+
+    // Add cover image to ZIP
+    zip.file(coverPath, metadata.coverImage);
+
+    // Update OPF: add manifest item and meta cover element
+    updatedOpf = addCoverToOpf(updatedOpf, coverFileName);
+    coverEmbedded = true;
+  }
+
+  // Step 6: Write the updated OPF back to the ZIP
   zip.file(opfPath, updatedOpf);
 
-  // Step 6: Generate and save the modified EPUB
+  // Step 7: Generate and save the modified EPUB
   const newBuffer = await zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",
@@ -127,7 +148,45 @@ async function writeEpubMetadata(
 
   await writeFile(filePath, newBuffer);
 
-  return { success: true, format: "epub" };
+  return { success: true, format: "epub", coverEmbedded };
+}
+
+/**
+ * Add cover image reference to OPF manifest and metadata.
+ */
+function addCoverToOpf(opfContent: string, coverFileName: string): string {
+  let result = opfContent;
+
+  // Remove any existing cover-image manifest item
+  result = result.replace(
+    /<item[^>]*id=["']cover-image["'][^>]*(?:\/>|>[^<]*<\/item>)\s*/gi,
+    "",
+  );
+
+  // Remove any existing cover meta element
+  result = result.replace(/<meta\s+name=["']cover["'][^>]*\/>\s*/gi, "");
+
+  // Add manifest item before </manifest>
+  const manifestEnd = result.match(/<\/manifest>/i);
+  if (manifestEnd && manifestEnd.index !== undefined) {
+    const manifestItem = `    <item id="cover-image" href="${escapeXml(coverFileName)}" media-type="image/jpeg"/>\n  `;
+    result =
+      result.slice(0, manifestEnd.index) +
+      manifestItem +
+      result.slice(manifestEnd.index);
+  }
+
+  // Add meta cover element before </metadata>
+  const metadataEnd = result.match(/<\/(?:opf:)?metadata>/i);
+  if (metadataEnd && metadataEnd.index !== undefined) {
+    const metaElement = `    <meta name="cover" content="cover-image"/>\n  `;
+    result =
+      result.slice(0, metadataEnd.index) +
+      metaElement +
+      result.slice(metadataEnd.index);
+  }
+
+  return result;
 }
 
 /**
@@ -361,11 +420,26 @@ async function writeMp3Metadata(
     }
   }
 
+  // Add cover image using APIC frame
+  let coverEmbedded = false;
+  if (metadata.coverImage) {
+    tags.image = {
+      mime: metadata.coverMimeType || "image/jpeg",
+      type: {
+        id: 3, // Front cover
+        name: "front cover",
+      },
+      description: "Cover",
+      imageBuffer: metadata.coverImage,
+    };
+    coverEmbedded = true;
+  }
+
   // Write tags to file
   const result = NodeID3Module.update(tags, filePath);
 
   if (result === true) {
-    return { success: true, format: "mp3" };
+    return { success: true, format: "mp3", coverEmbedded };
   }
 
   return {
@@ -437,8 +511,16 @@ async function writeM4Metadata(
     }
   }
 
-  // Create temp file for output
+  // Create temp files
   const tempPath = join(tmpdir(), `compendus-m4-${Date.now()}.${format}`);
+  let coverTempPath: string | null = null;
+  let coverEmbedded = false;
+
+  // Write cover to temp file if provided
+  if (metadata.coverImage) {
+    coverTempPath = join(tmpdir(), `compendus-cover-${Date.now()}.jpg`);
+    await writeFile(coverTempPath, metadata.coverImage);
+  }
 
   try {
     // Use ffmpeg to copy stream and update metadata
@@ -448,16 +530,25 @@ async function writeM4Metadata(
       .map((arg) => `"${arg.replace(/"/g, '\\"')}"`)
       .join(" ");
 
-    await execAsync(
-      `ffmpeg -i "${escapedPath}" -c copy ${metadataStr} -y "${escapedTemp}"`,
-      { maxBuffer: 50 * 1024 * 1024 },
-    );
+    // Build ffmpeg command with optional cover
+    let ffmpegCmd: string;
+    if (coverTempPath) {
+      const escapedCover = coverTempPath.replace(/"/g, '\\"');
+      // With cover: map audio from input 0, video (cover) from input 1
+      ffmpegCmd = `ffmpeg -i "${escapedPath}" -i "${escapedCover}" -map 0:a -map 1:v -c:a copy -c:v mjpeg -disposition:v:0 attached_pic ${metadataStr} -y "${escapedTemp}"`;
+      coverEmbedded = true;
+    } else {
+      // Without cover: just copy all streams
+      ffmpegCmd = `ffmpeg -i "${escapedPath}" -c copy ${metadataStr} -y "${escapedTemp}"`;
+    }
+
+    await execAsync(ffmpegCmd, { maxBuffer: 50 * 1024 * 1024 });
 
     // Replace original with updated file
     await unlink(filePath);
     await rename(tempPath, filePath);
 
-    return { success: true, format };
+    return { success: true, format, coverEmbedded };
   } catch (error) {
     // Clean up temp file if it exists
     try {
@@ -474,5 +565,14 @@ async function writeM4Metadata(
           ? error.message
           : "Failed to write M4B/M4A metadata",
     };
+  } finally {
+    // Clean up cover temp file
+    if (coverTempPath) {
+      try {
+        await unlink(coverTempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   }
 }
