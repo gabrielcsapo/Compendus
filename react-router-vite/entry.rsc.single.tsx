@@ -737,8 +737,20 @@ async function serveStaticFile(pathname: string, request?: Request): Promise<Res
           },
         });
       } catch (error) {
-        console.error(`[as-cbz] Conversion failed for ${bookId}:`, error);
-        return new Response("Conversion failed", { status: 500 });
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        console.error(`[as-cbz] Conversion failed for ${bookId}:`, errorMessage);
+
+        // Return appropriate status code based on error type
+        if (errorMessage.includes("too large")) {
+          return new Response(JSON.stringify({ error: errorMessage }), {
+            status: 413, // Payload Too Large
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Conversion failed", details: errorMessage }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
       }
     }
 

@@ -224,9 +224,13 @@ export async function getComicPageCount(buffer: Buffer, format: BookFormat): Pro
 /**
  * Convert a CBR (RAR) archive to CBZ (ZIP) format
  * This allows iOS devices to read comics offline without server extraction
+ *
+ * Note: Large files (300MB+) may require 4GB+ container memory due to
+ * in-memory extraction. Configure Docker with appropriate memory limits.
  */
 export async function convertCbrToCbz(cbrBuffer: Buffer): Promise<Buffer> {
-  console.log(`[CBR→CBZ] Starting conversion, input size: ${(cbrBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+  const sizeMB = (cbrBuffer.length / 1024 / 1024).toFixed(1);
+  console.log(`[CBR→CBZ] Starting conversion, input size: ${sizeMB}MB`);
 
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();

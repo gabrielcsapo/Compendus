@@ -41,9 +41,16 @@ export async function renderPdfPage(
     preserveAspectRatio: true,
   });
 
-  const result = await converter(pageNumber, { responseType: "buffer" });
+  let result;
+  try {
+    result = await converter(pageNumber, { responseType: "buffer" });
+  } catch (error) {
+    console.error(`[PDF] Error rendering page ${pageNumber} for book ${bookId}:`, error);
+    throw new Error(`Failed to render PDF page ${pageNumber}: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
 
   if (!result.buffer) {
+    console.error(`[PDF] Failed to render page ${pageNumber} for book ${bookId}. Result:`, result);
     throw new Error(`Failed to render PDF page ${pageNumber}`);
   }
 
