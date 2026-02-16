@@ -29,6 +29,8 @@ struct CompendusApp: App {
     @State private var comicExtractor = ComicExtractor()
     @State private var deepLinkBookId: String?
 
+    @State private var readerSettings = ReaderSettings()
+
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
     @State private var downloadManager: DownloadManager
@@ -51,6 +53,7 @@ struct CompendusApp: App {
                 .environment(comicExtractor)
                 .environment(apiService)
                 .environment(downloadManager)
+                .environment(readerSettings)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .onOpenURL { url in
                     handleDeepLink(url)

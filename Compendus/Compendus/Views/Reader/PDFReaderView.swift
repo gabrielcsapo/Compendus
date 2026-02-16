@@ -14,8 +14,10 @@ struct PDFReaderView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(ReaderSettings.self) private var readerSettings
 
     @State private var pdfDocument: PDFDocument?
+    @State private var showingSettings = false
     @State private var currentPage: Int = 0
     @State private var totalPages: Int = 0
     @State private var showingControls = false
@@ -48,6 +50,7 @@ struct PDFReaderView: View {
                         PDFKitView(
                             document: document,
                             currentPage: $currentPage,
+                            backgroundColor: readerSettings.theme.backgroundColor,
                             onSelectionChanged: { hasSelection, frame in
                                 hasTextSelection = hasSelection
                                 selectionFrame = frame
@@ -137,10 +140,18 @@ struct PDFReaderView: View {
         .toolbar {
             if pdfDocument != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingHighlights = true
-                    } label: {
-                        Image(systemName: "highlighter")
+                    HStack(spacing: 12) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "textformat.size")
+                        }
+
+                        Button {
+                            showingHighlights = true
+                        } label: {
+                            Image(systemName: "highlighter")
+                        }
                     }
                 }
             }
@@ -153,6 +164,9 @@ struct PDFReaderView: View {
         }
         .onDisappear {
             UIScreen.main.brightness = CGFloat(originalBrightness)
+        }
+        .sheet(isPresented: $showingSettings) {
+            ReaderSettingsView(format: .pdf)
         }
         .sheet(isPresented: $showingCustomColorPicker) {
             NavigationStack {
@@ -460,6 +474,7 @@ struct PDFReaderView: View {
 struct PDFKitView: UIViewRepresentable {
     let document: PDFDocument
     @Binding var currentPage: Int
+    var backgroundColor: UIColor = .systemBackground
     var onSelectionChanged: ((Bool, CGRect?) -> Void)?
     var onPDFViewCreated: ((PDFView) -> Void)?
 
@@ -470,6 +485,7 @@ struct PDFKitView: UIViewRepresentable {
         pdfView.displayMode = .singlePage
         pdfView.displayDirection = .horizontal
         pdfView.usePageViewController(true)
+        pdfView.backgroundColor = backgroundColor
 
         // Set initial page
         if let page = document.page(at: currentPage) {
@@ -499,6 +515,8 @@ struct PDFKitView: UIViewRepresentable {
     }
 
     func updateUIView(_ pdfView: PDFView, context: Context) {
+        pdfView.backgroundColor = backgroundColor
+
         if let currentDisplayedPage = pdfView.currentPage {
             let currentIndex = document.index(for: currentDisplayedPage)
             if currentIndex != NSNotFound && currentIndex != currentPage {

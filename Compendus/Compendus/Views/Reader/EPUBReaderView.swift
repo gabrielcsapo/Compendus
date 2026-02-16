@@ -126,13 +126,18 @@ struct EPUBReaderView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(ReaderSettings.self) private var readerSettings
     @State private var readerState: ReaderState = .loading
+    @State private var showingSettings = false
     @State private var publication: Publication?
     @State private var container: EPUBNavigatorContainer?
     @State private var currentLocator: Locator?
     @State private var showingTOC = false
     @State private var showingHighlights = false
     @State private var readerDelegate: EPUBReaderDelegate?
+
+    // Position tracking
+    @State private var totalPositions: Int = 0
 
     // Highlighting state
     @State private var highlights: [BookHighlight] = []
@@ -182,14 +187,20 @@ struct EPUBReaderView: View {
                                                 .lineLimit(1)
                                         }
                                         Spacer()
-                                        Text("\(Int((currentLocator?.locations.totalProgression ?? 0) * 100))%")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        if let position = currentLocator?.locations.position, totalPositions > 0 {
+                                            Text("Page \(position) of \(totalPositions)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("\(Int((currentLocator?.locations.totalProgression ?? 0) * 100))%")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                                 .padding(.horizontal)
                                 .padding(.vertical, 8)
-                                .background(Color(.systemBackground))
+                                .background(Color(uiColor: readerSettings.theme.backgroundColor))
                             }
 
                             // Floating highlight toolbar
@@ -230,6 +241,12 @@ struct EPUBReaderView: View {
             if case .ready = readerState {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "textformat.size")
+                        }
+
                         Button {
                             showingHighlights = true
                         } label: {
@@ -283,6 +300,21 @@ struct EPUBReaderView: View {
                     fetchHighlights()
                 }
             )
+        }
+        .sheet(isPresented: $showingSettings) {
+            ReaderSettingsView(format: .epub)
+        }
+        .onChange(of: readerSettings.theme) { _, _ in
+            container?.navigator.submitPreferences(readerSettings.epubPreferences())
+        }
+        .onChange(of: readerSettings.fontFamily) { _, _ in
+            container?.navigator.submitPreferences(readerSettings.epubPreferences())
+        }
+        .onChange(of: readerSettings.fontSize) { _, _ in
+            container?.navigator.submitPreferences(readerSettings.epubPreferences())
+        }
+        .onChange(of: readerSettings.lineHeight) { _, _ in
+            container?.navigator.submitPreferences(readerSettings.epubPreferences())
         }
         .sheet(isPresented: $showingCustomColorPicker) {
             NavigationStack {
@@ -369,6 +401,11 @@ struct EPUBReaderView: View {
 
             self.publication = pub
 
+            // Load total position count for page display
+            if case .success(let positions) = await pub.positions() {
+                self.totalPositions = positions.count
+            }
+
             // Restore last position if available
             var initialLocator: Locator? = nil
             if let lastPosition = book.lastPosition,
@@ -378,8 +415,9 @@ struct EPUBReaderView: View {
                 initialLocator = await pub.locate(progression: totalProgression)
             }
 
-            // Configure navigator with "Highlight" editing action
+            // Configure navigator with reader preferences and "Highlight" editing action
             let config = EPUBNavigatorViewController.Configuration(
+                preferences: readerSettings.epubPreferences(),
                 editingActions: EditingAction.defaultActions + [
                     EditingAction(title: "Highlight", action: #selector(EPUBNavigatorContainer.highlightSelection))
                 ]
