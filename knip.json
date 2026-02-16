@@ -4,7 +4,6 @@
     "app/routes/**/*.tsx",
     "react-router-vite/entry.*.tsx",
     "react-router-vite/plugin.ts",
-    "cf/entry.*.tsx",
     "scripts/*.ts",
     "tests/**/*.ts",
     "app/lib/reader/parser-worker.ts"
@@ -12,7 +11,6 @@
   "project": [
     "app/**/*.{ts,tsx}",
     "react-router-vite/**/*.{ts,tsx}",
-    "cf/**/*.{ts,tsx}",
     "scripts/**/*.ts",
     "tests/**/*.ts"
   ],
@@ -26,7 +24,7 @@
     "isbot"
   ],
   "vite": {
-    "config": ["vite.config.ts", "cf/vite.config.ts"]
+    "config": ["vite.config.ts"]
   },
   "vitest": {
     "config": ["vite.config.ts"]
