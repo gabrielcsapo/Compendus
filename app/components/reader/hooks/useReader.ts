@@ -19,6 +19,8 @@ import {
   deleteBookmark as deleteBookmarkAction,
   addHighlight as addHighlightAction,
   deleteHighlight as deleteHighlightAction,
+  updateHighlightNote as updateHighlightNoteAction,
+  updateHighlightColor as updateHighlightColorAction,
   saveReadingProgress,
 } from "@/actions/reader";
 
@@ -68,6 +70,8 @@ interface UseReaderReturn {
     color?: string,
   ) => Promise<void>;
   removeHighlight: (highlightId: string) => Promise<void>;
+  updateHighlightNote: (highlightId: string, note: string | null) => Promise<void>;
+  updateHighlightColor: (highlightId: string, color: string) => Promise<void>;
 
   // Progress
   saveProgress: () => Promise<void>;
@@ -373,6 +377,38 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
     }
   }, []);
 
+  const updateHighlightNote = useCallback(
+    async (highlightId: string, note: string | null) => {
+      try {
+        await updateHighlightNoteAction(highlightId, note);
+        setHighlights((prev) =>
+          prev.map((h) =>
+            h.id === highlightId ? { ...h, note: note ?? undefined } : h,
+          ),
+        );
+      } catch (err) {
+        console.error("Failed to update highlight note:", err);
+      }
+    },
+    [],
+  );
+
+  const updateHighlightColor = useCallback(
+    async (highlightId: string, color: string) => {
+      try {
+        await updateHighlightColorAction(highlightId, color);
+        setHighlights((prev) =>
+          prev.map((h) =>
+            h.id === highlightId ? { ...h, color } : h,
+          ),
+        );
+      } catch (err) {
+        console.error("Failed to update highlight color:", err);
+      }
+    },
+    [],
+  );
+
   // Save progress
   const saveProgress = useCallback(async () => {
     if (!pageContent) return;
@@ -419,6 +455,8 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
     removeBookmark,
     addHighlight,
     removeHighlight,
+    updateHighlightNote,
+    updateHighlightColor,
     saveProgress,
   };
 }

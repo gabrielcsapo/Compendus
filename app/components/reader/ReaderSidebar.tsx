@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import type { TocEntry, ReaderBookmark, ReaderHighlight } from "@/lib/reader/types";
 
 interface ReaderSidebarProps {
@@ -16,6 +17,7 @@ interface ReaderSidebarProps {
   onBookmarkDelete: (bookmarkId: string) => void;
   onHighlightSelect: (position: number) => void;
   onHighlightDelete: (highlightId: string) => void;
+  onHighlightUpdateNote?: (highlightId: string, note: string | null) => void;
   theme: {
     background: string;
     foreground: string;
@@ -38,6 +40,7 @@ export function ReaderSidebar({
   onBookmarkDelete,
   onHighlightSelect,
   onHighlightDelete,
+  onHighlightUpdateNote,
   theme,
 }: ReaderSidebarProps) {
   if (!isOpen) return null;
@@ -103,6 +106,7 @@ export function ReaderSidebar({
               currentPosition={currentPosition}
               onSelect={onHighlightSelect}
               onDelete={onHighlightDelete}
+              onUpdateNote={onHighlightUpdateNote}
               theme={theme}
             />
           )}
@@ -288,14 +292,26 @@ function HighlightList({
   currentPosition,
   onSelect,
   onDelete,
+  onUpdateNote,
   theme,
 }: {
   highlights: ReaderHighlight[];
   currentPosition: number;
   onSelect: (position: number) => void;
   onDelete: (id: string) => void;
+  onUpdateNote?: (highlightId: string, note: string | null) => void;
   theme: ReaderSidebarProps["theme"];
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editNoteText, setEditNoteText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (editingId && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [editingId]);
+
   if (highlights.length === 0) {
     return (
       <div className="p-4 text-center text-sm" style={{ color: theme.muted }}>
@@ -306,12 +322,31 @@ function HighlightList({
 
   const sortedHighlights = [...highlights].sort((a, b) => a.startPosition - b.startPosition);
 
+  const handleStartEdit = (highlight: ReaderHighlight, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(highlight.id);
+    setEditNoteText(highlight.note || "");
+  };
+
+  const handleSaveNote = (highlightId: string) => {
+    const trimmed = editNoteText.trim();
+    onUpdateNote?.(highlightId, trimmed || null);
+    setEditingId(null);
+    setEditNoteText("");
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditNoteText("");
+  };
+
   return (
     <ul className="py-2">
       {sortedHighlights.map((highlight) => {
         const isNearCurrent =
           highlight.startPosition <= currentPosition &&
           highlight.endPosition >= currentPosition;
+        const isEditing = editingId === highlight.id;
 
         return (
           <li key={highlight.id} className="group relative">
@@ -331,12 +366,49 @@ function HighlightList({
                 &ldquo;{highlight.text}&rdquo;
               </div>
 
-              {/* Note if present */}
-              {highlight.note && (
-                <div className="text-xs line-clamp-2 mt-1 pl-2" style={{ color: theme.muted }}>
+              {/* Note display or editor */}
+              {isEditing ? (
+                <div className="mt-1.5 pl-2" onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    ref={textareaRef}
+                    value={editNoteText}
+                    onChange={(e) => setEditNoteText(e.target.value)}
+                    placeholder="Add a note..."
+                    rows={2}
+                    className="w-full px-2 py-1.5 text-xs rounded border resize-none focus:outline-none focus:ring-1"
+                    style={{
+                      backgroundColor: `${theme.foreground}08`,
+                      borderColor: `${theme.foreground}20`,
+                      color: theme.foreground,
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSaveNote(highlight.id);
+                      } else if (e.key === "Escape") {
+                        handleCancelEdit();
+                      }
+                    }}
+                    onBlur={() => handleSaveNote(highlight.id)}
+                  />
+                </div>
+              ) : highlight.note ? (
+                <div
+                  className="text-xs line-clamp-2 mt-1 pl-2 cursor-pointer hover:underline"
+                  style={{ color: theme.muted }}
+                  onClick={(e) => onUpdateNote && handleStartEdit(highlight, e)}
+                >
                   {highlight.note}
                 </div>
-              )}
+              ) : onUpdateNote ? (
+                <div
+                  className="text-xs mt-1 pl-2 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
+                  style={{ color: theme.muted }}
+                  onClick={(e) => handleStartEdit(highlight, e)}
+                >
+                  Add note...
+                </div>
+              ) : null}
 
               {/* Position info */}
               <div className="text-xs mt-1 pl-2" style={{ color: theme.muted }}>

@@ -15,11 +15,13 @@ struct HighlightsView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var searchText = ""
     @State private var bookToOpen: DownloadedBook?
+    @State private var editingHighlight: BookHighlight?
 
     /// Highlights grouped by bookId, sorted by most recent highlight first
     private var groupedHighlights: [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {
         let filtered = searchText.isEmpty ? allHighlights : allHighlights.filter { highlight in
             highlight.text.localizedCaseInsensitiveContains(searchText) ||
+            (highlight.note?.localizedCaseInsensitiveContains(searchText) ?? false) ||
             (highlight.chapterTitle?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
 
@@ -59,6 +61,14 @@ struct HighlightsView: View {
                                                 bookToOpen = book
                                             }
                                         }
+                                        .swipeActions(edge: .leading) {
+                                            Button {
+                                                editingHighlight = highlight
+                                            } label: {
+                                                Label("Note", systemImage: "note.text")
+                                            }
+                                            .tint(.blue)
+                                        }
                                 }
                                 .onDelete { indexSet in
                                     for index in indexSet {
@@ -79,6 +89,11 @@ struct HighlightsView: View {
             .searchable(text: $searchText, prompt: "Search highlights")
             .fullScreenCover(item: $bookToOpen) { book in
                 ReaderContainerView(book: book)
+            }
+            .sheet(item: $editingHighlight) { highlight in
+                EditNoteSheet(highlight: highlight) {
+                    try? modelContext.save()
+                }
             }
         }
     }
@@ -153,6 +168,18 @@ private struct HighlightRow: View {
                     .italic()
                     .lineLimit(3)
                     .foregroundStyle(.primary)
+
+                // Note display
+                if let note = highlight.note, !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text("Add note...")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
 
                 // Metadata row
                 HStack {

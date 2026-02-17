@@ -12,6 +12,8 @@ struct FloatingHighlightToolbar: View {
     let containerSize: CGSize
     let onSelectColor: (String) -> Void
     let onCustomColor: () -> Void
+    let onAddNote: () -> Void
+    let onCopy: () -> Void
     let onDismiss: () -> Void
 
     private var showAbove: Bool {
@@ -28,7 +30,7 @@ struct FloatingHighlightToolbar: View {
 
     private var toolbarX: CGFloat {
         let x = selectionRect.midX
-        return max(130, min(x, containerSize.width - 130))
+        return max(170, min(x, containerSize.width - 170))
     }
 
     var body: some View {
@@ -72,6 +74,30 @@ struct FloatingHighlightToolbar: View {
                                 .foregroundStyle(.white)
                                 .shadow(radius: 1)
                         }
+                }
+
+                // Divider
+                Divider()
+                    .frame(height: 24)
+
+                // Note button
+                Button {
+                    onAddNote()
+                } label: {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                }
+
+                // Copy button
+                Button {
+                    onCopy()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
                 }
             }
             .padding(.horizontal, 14)

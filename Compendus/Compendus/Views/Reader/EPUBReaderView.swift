@@ -41,12 +41,16 @@ final class ReadiumServices {
 
 // MARK: - EPUB Navigator Container
 
-/// Wraps EPUBNavigatorViewController as a child VC so we can handle
-/// custom editing actions (like "Highlight") via the responder chain.
+/// Wraps EPUBNavigatorViewController as a child VC.
+/// Detects text selection via polling and shows the floating highlight toolbar directly.
 @MainActor
 class EPUBNavigatorContainer: UIViewController {
     let navigator: EPUBNavigatorViewController
     var onHighlightRequested: ((Locator, String, CGRect?) -> Void)?
+    var onHighlightTapped: ((String, CGRect?) -> Void)?
+
+    private var selectionTimer: Timer?
+    private var lastSelectionText: String = ""
 
     init(navigator: EPUBNavigatorViewController) {
         self.navigator = navigator
@@ -66,20 +70,43 @@ class EPUBNavigatorContainer: UIViewController {
         navigator.didMove(toParent: self)
     }
 
-    /// Called when the user taps "Highlight" in the text selection menu
-    @objc func highlightSelection() {
-        guard let selection = navigator.currentSelection else { return }
-        let text = selection.locator.text.highlight ?? ""
-        let frame = selection.frame
-        onHighlightRequested?(selection.locator, text, frame)
-        // Don't clear selection yet — cleared when color is picked or toolbar dismissed
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        startSelectionObservation()
     }
 
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        stopSelectionObservation()
+    }
+
+    /// Suppress the default edit menu so our floating toolbar is the only UI
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(highlightSelection) {
-            return navigator.currentSelection != nil
+        return false
+    }
+
+    // MARK: - Selection Observation
+
+    private func startSelectionObservation() {
+        selectionTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            self?.checkSelection()
         }
-        return super.canPerformAction(action, withSender: sender)
+    }
+
+    private func stopSelectionObservation() {
+        selectionTimer?.invalidate()
+        selectionTimer = nil
+    }
+
+    private func checkSelection() {
+        guard let selection = navigator.currentSelection else {
+            lastSelectionText = ""
+            return
+        }
+        let text = selection.locator.text.highlight ?? ""
+        guard !text.isEmpty, text != lastSelectionText else { return }
+        lastSelectionText = text
+        onHighlightRequested?(selection.locator, text, selection.frame)
     }
 
     /// Apply highlight decorations to the navigator
@@ -93,6 +120,14 @@ class EPUBNavigatorContainer: UIViewController {
             )
         }
         navigator.apply(decorations: decorations, in: "user-highlights")
+    }
+
+    /// Observe taps on existing highlight decorations
+    func observeHighlightTaps() {
+        navigator.observeDecorationInteractions(inGroup: "user-highlights") { [weak self] event in
+            let highlightId = event.decoration.id
+            self?.onHighlightTapped?(highlightId, event.rect)
+        }
     }
 
     static func serializeLocator(_ locator: Locator) -> String? {
@@ -147,6 +182,13 @@ struct EPUBReaderView: View {
     @State private var selectionFrame: CGRect?
     @State private var pendingHighlightLocator: Locator?
     @State private var pendingHighlightText: String = ""
+
+    // Note input state
+    @State private var showingNoteInput = false
+    @State private var noteInputText = ""
+    @State private var noteInputColor = "#ffff00"
+    @State private var editingHighlight: BookHighlight?
+    @State private var tappedHighlight: BookHighlight?
 
     enum ReaderState {
         case loading
@@ -215,6 +257,19 @@ struct EPUBReaderView: View {
                                     },
                                     onCustomColor: {
                                         showingCustomColorPicker = true
+                                    },
+                                    onAddNote: {
+                                        showingFloatingToolbar = false
+                                        noteInputText = ""
+                                        noteInputColor = "#ffff00"
+                                        showingNoteInput = true
+                                    },
+                                    onCopy: {
+                                        UIPasteboard.general.string = pendingHighlightText
+                                        container.navigator.clearSelection()
+                                        pendingHighlightLocator = nil
+                                        pendingHighlightText = ""
+                                        showingFloatingToolbar = false
                                     },
                                     onDismiss: {
                                         container.navigator.clearSelection()
@@ -298,6 +353,10 @@ struct EPUBReaderView: View {
                     modelContext.delete(highlight)
                     try? modelContext.save()
                     fetchHighlights()
+                },
+                onEditNote: { highlight in
+                    showingHighlights = false
+                    editingHighlight = highlight
                 }
             )
         }
@@ -357,6 +416,55 @@ struct EPUBReaderView: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(isPresented: $showingNoteInput) {
+            HighlightNoteEditor(
+                highlightText: pendingHighlightText,
+                note: $noteInputText,
+                selectedColor: $noteInputColor,
+                onSave: {
+                    saveHighlight(color: noteInputColor, note: noteInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteInputText.trimmingCharacters(in: .whitespacesAndNewlines))
+                    container?.navigator.clearSelection()
+                    showingNoteInput = false
+                },
+                onCancel: {
+                    container?.navigator.clearSelection()
+                    pendingHighlightLocator = nil
+                    pendingHighlightText = ""
+                    showingNoteInput = false
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $editingHighlight) { highlight in
+            EditNoteSheet(highlight: highlight) {
+                try? modelContext.save()
+                fetchHighlights()
+            }
+        }
+        .sheet(item: $tappedHighlight) { highlight in
+            HighlightEditSheet(
+                highlight: highlight,
+                onChangeColor: { color in
+                    highlight.color = color
+                    try? modelContext.save()
+                    fetchHighlights()
+                },
+                onSaveNote: { note in
+                    highlight.note = note
+                    try? modelContext.save()
+                    fetchHighlights()
+                },
+                onCopy: {
+                    UIPasteboard.general.string = highlight.text
+                },
+                onDelete: {
+                    modelContext.delete(highlight)
+                    try? modelContext.save()
+                    fetchHighlights()
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
     }
 
     private func loadEPUB() async {
@@ -415,12 +523,10 @@ struct EPUBReaderView: View {
                 initialLocator = await pub.locate(progression: totalProgression)
             }
 
-            // Configure navigator with reader preferences and "Highlight" editing action
+            // Configure navigator with reader preferences (no edit menu — floating toolbar handles highlighting)
             let config = EPUBNavigatorViewController.Configuration(
                 preferences: readerSettings.epubPreferences(),
-                editingActions: EditingAction.defaultActions + [
-                    EditingAction(title: "Highlight", action: #selector(EPUBNavigatorContainer.highlightSelection))
-                ]
+                editingActions: []
             )
 
             let nav = try EPUBNavigatorViewController(
@@ -449,6 +555,12 @@ struct EPUBReaderView: View {
                 self.selectionFrame = frame
                 self.showingFloatingToolbar = true
             }
+            cont.onHighlightTapped = { highlightId, _ in
+                if let highlight = self.highlights.first(where: { $0.id == highlightId }) {
+                    self.tappedHighlight = highlight
+                }
+            }
+            cont.observeHighlightTaps()
             self.container = cont
 
             // Load existing highlights
@@ -497,7 +609,7 @@ struct EPUBReaderView: View {
         highlights = (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    private func saveHighlight(color: String) {
+    private func saveHighlight(color: String, note: String? = nil) {
         guard let locator = pendingHighlightLocator else { return }
         guard let locatorJSON = EPUBNavigatorContainer.serializeLocator(locator) else { return }
 
@@ -505,6 +617,7 @@ struct EPUBReaderView: View {
             bookId: book.id,
             locatorJSON: locatorJSON,
             text: pendingHighlightText,
+            note: note,
             color: color,
             progression: locator.locations.totalProgression ?? 0,
             chapterTitle: locator.title
@@ -556,6 +669,7 @@ struct EPUBHighlightsView: View {
     let highlights: [BookHighlight]
     let onSelect: (BookHighlight) -> Void
     let onDelete: (BookHighlight) -> Void
+    var onEditNote: ((BookHighlight) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -587,6 +701,18 @@ struct EPUBHighlightsView: View {
                                             .lineLimit(3)
                                             .foregroundStyle(.primary)
 
+                                        // Note display
+                                        if let note = highlight.note, !note.isEmpty {
+                                            Text(note)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        } else if onEditNote != nil {
+                                            Text("Add note...")
+                                                .font(.caption)
+                                                .foregroundStyle(.tertiary)
+                                        }
+
                                         HStack {
                                             if let chapter = highlight.chapterTitle {
                                                 Text(chapter)
@@ -605,6 +731,16 @@ struct EPUBHighlightsView: View {
                                 }
                                 .padding(.vertical, 4)
                             }
+                            .swipeActions(edge: .leading) {
+                                if onEditNote != nil {
+                                    Button {
+                                        onEditNote?(highlight)
+                                    } label: {
+                                        Label("Note", systemImage: "note.text")
+                                    }
+                                    .tint(.blue)
+                                }
+                            }
                         }
                         .onDelete { indexSet in
                             for index in indexSet {
@@ -621,6 +757,35 @@ struct EPUBHighlightsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Edit Note Sheet (shared between EPUB and PDF readers)
+
+struct EditNoteSheet: View {
+    let highlight: BookHighlight
+    let onSave: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var noteText: String = ""
+
+    var body: some View {
+        HighlightNoteEditor(
+            highlightText: highlight.text,
+            note: $noteText,
+            onSave: {
+                highlight.note = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+                onSave()
+                dismiss()
+            },
+            onCancel: {
+                dismiss()
+            }
+        )
+        .presentationDetents([.medium, .large])
+        .onAppear {
+            noteText = highlight.note ?? ""
         }
     }
 }

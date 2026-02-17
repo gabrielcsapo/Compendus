@@ -36,6 +36,14 @@ struct PDFReaderView: View {
     @State private var showingHighlights = false
     @State private var pdfViewReference: PDFView?
 
+    // Note input state
+    @State private var showingNoteInput = false
+    @State private var noteInputText = ""
+    @State private var noteInputColor = "#ffff00"
+    @State private var pendingHighlightText = ""
+    @State private var editingHighlight: BookHighlight?
+    @State private var tappedHighlight: BookHighlight?
+
     var body: some View {
         Group {
             if let error = errorMessage {
@@ -62,6 +70,11 @@ struct PDFReaderView: View {
                             },
                             onPDFViewCreated: { pdfView in
                                 pdfViewReference = pdfView
+                            },
+                            onAnnotationTapped: { highlightId in
+                                if let highlight = highlights.first(where: { $0.id == highlightId }) {
+                                    tappedHighlight = highlight
+                                }
                             }
                         )
                         .ignoresSafeArea(edges: .bottom)
@@ -102,6 +115,21 @@ struct PDFReaderView: View {
                                 },
                                 onCustomColor: {
                                     showingCustomColorPicker = true
+                                },
+                                onAddNote: {
+                                    // Capture selected text before dismissing toolbar
+                                    pendingHighlightText = pdfViewReference?.currentSelection?.string ?? ""
+                                    showingFloatingToolbar = false
+                                    noteInputText = ""
+                                    noteInputColor = "#ffff00"
+                                    showingNoteInput = true
+                                },
+                                onCopy: {
+                                    let text = pdfViewReference?.currentSelection?.string ?? ""
+                                    UIPasteboard.general.string = text
+                                    pdfViewReference?.clearSelection()
+                                    hasTextSelection = false
+                                    showingFloatingToolbar = false
                                 },
                                 onDismiss: {
                                     pdfViewReference?.clearSelection()
@@ -217,8 +245,63 @@ struct PDFReaderView: View {
                 },
                 onDelete: { highlight in
                     deleteHighlight(highlight)
+                },
+                onEditNote: { highlight in
+                    showingHighlights = false
+                    editingHighlight = highlight
                 }
             )
+        }
+        .sheet(isPresented: $showingNoteInput) {
+            HighlightNoteEditor(
+                highlightText: pendingHighlightText,
+                note: $noteInputText,
+                selectedColor: $noteInputColor,
+                onSave: {
+                    let trimmedNote = noteInputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    saveHighlight(color: noteInputColor, note: trimmedNote.isEmpty ? nil : trimmedNote)
+                    showingNoteInput = false
+                },
+                onCancel: {
+                    pdfViewReference?.clearSelection()
+                    hasTextSelection = false
+                    pendingHighlightText = ""
+                    showingNoteInput = false
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $editingHighlight) { highlight in
+            EditNoteSheet(highlight: highlight) {
+                try? modelContext.save()
+                fetchHighlights()
+            }
+        }
+        .sheet(item: $tappedHighlight) { highlight in
+            HighlightEditSheet(
+                highlight: highlight,
+                onChangeColor: { color in
+                    highlight.color = color
+                    // Update PDF annotations with new color
+                    if let document = pdfDocument {
+                        updateAnnotationColor(for: highlight, in: document, color: color)
+                    }
+                    try? modelContext.save()
+                    fetchHighlights()
+                },
+                onSaveNote: { note in
+                    highlight.note = note
+                    try? modelContext.save()
+                    fetchHighlights()
+                },
+                onCopy: {
+                    UIPasteboard.general.string = highlight.text
+                },
+                onDelete: {
+                    deleteHighlight(highlight)
+                }
+            )
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -340,7 +423,7 @@ struct PDFReaderView: View {
         highlights = (try? modelContext.fetch(descriptor)) ?? []
     }
 
-    private func saveHighlight(color: String) {
+    private func saveHighlight(color: String, note: String? = nil) {
         guard let pdfView = pdfViewReference,
               let selection = pdfView.currentSelection else { return }
 
@@ -366,9 +449,16 @@ struct PDFReaderView: View {
                     "height": bounds.size.height,
                 ])
 
-                // Create and add the visual annotation
-                let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
-                annotation.color = (UIColor(hex: color) ?? .yellow).withAlphaComponent(0.4)
+                // Create a thin colored bar above the text line
+                let barHeight: CGFloat = 4
+                let barBounds = CGRect(
+                    x: bounds.origin.x,
+                    y: bounds.maxY,
+                    width: bounds.size.width,
+                    height: barHeight
+                )
+                let annotation = PDFAnnotation(bounds: barBounds, forType: .highlight, withProperties: nil)
+                annotation.color = (UIColor(hex: color) ?? .yellow).withAlphaComponent(0.7)
                 page.addAnnotation(annotation)
             }
         }
@@ -395,6 +485,7 @@ struct PDFReaderView: View {
             bookId: book.id,
             locatorJSON: locatorJSON,
             text: text,
+            note: note,
             color: color,
             progression: totalPages > 0 ? Double(primaryPageIndex) / Double(totalPages) : 0,
             chapterTitle: "Page \(primaryPageIndex + 1)"
@@ -423,9 +514,11 @@ struct PDFReaderView: View {
                       let height = annotationInfo["height"] as? Double,
                       let page = document.page(at: pageIndex) else { continue }
 
-                let bounds = CGRect(x: x, y: y, width: width, height: height)
-                let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
-                annotation.color = highlight.uiColor.withAlphaComponent(0.4)
+                // Create a thin colored bar above the text line
+                let barHeight: CGFloat = 4
+                let barBounds = CGRect(x: x, y: y + height, width: width, height: barHeight)
+                let annotation = PDFAnnotation(bounds: barBounds, forType: .highlight, withProperties: nil)
+                annotation.color = highlight.uiColor.withAlphaComponent(0.7)
                 annotation.setValue(highlight.id, forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId"))
                 page.addAnnotation(annotation)
             }
@@ -458,6 +551,27 @@ struct PDFReaderView: View {
         fetchHighlights()
     }
 
+    private func updateAnnotationColor(for highlight: BookHighlight, in document: PDFDocument, color: String) {
+        guard let data = highlight.locatorJSON.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let annotations = json["annotations"] as? [[String: Any]] else { return }
+
+        let newColor = (UIColor(hex: color) ?? .yellow).withAlphaComponent(0.7)
+
+        for annotationInfo in annotations {
+            guard let pageIndex = annotationInfo["pageIndex"] as? Int,
+                  let page = document.page(at: pageIndex) else { continue }
+
+            for annotation in page.annotations {
+                if annotation.type == "Highlight",
+                   let storedId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? String,
+                   storedId == highlight.id {
+                    annotation.color = newColor
+                }
+            }
+        }
+    }
+
     private func navigateToHighlight(_ highlight: BookHighlight) {
         guard let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -477,6 +591,7 @@ struct PDFKitView: UIViewRepresentable {
     var backgroundColor: UIColor = .systemBackground
     var onSelectionChanged: ((Bool, CGRect?) -> Void)?
     var onPDFViewCreated: ((PDFView) -> Void)?
+    var onAnnotationTapped: ((String) -> Void)?
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
@@ -508,6 +623,14 @@ struct PDFKitView: UIViewRepresentable {
             object: pdfView
         )
 
+        // Add tap gesture to detect taps on highlight annotations
+        let tapGesture = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleAnnotationTap(_:))
+        )
+        tapGesture.delegate = context.coordinator
+        pdfView.addGestureRecognizer(tapGesture)
+
         context.coordinator.pdfView = pdfView
         onPDFViewCreated?(pdfView)
 
@@ -531,12 +654,36 @@ struct PDFKitView: UIViewRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: PDFKitView
         weak var pdfView: PDFView?
 
         init(_ parent: PDFKitView) {
             self.parent = parent
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        @objc func handleAnnotationTap(_ gesture: UITapGestureRecognizer) {
+            guard let pdfView = pdfView else { return }
+            let location = gesture.location(in: pdfView)
+
+            guard let page = pdfView.page(for: location, nearest: false) else { return }
+            let pagePoint = pdfView.convert(location, to: page)
+
+            for annotation in page.annotations where annotation.type == "Highlight" {
+                // Expand hit area since the bar annotation is thin
+                let hitBounds = annotation.bounds.insetBy(dx: 0, dy: -8)
+                if hitBounds.contains(pagePoint),
+                   let highlightId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? String {
+                    DispatchQueue.main.async {
+                        self.parent.onAnnotationTapped?(highlightId)
+                    }
+                    return
+                }
+            }
         }
 
         @objc func pageChanged(_ notification: Notification) {
@@ -581,6 +728,7 @@ struct PDFHighlightsView: View {
     let highlights: [BookHighlight]
     let onSelect: (BookHighlight) -> Void
     let onDelete: (BookHighlight) -> Void
+    var onEditNote: ((BookHighlight) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -611,6 +759,18 @@ struct PDFHighlightsView: View {
                                             .lineLimit(3)
                                             .foregroundStyle(.primary)
 
+                                        // Note display
+                                        if let note = highlight.note, !note.isEmpty {
+                                            Text(note)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        } else if onEditNote != nil {
+                                            Text("Add note...")
+                                                .font(.caption)
+                                                .foregroundStyle(.tertiary)
+                                        }
+
                                         HStack {
                                             if let chapter = highlight.chapterTitle {
                                                 Text(chapter)
@@ -628,6 +788,16 @@ struct PDFHighlightsView: View {
                                     }
                                 }
                                 .padding(.vertical, 4)
+                            }
+                            .swipeActions(edge: .leading) {
+                                if onEditNote != nil {
+                                    Button {
+                                        onEditNote?(highlight)
+                                    } label: {
+                                        Label("Note", systemImage: "note.text")
+                                    }
+                                    .tint(.blue)
+                                }
                             }
                         }
                         .onDelete { indexSet in

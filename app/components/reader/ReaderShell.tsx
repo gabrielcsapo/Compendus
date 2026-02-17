@@ -197,6 +197,7 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: Re
           onBookmarkDelete={reader.removeBookmark}
           onHighlightSelect={handleHighlightSelect}
           onHighlightDelete={reader.removeHighlight}
+          onHighlightUpdateNote={reader.updateHighlightNote}
           theme={theme}
         />
 
@@ -214,6 +215,8 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: Re
             highlights={reader.highlights}
             onAddHighlight={reader.addHighlight}
             onRemoveHighlight={reader.removeHighlight}
+            onUpdateHighlightColor={reader.updateHighlightColor}
+            onUpdateHighlightNote={reader.updateHighlightNote}
           />
         </div>
 

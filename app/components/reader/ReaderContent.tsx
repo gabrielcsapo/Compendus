@@ -5,7 +5,7 @@ import type { PageContent, ReaderHighlight } from "@/lib/reader/types";
 import type { ReaderSettings } from "@/lib/reader/settings";
 import { THEMES, FONTS } from "@/lib/reader/settings";
 import type { AudioChapter } from "@/lib/types";
-import { HighlightToolbar } from "./HighlightToolbar";
+import { HighlightToolbar, HighlightEditToolbar } from "./HighlightToolbar";
 import {
   selectionToPositions,
   applyHighlightsToDOM,
@@ -32,6 +32,8 @@ interface ReaderContentProps {
     color?: string,
   ) => void;
   onRemoveHighlight?: (highlightId: string) => void;
+  onUpdateHighlightColor?: (highlightId: string, color: string) => void;
+  onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
 }
 
 /**
@@ -48,6 +50,9 @@ export function ReaderContent({
   audioDuration,
   highlights,
   onAddHighlight,
+  onRemoveHighlight,
+  onUpdateHighlightColor,
+  onUpdateHighlightNote,
 }: ReaderContentProps) {
   if (!content) {
     return (
@@ -69,6 +74,9 @@ export function ReaderContent({
           onNextPage={onNextPage}
           highlights={highlights}
           onAddHighlight={onAddHighlight}
+          onRemoveHighlight={onRemoveHighlight}
+          onUpdateHighlightColor={onUpdateHighlightColor}
+          onUpdateHighlightNote={onUpdateHighlightNote}
           theme={theme}
         />
       );
@@ -108,6 +116,9 @@ function TextContent({
   onNextPage,
   highlights,
   onAddHighlight,
+  onRemoveHighlight,
+  onUpdateHighlightColor,
+  onUpdateHighlightNote,
   theme,
 }: {
   content: PageContent;
@@ -122,6 +133,9 @@ function TextContent({
     note?: string,
     color?: string,
   ) => void;
+  onRemoveHighlight?: (highlightId: string) => void;
+  onUpdateHighlightColor?: (highlightId: string, color: string) => void;
+  onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
   theme: { background: string; foreground: string; muted: string; accent: string; selection: string };
 }) {
   const font = FONTS[settings.fontFamily];
@@ -137,6 +151,20 @@ function TextContent({
     startPosition: number;
     endPosition: number;
     text: string;
+  } | null>(null);
+
+  // Edit toolbar state for existing highlights
+  const [showEditToolbar, setShowEditToolbar] = useState(false);
+  const [editToolbarPosition, setEditToolbarPosition] = useState<{ x: number; y: number; above: boolean }>({
+    x: 0,
+    y: 0,
+    above: true,
+  });
+  const [editingHighlight, setEditingHighlight] = useState<{
+    id: string;
+    text: string;
+    note?: string;
+    color: string;
   } | null>(null);
 
   // Handle keyboard navigation
@@ -198,6 +226,48 @@ function TextContent({
     };
   }, [content.position, content.endPosition]);
 
+  // Detect clicks on existing highlights
+  useEffect(() => {
+    const handleHighlightClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const highlightMark = target.closest("[data-highlight-id]") as HTMLElement | null;
+      if (!highlightMark || !contentRef.current) return;
+
+      const highlightId = highlightMark.getAttribute("data-highlight-id");
+      if (!highlightId) return;
+
+      const highlight = highlights?.find((h) => h.id === highlightId);
+      if (!highlight) return;
+
+      // Don't show edit toolbar if user is selecting text
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) return;
+
+      e.stopPropagation();
+
+      const markRect = highlightMark.getBoundingClientRect();
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (containerRect) {
+        setEditToolbarPosition(calculateToolbarPosition(markRect, containerRect));
+      }
+
+      setEditingHighlight({
+        id: highlight.id,
+        text: highlight.text,
+        note: highlight.note,
+        color: highlight.color,
+      });
+      setShowEditToolbar(true);
+      setShowToolbar(false);
+    };
+
+    const el = contentRef.current;
+    if (el) {
+      el.addEventListener("click", handleHighlightClick);
+      return () => el.removeEventListener("click", handleHighlightClick);
+    }
+  }, [highlights]);
+
   // Apply saved highlights to DOM after content renders
   useEffect(() => {
     if (!contentRef.current || !highlights?.length) return;
@@ -245,13 +315,13 @@ function TextContent({
 
   // Handle highlight save
   const handleHighlight = useCallback(
-    (color: string) => {
+    (color: string, note?: string) => {
       if (currentSelection && onAddHighlight) {
         onAddHighlight(
           currentSelection.startPosition,
           currentSelection.endPosition,
           currentSelection.text,
-          undefined,
+          note,
           color,
         );
       }
@@ -306,14 +376,42 @@ function TextContent({
         dangerouslySetInnerHTML={{ __html: content.html || "" }}
       />
 
-      {/* Floating highlight toolbar */}
-      {showToolbar && (
+      {/* Floating highlight toolbar (new selection) */}
+      {showToolbar && currentSelection && (
         <HighlightToolbar
           position={toolbarPosition}
+          selectedText={currentSelection.text}
           onHighlight={handleHighlight}
           onDismiss={() => {
             setShowToolbar(false);
             window.getSelection()?.removeAllRanges();
+          }}
+          theme={theme}
+        />
+      )}
+
+      {/* Edit toolbar (existing highlight) */}
+      {showEditToolbar && editingHighlight && (
+        <HighlightEditToolbar
+          position={editToolbarPosition}
+          highlight={editingHighlight}
+          onChangeColor={(highlightId, color) => {
+            onUpdateHighlightColor?.(highlightId, color);
+            setEditingHighlight((prev) => prev ? { ...prev, color } : null);
+          }}
+          onSaveNote={(highlightId, note) => {
+            onUpdateHighlightNote?.(highlightId, note);
+            setEditingHighlight((prev) => prev ? { ...prev, note: note ?? undefined } : null);
+          }}
+          onCopy={(text) => {
+            navigator.clipboard.writeText(text);
+          }}
+          onDelete={(highlightId) => {
+            onRemoveHighlight?.(highlightId);
+          }}
+          onDismiss={() => {
+            setShowEditToolbar(false);
+            setEditingHighlight(null);
           }}
           theme={theme}
         />

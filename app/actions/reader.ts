@@ -119,6 +119,26 @@ export async function deleteHighlight(highlightId: string): Promise<void> {
   await db.delete(highlights).where(eq(highlights.id, highlightId));
 }
 
+export async function updateHighlightNote(
+  highlightId: string,
+  note: string | null,
+): Promise<void> {
+  await db
+    .update(highlights)
+    .set({ note: note || null })
+    .where(eq(highlights.id, highlightId));
+}
+
+export async function updateHighlightColor(
+  highlightId: string,
+  color: string,
+): Promise<void> {
+  await db
+    .update(highlights)
+    .set({ color })
+    .where(eq(highlights.id, highlightId));
+}
+
 export async function getAllHighlights(): Promise<
   {
     id: string;
