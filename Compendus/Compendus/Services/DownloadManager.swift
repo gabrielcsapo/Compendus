@@ -157,6 +157,51 @@ class DownloadManager: NSObject {
         return downloadedBook
     }
 
+    /// Download the converted EPUB version for a PDF book
+    @MainActor
+    func downloadEpubVersion(bookId: String, modelContext: ModelContext) async throws {
+        let descriptor = FetchDescriptor<DownloadedBook>(
+            predicate: #Predicate { $0.id == bookId }
+        )
+        guard let downloadedBook = try? modelContext.fetch(descriptor).first else {
+            throw APIError.invalidURL
+        }
+
+        guard let downloadURL = config.bookAsEpubURL(for: bookId) else {
+            throw APIError.invalidURL
+        }
+
+        let progressId = "\(bookId)-epub"
+        let progress = DownloadProgress(
+            id: progressId,
+            progress: 0,
+            bytesReceived: 0,
+            totalBytes: 0,
+            state: .waiting
+        )
+        activeDownloads[progressId] = progress
+
+        let localURL = try await downloadFile(from: downloadURL, bookId: progressId)
+
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
+        try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+
+        let fileName = "\(bookId).epub"
+        let destinationURL = booksDir.appendingPathComponent(fileName)
+
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+
+        try FileManager.default.moveItem(at: localURL, to: destinationURL)
+
+        downloadedBook.epubLocalPath = "books/\(fileName)"
+        try modelContext.save()
+
+        activeDownloads.removeValue(forKey: progressId)
+    }
+
     /// Cancel a download in progress
     func cancelDownload(bookId: String) {
         downloadTasks[bookId]?.cancel()

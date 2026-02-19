@@ -220,14 +220,15 @@ export async function saveReadingProgress(
 export async function getReaderInfo(
   bookId: string,
   viewport: ViewportConfig,
+  formatOverride?: string,
 ): Promise<ReaderInfoResponse | null> {
   // Get book from database
   const book = await db.select().from(books).where(eq(books.id, bookId)).get();
   if (!book) return null;
 
   // Get normalized content
-  console.log(`[getReaderInfo] Getting content for book ${bookId} (format: ${book.format})`);
-  const content = await getContent(bookId);
+  console.log(`[getReaderInfo] Getting content for book ${bookId} (format: ${book.format}${formatOverride ? `, override: ${formatOverride}` : ''})`);
+  const content = await getContent(bookId, formatOverride);
   if (!content) {
     console.log(`[getReaderInfo] No content returned for book ${bookId}`);
     return null;
@@ -283,9 +284,10 @@ export async function getReaderPage(
   bookId: string,
   pageNum: number,
   viewport: ViewportConfig,
+  formatOverride?: string,
 ): Promise<ReaderPageResponse | null> {
   // Get normalized content
-  const content = await getContent(bookId);
+  const content = await getContent(bookId, formatOverride);
   if (!content) return null;
 
   const totalPages = paginationEngine.calculateTotalPages(content, viewport);
@@ -305,9 +307,10 @@ export async function getReaderPageForPosition(
   bookId: string,
   position: number,
   viewport: ViewportConfig,
+  formatOverride?: string,
 ): Promise<{ pageNum: number; content: PageContent; position: number } | null> {
   // Get normalized content
-  const content = await getContent(bookId);
+  const content = await getContent(bookId, formatOverride);
   if (!content) return null;
 
   const pageNum = paginationEngine.getPageForPosition(content, position, viewport);

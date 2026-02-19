@@ -19,182 +19,51 @@ struct DownloadedBookDetailView: View {
 
     @State private var bookToRead: DownloadedBook?
     @State private var showingDeleteConfirmation = false
+    @State private var isDescriptionExpanded = false
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Cover and basic info
-                HStack(alignment: .top, spacing: 16) {
-                    // Cover
-                    if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 120, height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .shadow(radius: 4)
-                    } else {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(width: 120, height: 180)
-                            .overlay {
-                                Image(systemName: "book.closed")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(.secondary)
-                            }
-                    }
+            VStack(spacing: 0) {
+                heroCoverSection
 
-                    // Info
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(book.title)
-                            .font(.title2)
-                            .fontWeight(.bold)
+                titleBlock
+                    .padding(.top, 16)
 
-                        if let subtitle = book.subtitle {
-                            Text(subtitle)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
+                metadataRow
+                    .padding(.top, 12)
 
-                        Text(book.authorsDisplay)
-                            .font(.subheadline)
+                actionSection
+                    .padding(.top, 20)
+                    .padding(.horizontal, 20)
 
-                        Spacer()
-
-                        HStack(spacing: 8) {
-                            formatBadge
-
-                            Text(book.fileSizeDisplay)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if book.isAudiobook {
-                            if let duration = book.durationDisplay {
-                                Label(duration, systemImage: "clock")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let narrator = book.narrator {
-                                Label(narrator, systemImage: "person.wave.2")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else if let pageCount = book.pageCount {
-                            Label("\(pageCount) pages", systemImage: "doc.text")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal)
-
-                // Read button
-                Button {
-                    bookToRead = book
-                } label: {
-                    Label("Read Now", systemImage: "book.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.green)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .padding(.horizontal)
-
-                // Reading progress
-                if book.readingProgress > 0 {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Reading Progress")
-                            .font(.headline)
-
-                        ProgressView(value: book.readingProgress)
-                            .tint(.blue)
-
-                        Text("\(Int(book.readingProgress * 100))% complete")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if let lastRead = book.lastReadAt {
-                            Text("Last read: \(lastRead.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-                }
-
-                // Description
                 if let description = book.bookDescription, !description.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Description")
-                            .font(.headline)
-
-                        Text(description)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
+                    descriptionSection(description)
+                        .padding(.top, 24)
+                        .padding(.horizontal, 20)
                 }
 
-                // Details section
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Details")
-                        .font(.headline)
+                detailsCardSection
+                    .padding(.top, 24)
+                    .padding(.horizontal, 20)
 
-                    detailsGrid
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-
-                // Downloaded info
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Download Info")
-                        .font(.headline)
-
-                    HStack {
-                        Text("Downloaded")
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text(book.downloadedAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    .font(.subheadline)
-
-                    if let fileURL = book.fileURL {
-                        HStack {
-                            Text("File")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(fileURL.lastPathComponent)
-                                .lineLimit(1)
-                        }
-                        .font(.subheadline)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-
-                // Delete button
+                downloadInfoSection
+                    .padding(.top, 24)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
                 Button(role: .destructive) {
                     showingDeleteConfirmation = true
                 } label: {
-                    Label("Delete Download", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.1))
-                        .foregroundStyle(.red)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    Image(systemName: "trash")
                 }
-                .padding(.horizontal)
-                .padding(.bottom)
             }
-            .padding(.vertical)
         }
-        .navigationTitle("Book Details")
-        .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             "Delete Book?",
             isPresented: $showingDeleteConfirmation,
@@ -214,6 +83,267 @@ struct DownloadedBookDetailView: View {
                 .modelContext(modelContext)
         }
     }
+
+    // MARK: - Hero Cover
+
+    @ViewBuilder
+    private var heroCoverSection: some View {
+        VStack {
+            if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 200)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.gray.opacity(0.2))
+                    .aspectRatio(2/3, contentMode: .fit)
+                    .frame(width: 200)
+                    .overlay {
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                    }
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .background {
+            heroCoverBackground
+                .ignoresSafeArea(edges: .top)
+        }
+    }
+
+    @ViewBuilder
+    private var heroCoverBackground: some View {
+        if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .blur(radius: 40)
+                .overlay(Color(.systemBackground).opacity(0.6))
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.6),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .clipped()
+        } else {
+            LinearGradient(
+                colors: [Color(.systemGray5), Color(.systemBackground)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    // MARK: - Title Block
+
+    @ViewBuilder
+    private var titleBlock: some View {
+        VStack(spacing: 4) {
+            Text(book.title)
+                .font(.title2)
+                .fontWeight(.bold)
+                .multilineTextAlignment(.center)
+
+            if let subtitle = book.subtitle {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Text(book.authorsDisplay)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Metadata Row
+
+    @ViewBuilder
+    private var metadataRow: some View {
+        HStack(spacing: 12) {
+            formatBadge
+
+            if book.isAudiobook {
+                if let duration = book.durationDisplay {
+                    metadataLabel(icon: "clock", text: duration)
+                }
+                if let narrator = book.narrator {
+                    metadataLabel(icon: "person.wave.2", text: narrator)
+                }
+            } else if let pageCount = book.pageCount {
+                metadataLabel(icon: "doc.text", text: "\(pageCount) pages")
+            }
+
+            metadataLabel(icon: nil, text: book.fileSizeDisplay)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    @ViewBuilder
+    private func metadataLabel(icon: String?, text: String) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.caption2)
+            }
+            Text(text)
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Action Section
+
+    @ViewBuilder
+    private var actionSection: some View {
+        VStack(spacing: 10) {
+            Button {
+                bookToRead = book
+            } label: {
+                Label(readButtonTitle, systemImage: readButtonIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            if book.readingProgress > 0 && book.readingProgress < 1.0 {
+                VStack(spacing: 4) {
+                    ProgressView(value: book.readingProgress)
+                        .tint(.accentColor)
+
+                    HStack {
+                        if let pageCount = book.pageCount, pageCount > 0 {
+                            let currentPage = Int(book.readingProgress * Double(pageCount))
+                            Text("Page \(currentPage) of \(pageCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+
+                            Text("\(pageCount - currentPage) pages left")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("\(Int(book.readingProgress * 100))% complete")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if let lastRead = book.lastReadAt {
+                            Text("Last read \(lastRead.formatted(.relative(presentation: .named)))")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var readButtonTitle: String {
+        if book.readingProgress >= 1.0 {
+            return "Read Again"
+        } else if book.readingProgress > 0 {
+            return "Continue Reading"
+        } else {
+            return "Read"
+        }
+    }
+
+    private var readButtonIcon: String {
+        if book.readingProgress >= 1.0 {
+            return "arrow.counterclockwise"
+        } else {
+            return "book.fill"
+        }
+    }
+
+    // MARK: - Description
+
+    @ViewBuilder
+    private func descriptionSection(_ description: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(description)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(isDescriptionExpanded ? nil : 3)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isDescriptionExpanded.toggle()
+                }
+            } label: {
+                Text(isDescriptionExpanded ? "Less" : "More")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Details Card
+
+    @ViewBuilder
+    private var detailsCardSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Details")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                detailsGrid
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.separator, lineWidth: 0.5)
+                    }
+            }
+        }
+    }
+
+    // MARK: - Download Info
+
+    @ViewBuilder
+    private var downloadInfoSection: some View {
+        HStack {
+            Label(
+                "Downloaded \(book.downloadedAt.formatted(date: .abbreviated, time: .omitted))",
+                systemImage: "arrow.down.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+
+            Spacer()
+
+            Text(book.fileSizeDisplay)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - Components
 
     @ViewBuilder
     private var formatBadge: some View {

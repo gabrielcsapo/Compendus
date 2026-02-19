@@ -113,7 +113,7 @@ struct AnimatedDownloadButton: View {
             Text("\(Int(progress * 100))%")
                 .monospacedDigit()
         case .completed:
-            Text("Read Now")
+            Text("Read")
         case .failed:
             Text("Retry")
         }
@@ -126,7 +126,7 @@ struct AnimatedDownloadButton: View {
         case .downloading:
             return .gray
         case .completed:
-            return .green
+            return .accentColor
         case .failed:
             return .red
         }

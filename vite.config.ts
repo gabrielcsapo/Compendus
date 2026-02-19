@@ -20,7 +20,8 @@ const proxyConfig = {
     bypass(req: { url?: string }) {
       const url = req.url || "";
       const match = url.match(/^\/book\/[a-f0-9-]+\/(.+)$/);
-      if (match && match[1] !== "read") {
+      const pathPart = match?.[1]?.split("?")[0];
+      if (match && pathPart && !/^read(\..+)?$/.test(pathPart)) {
         return undefined; // proxy to Hono
       }
       return url; // bypass proxy, let Vite/React Router handle

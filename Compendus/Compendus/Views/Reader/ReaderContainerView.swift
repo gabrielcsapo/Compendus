@@ -2,54 +2,48 @@
 //  ReaderContainerView.swift
 //  Compendus
 //
-//  Container that routes to the appropriate reader based on book format
+//  Container that routes to the appropriate reader based on book format.
+//  ReaderShell provides shared chrome (dismiss button, onDisappear lifecycle)
+//  for all reader types.
 //
 
 import SwiftUI
 import SwiftData
 import WidgetKit
 
-struct ReaderContainerView: View {
+// MARK: - Reader Shell
+
+struct ReaderShell<Content: View>: View {
     let book: DownloadedBook
+    let showsDismissButton: Bool
+    @ViewBuilder let content: () -> Content
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch book.format.lowercased() {
-                case "pdf":
-                    PDFReaderView(book: book)
-                case "epub":
-                    EPUBReaderView(book: book)
-                case "mobi", "azw", "azw3":
-                    // MOBI should be converted to EPUB on server
-                    // For now, show placeholder
-                    UnsupportedFormatView(format: book.format, message: "MOBI support requires server-side conversion")
-                case "cbr", "cbz":
-                    ComicReaderView(book: book)
-                case "m4b", "mp3", "m4a":
-                    AudiobookPlayerView(book: book)
-                default:
-                    UnsupportedFormatView(format: book.format, message: "This format is not supported")
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .onDisappear {
-                // Save reading progress
-                book.lastReadAt = Date()
-                try? modelContext.save()
+        ZStack(alignment: .topLeading) {
+            content()
 
-                // Update widget data
-                updateWidgetData()
+            if showsDismissButton {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .padding(.leading, 16)
+                .padding(.top, 12)
             }
+        }
+        .onDisappear {
+            book.lastReadAt = Date()
+            try? modelContext.save()
+            updateWidgetData()
         }
     }
 
@@ -64,9 +58,39 @@ struct ReaderContainerView: View {
             lastReadAt: book.lastReadAt ?? Date()
         )
         WidgetDataManager.shared.saveCurrentBook(widgetBook)
-
-        // Reload widget timeline
         WidgetCenter.shared.reloadAllTimelines()
+    }
+}
+
+// MARK: - Reader Container
+
+struct ReaderContainerView: View {
+    let book: DownloadedBook
+    var preferEpub: Bool = false
+
+    var body: some View {
+        switch book.format.lowercased() {
+        case "pdf", "epub":
+            ReaderShell(book: book, showsDismissButton: false) {
+                UnifiedReaderView(book: book, preferEpub: preferEpub)
+            }
+        case "mobi", "azw", "azw3":
+            ReaderShell(book: book, showsDismissButton: false) {
+                UnsupportedFormatView(format: book.format, message: "MOBI support requires server-side conversion")
+            }
+        case "cbr", "cbz":
+            ReaderShell(book: book, showsDismissButton: false) {
+                ComicReaderView(book: book)
+            }
+        case "m4b", "mp3", "m4a":
+            ReaderShell(book: book, showsDismissButton: true) {
+                AudiobookPlayerView(book: book)
+            }
+        default:
+            ReaderShell(book: book, showsDismissButton: false) {
+                UnsupportedFormatView(format: book.format, message: "This format is not supported")
+            }
+        }
     }
 }
 
@@ -86,8 +110,6 @@ struct UnsupportedFormatView: View {
                 dismiss()
             }
         }
-        .navigationTitle(format.uppercased())
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

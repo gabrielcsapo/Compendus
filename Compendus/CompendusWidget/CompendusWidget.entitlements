@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>com.gabrielcsapo.Compendus.shared</string>
+		<string>group.com.gabrielcsapo.Compendus.shared</string>
 	</array>
 </dict>
 </plist>

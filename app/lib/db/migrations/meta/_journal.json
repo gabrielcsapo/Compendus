@@ -8,6 +8,13 @@
       "when": 1770698715831,
       "tag": "0000_parallel_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1771487478281,
+      "tag": "0001_optimal_shockwave",
+      "breakpoints": true
     }
   ]
 }

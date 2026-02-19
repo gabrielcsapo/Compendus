@@ -85,30 +85,42 @@ struct ReaderSettingsView: View {
 
     // MARK: - Font Section
 
+    private static let previewSentence = "The quick brown fox jumps over the lazy dog."
+
     @ViewBuilder
     private var fontSection: some View {
         @Bindable var settings = readerSettings
 
         Section("Font") {
             ForEach(ReaderFont.allCases) { font in
+                let isSelected = settings.fontFamily == font
                 Button {
                     settings.fontFamily = font
                 } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(font.displayName)
                                 .font(.custom(font.previewFontName, size: 17))
-                            Text(font.description)
-                                .font(.caption)
+
+                            Text(Self.previewSentence)
+                                .font(.custom(font.previewFontName, size: 14))
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+
+                            Text(font.description)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
+
                         Spacer()
-                        if settings.fontFamily == font {
+
+                        if isSelected {
                             Image(systemName: "checkmark")
                                 .foregroundStyle(.blue)
                                 .fontWeight(.semibold)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
                 .foregroundStyle(.primary)
             }
@@ -121,7 +133,7 @@ struct ReaderSettingsView: View {
     private var fontSizeSection: some View {
         @Bindable var settings = readerSettings
 
-        Section("Font Size: \(Int(settings.fontSize * 100))%") {
+        Section("Font Size: \(Int(settings.fontSize))px") {
             HStack(spacing: 12) {
                 Text("Aa")
                     .font(.caption2)
@@ -129,8 +141,8 @@ struct ReaderSettingsView: View {
 
                 Slider(
                     value: $settings.fontSize,
-                    in: 0.5...3.0,
-                    step: 0.1
+                    in: 12...36,
+                    step: 1
                 )
 
                 Text("Aa")
@@ -175,6 +187,7 @@ struct ReaderSettingsView: View {
             Text("Font and text changes are not available for PDF files. PDFs use their own embedded fonts and layout.")
         }
     }
+
 }
 
 #Preview {

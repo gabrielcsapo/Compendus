@@ -59,12 +59,22 @@ app.get("/api/reader/:bookId/resource/*", async (c) => {
       where: eq(books.id, bookId),
     });
 
-    if (!book || book.format !== "epub") {
+    if (!book) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    // Determine the EPUB file path
+    let filePath: string;
+    if (book.format === "epub") {
+      filePath = getBookFilePath(bookId, "epub");
+    } else if (book.convertedEpubPath) {
+      // Non-EPUB book (e.g. PDF) with a converted EPUB version
+      filePath = resolve("data", book.convertedEpubPath);
+    } else {
       return new Response("Not found", { status: 404 });
     }
 
     // Read EPUB file
-    const filePath = getBookFilePath(bookId, "epub");
     const buffer = await readFile(filePath);
 
     // Extract resource from EPUB

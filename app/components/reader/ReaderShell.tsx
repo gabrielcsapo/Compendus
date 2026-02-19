@@ -13,12 +13,13 @@ interface ReaderShellProps {
   bookId: string;
   initialPosition?: number;
   returnUrl?: string;
+  formatOverride?: string;
 }
 
 /**
  * Main reader shell that orchestrates all reader components
  */
-export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: ReaderShellProps) {
+export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", formatOverride }: ReaderShellProps) {
   const navigate = useNavigate();
 
   const handleClose = useCallback(() => {
@@ -38,7 +39,7 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/" }: Re
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleClose]);
 
-  const reader = useReader({ bookId, initialPosition });
+  const reader = useReader({ bookId, initialPosition, formatOverride });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"toc" | "bookmarks" | "highlights" | "search">("toc");
   const [settingsOpen, setSettingsOpen] = useState(false);

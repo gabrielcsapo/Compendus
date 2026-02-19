@@ -11,6 +11,7 @@ import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
 import { DeleteBookButton } from "../components/DeleteBookButton";
 import { AuthorLinks } from "../components/AuthorLink";
+import { ConvertToEpubButton } from "../components/ConvertToEpubButton";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -104,6 +105,11 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
               Download {book.format.toUpperCase()}
             </a>
           </div>
+
+          {/* Convert PDF to EPUB */}
+          {book.format === "pdf" && (
+            <ConvertToEpubButton bookId={book.id} hasEpub={!!book.convertedEpubPath} />
+          )}
 
           {/* Linked formats (same ISBN, different format) */}
           {linkedFormats.length > 0 && (

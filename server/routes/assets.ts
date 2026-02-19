@@ -56,6 +56,26 @@ app.get("/books/:id/as-cbz", async (c) => {
   return new Response("Comic not found", { status: 404 });
 });
 
+// GET /books/:id/as-epub - serve converted EPUB for PDF books
+app.get("/books/:id/as-epub", async (c) => {
+  const bookId = c.req.param("id");
+  const epubPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
+
+  if (!existsSync(epubPath)) {
+    return c.json({ error: "No converted EPUB available" }, 404);
+  }
+
+  const buffer = await readFile(epubPath);
+  return new Response(buffer, {
+    headers: {
+      "Content-Type": "application/epub+zip",
+      "Content-Disposition": `attachment; filename="${bookId}.epub"`,
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
+});
+
 // GET /books/* - serve book files with range request support for audio
 app.get("/books/:filepath{.+}", async (c) => {
   const filepath = c.req.param("filepath");

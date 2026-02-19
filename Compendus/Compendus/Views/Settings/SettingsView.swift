@@ -181,6 +181,19 @@ struct SettingsView: View {
                 } header: {
                     Text("About")
                 }
+
+                #if DEBUG
+                // Developer section
+                Section {
+                    NavigationLink {
+                        SampleEPUBListView()
+                    } label: {
+                        Label("Sample EPUBs", systemImage: "books.vertical")
+                    }
+                } header: {
+                    Text("Developer")
+                }
+                #endif
             }
             .navigationTitle("Settings")
             .onAppear {

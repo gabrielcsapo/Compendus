@@ -66,6 +66,21 @@ class ServerConfig {
         apiURL("/books/\(bookId)/as-cbz")
     }
 
+    /// Build a URL for triggering PDF → EPUB conversion
+    func convertToEpubURL(for bookId: String) -> URL? {
+        apiURL("/api/books/\(bookId)/convert-to-epub")
+    }
+
+    /// Build a URL for downloading the converted EPUB
+    func bookAsEpubURL(for bookId: String) -> URL? {
+        apiURL("/books/\(bookId)/as-epub")
+    }
+
+    /// Build a URL for checking job progress
+    func jobProgressURL(for jobId: String) -> URL? {
+        apiURL("/api/jobs/\(jobId)")
+    }
+
     /// Build a URL for a comic page
     func comicPageURL(for bookId: String, format: String, page: Int) -> URL? {
         apiURL("/comic/\(bookId)/\(format)/page/\(page)")

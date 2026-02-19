@@ -51,6 +51,10 @@ struct ContentView: View {
                 .fullScreenCover(item: $deepLinkedBook) { book in
                     ReaderContainerView(book: book)
                 }
+                .task {
+                    // One-time migration of old Readium-format highlight locators
+                    HighlightMigration.migrateIfNeeded(modelContext: modelContext)
+                }
             } else {
                 ServerSetupView()
             }

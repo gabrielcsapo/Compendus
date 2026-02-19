@@ -62,6 +62,10 @@ export const books = sqliteTable(
     // Book type override - allows treating a book as a different type (e.g., epub as comic)
     bookTypeOverride: text("book_type_override"),
 
+    // Converted EPUB (for PDF → EPUB conversion)
+    convertedEpubPath: text("converted_epub_path"),
+    convertedEpubSize: integer("converted_epub_size"),
+
     // Reading state
     readingProgress: real("reading_progress").default(0),
     lastReadAt: integer("last_read_at", { mode: "timestamp" }),

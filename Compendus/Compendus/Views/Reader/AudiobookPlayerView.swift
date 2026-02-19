@@ -196,8 +196,6 @@ struct AudiobookPlayerView: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
-        .navigationTitle("Now Playing")
-        .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadAudiobook()
         }

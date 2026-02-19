@@ -27,6 +27,7 @@ import {
 interface UseReaderOptions {
   bookId: string;
   initialPosition?: number;
+  formatOverride?: string;
 }
 
 interface UseReaderReturn {
@@ -80,7 +81,7 @@ interface UseReaderReturn {
 /**
  * Main hook for the unified reader
  */
-export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): UseReaderReturn {
+export function useReader({ bookId, initialPosition = 0, formatOverride }: UseReaderOptions): UseReaderReturn {
   const viewport = useViewport();
   const { settings, updateGlobalSetting, updateBookSetting } = useReaderSettings(bookId);
 
@@ -132,7 +133,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
 
     const fetchInfo = async () => {
       try {
-        const data = await getReaderInfo(bookId, viewportConfig);
+        const data = await getReaderInfo(bookId, viewportConfig, formatOverride);
 
         if (data) {
           // Check if the response contains an error (e.g., parsing failure)
@@ -150,6 +151,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
                 bookId,
                 initialPosition,
                 viewportConfig,
+                formatOverride,
               );
               if (posData) {
                 setCurrentPage(posData.pageNum);
@@ -174,6 +176,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
     settings.fontSize,
     settings.lineHeight,
     initialPosition,
+    formatOverride,
   ]);
 
   // Fetch page content when page changes
@@ -183,14 +186,14 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
     const fetchPages = async () => {
       try {
         // Fetch the left (or only) page
-        const data = await getReaderPage(bookId, currentPage, viewportConfig);
+        const data = await getReaderPage(bookId, currentPage, viewportConfig, formatOverride);
 
         if (data) {
           setPageContent(data.content);
 
           // In spread mode, also fetch the right page if available
           if (isSpreadMode && data.content?.type === "image" && currentPage < bookInfo.totalPages) {
-            const rightData = await getReaderPage(bookId, currentPage + 1, viewportConfig);
+            const rightData = await getReaderPage(bookId, currentPage + 1, viewportConfig, formatOverride);
             if (rightData) {
               setRightPageContent(rightData.content);
             } else {
@@ -215,6 +218,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
     settings.lineHeight,
     bookInfo,
     isSpreadMode,
+    formatOverride,
   ]);
 
   // Prefetch upcoming pages in the background
@@ -236,7 +240,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
         prefetchedPages.current.add(pageNum);
 
         // Use server action for prefetching
-        getReaderPage(bookId, pageNum, viewportConfig)
+        getReaderPage(bookId, pageNum, viewportConfig, formatOverride)
           .then((data) => {
             // For image content (PDFs, comics), also prefetch the image
             if (data?.content?.imageUrl) {
@@ -296,7 +300,7 @@ export function useReader({ bookId, initialPosition = 0 }: UseReaderOptions): Us
   const goToPosition = useCallback(
     async (position: number) => {
       try {
-        const data = await getReaderPageForPosition(bookId, position, viewportConfig);
+        const data = await getReaderPageForPosition(bookId, position, viewportConfig, formatOverride);
 
         if (data) {
           setCurrentPage(data.pageNum);

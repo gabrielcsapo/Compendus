@@ -7,16 +7,60 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F91E184F2F3677670029A1F0 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F91E184E2F3677670029A1F0 /* ReadiumNavigator */; };
-		F91E18512F3677670029A1F0 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18502F3677670029A1F0 /* ReadiumShared */; };
-		F91E18532F3677670029A1F0 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18522F3677670029A1F0 /* ReadiumStreamer */; };
-		F91E18562F3678BE0029A1F0 /* ReadiumAdapterGCDWebServer in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18552F3678BE0029A1F0 /* ReadiumAdapterGCDWebServer */; };
+		0962C86F16A51D4580A8AB82 /* cc-shared-culture.epub in Resources */ = {isa = PBXBuildFile; fileRef = 43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */; };
+		126BA627C414AD0E8B512D3C /* page-blanche.epub in Resources */ = {isa = PBXBuildFile; fileRef = 0AC06FBC5F946AD5BA336870 /* page-blanche.epub */; };
+		15F2A68DC8B06A14B4D9CA3D /* quiz-bindings.epub in Resources */ = {isa = PBXBuildFile; fileRef = D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */; };
+		1A4345B752E17BB0EEF2E496 /* kusamakura-japanese-vertical-writing.epub in Resources */ = {isa = PBXBuildFile; fileRef = F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */; };
+		22EBCD4572294F1AF8D8F9C8 /* EPUBParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */; };
+		2C381E44577CB1DB692BAA8A /* AttributedStringBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */; };
+		36EA78AEF80572E668BF61EC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3198DB17E9FF90C3612D619A /* Foundation.framework */; };
+		4637F892513846848EC1E57C /* figure-gallery-bindings.epub in Resources */ = {isa = PBXBuildFile; fileRef = 49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */; };
+		4BEAEE2C3E7AA8A115739921 /* haruko-ahl.epub in Resources */ = {isa = PBXBuildFile; fileRef = 8F7F4934B000457C12EB9854 /* haruko-ahl.epub */; };
+		4CF97F08ACEDC367E1CF78C0 /* cole-voyage-of-life.epub in Resources */ = {isa = PBXBuildFile; fileRef = AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */; };
+		4E7D36E4CDF5F900FC97416B /* moby-dick.epub in Resources */ = {isa = PBXBuildFile; fileRef = 81D0A590A20E760F6386BD17 /* moby-dick.epub */; };
+		50B5DF7509C408F5A6458701 /* hefty-water.epub in Resources */ = {isa = PBXBuildFile; fileRef = B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */; };
+		5261468CF2191467A9AC0C75 /* mahabharata.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */; };
+		5C7911140AA3EC3ED240161F /* jlreq-in-japanese.epub in Resources */ = {isa = PBXBuildFile; fileRef = 7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */; };
+		60155E7648C284E88D055B26 /* kusamakura-preview.epub in Resources */ = {isa = PBXBuildFile; fileRef = FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */; };
+		61FB170B77C6B9A08879D801 /* sous-le-vent.epub in Resources */ = {isa = PBXBuildFile; fileRef = EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */; };
+		622B44296280C0CCFA49C674 /* kusamakura-preview-embedded.epub in Resources */ = {isa = PBXBuildFile; fileRef = 5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */; };
+		630A89744C7D0C65145E2E2F /* accessible_epub_3.epub in Resources */ = {isa = PBXBuildFile; fileRef = 0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */; };
+		6930027B1C5483DF3FFA2B58 /* israelsailing.epub in Resources */ = {isa = PBXBuildFile; fileRef = 1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */; };
+		740FCD4B25798FF7FA92C43B /* NativePaginationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */; };
+		7F79025BC59FF0A0853A7CB2 /* georgia-cfi.epub in Resources */ = {isa = PBXBuildFile; fileRef = EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */; };
+		81A6ABC176F1A5D934BED888 /* cole-voyage-of-life-tol.epub in Resources */ = {isa = PBXBuildFile; fileRef = 10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */; };
+		820575CE1F29DD6B0D7235E9 /* childrens-literature.epub in Resources */ = {isa = PBXBuildFile; fileRef = AE842891B44113B4A5FF6E91 /* childrens-literature.epub */; };
+		85DC76F02C0503605478D3E1 /* linear-algebra.epub in Resources */ = {isa = PBXBuildFile; fileRef = 36DB5DB50405C5725DA15419 /* linear-algebra.epub */; };
+		86CF172AA5BDE444DE12911B /* page-blanche-bitmaps-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */; };
+		897263B71893AA340834CB4D /* epub30-spec.epub in Resources */ = {isa = PBXBuildFile; fileRef = F936D7C41466220B1F3D3926 /* epub30-spec.epub */; };
+		8C2B5C770A32AFE1A92F7CC9 /* regime-anticancer-arabic.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */; };
+		8F94EB0592449A47A99B4B08 /* internallinks.epub in Resources */ = {isa = PBXBuildFile; fileRef = 7D2CF6D5EA965A9EB707A473 /* internallinks.epub */; };
+		922A738C682FFB9BEEC2E827 /* jlreq-in-english.epub in Resources */ = {isa = PBXBuildFile; fileRef = 6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */; };
+		9D79A56D8B51C192714058A6 /* svg-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */; };
+		A6C8714D718D4DD9AC54683D /* childrens-media-query.epub in Resources */ = {isa = PBXBuildFile; fileRef = FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */; };
+		A915BE8CBDF9617FB2542912 /* moby-dick-mo.epub in Resources */ = {isa = PBXBuildFile; fileRef = 78DE80B7B553073962261DC6 /* moby-dick-mo.epub */; };
+		C306A46CA6F5DEE383DFD793 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */; };
+		C5646A1FEF05473109666712 /* haruko-jpeg.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */; };
+		C7B52C7FC49FDA601594006C /* NativeEPUBEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */; };
+		C87D4573BA29359834CA2ED3 /* indexing-for-eds-and-auths-3f.epub in Resources */ = {isa = PBXBuildFile; fileRef = 519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */; };
+		CFB6A1D78AC6A4EFA68EDFE0 /* sous-le-vent_svg-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */; };
+		D1B527B10E02140348962F8D /* haruko-html-jpeg.epub in Resources */ = {isa = PBXBuildFile; fileRef = 8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */; };
+		F58FD9C72A7ED05E8F046F7E /* XHTMLContentParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */; };
+		F762B7CB76CB156CFA5440F8 /* georgia-pls-ssml.epub in Resources */ = {isa = PBXBuildFile; fileRef = 30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */; };
+		F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18582F3679000029A1F0 /* ZIPFoundation */; };
 		F91E18752F37E6270029A1F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18742F37E6270029A1F0 /* WidgetKit.framework */; };
 		F91E18772F37E6270029A1F0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18762F37E6270029A1F0 /* SwiftUI.framework */; };
 		F91E18882F37E6280029A1F0 /* CompendusWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4C01B1A11929028ABAE5A0B6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F91E18022F366F9C0029A1F0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F91E18092F366F9C0029A1F0;
+			remoteInfo = Compendus;
+		};
 		F91E18862F37E6280029A1F0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F91E18022F366F9C0029A1F0 /* Project object */;
@@ -41,11 +85,52 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0AC06FBC5F946AD5BA336870 /* page-blanche.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "page-blanche.epub"; sourceTree = "<group>"; };
+		0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = accessible_epub_3.epub; sourceTree = "<group>"; };
+		10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cole-voyage-of-life-tol.epub"; sourceTree = "<group>"; };
+		1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = israelsailing.epub; sourceTree = "<group>"; };
+		30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "georgia-pls-ssml.epub"; sourceTree = "<group>"; };
+		3198DB17E9FF90C3612D619A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		36DB5DB50405C5725DA15419 /* linear-algebra.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "linear-algebra.epub"; sourceTree = "<group>"; };
+		37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "sous-le-vent_svg-in-spine.epub"; sourceTree = "<group>"; };
+		3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompendusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cc-shared-culture.epub"; sourceTree = "<group>"; };
+		44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = XHTMLContentParserTests.swift; sourceTree = "<group>"; };
+		46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "svg-in-spine.epub"; sourceTree = "<group>"; };
+		49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "figure-gallery-bindings.epub"; sourceTree = "<group>"; };
+		510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeEPUBEngineTests.swift; sourceTree = "<group>"; };
+		519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "indexing-for-eds-and-auths-3f.epub"; sourceTree = "<group>"; };
+		5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-preview-embedded.epub"; sourceTree = "<group>"; };
+		6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "page-blanche-bitmaps-in-spine.epub"; sourceTree = "<group>"; };
+		6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "jlreq-in-english.epub"; sourceTree = "<group>"; };
+		78DE80B7B553073962261DC6 /* moby-dick-mo.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "moby-dick-mo.epub"; sourceTree = "<group>"; };
+		7D2CF6D5EA965A9EB707A473 /* internallinks.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = internallinks.epub; sourceTree = "<group>"; };
+		7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "jlreq-in-japanese.epub"; sourceTree = "<group>"; };
+		8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-html-jpeg.epub"; sourceTree = "<group>"; };
+		81D0A590A20E760F6386BD17 /* moby-dick.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "moby-dick.epub"; sourceTree = "<group>"; };
+		8F7F4934B000457C12EB9854 /* haruko-ahl.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-ahl.epub"; sourceTree = "<group>"; };
+		9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "regime-anticancer-arabic.epub"; sourceTree = "<group>"; };
+		9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-jpeg.epub"; sourceTree = "<group>"; };
+		9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = mahabharata.epub; sourceTree = "<group>"; };
+		A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
+		AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cole-voyage-of-life.epub"; sourceTree = "<group>"; };
+		AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EPUBParserTests.swift; sourceTree = "<group>"; };
+		AE842891B44113B4A5FF6E91 /* childrens-literature.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "childrens-literature.epub"; sourceTree = "<group>"; };
+		B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "hefty-water.epub"; sourceTree = "<group>"; };
+		BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativePaginationEngineTests.swift; sourceTree = "<group>"; };
+		BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AttributedStringBuilderTests.swift; sourceTree = "<group>"; };
+		D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "quiz-bindings.epub"; sourceTree = "<group>"; };
+		EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "georgia-cfi.epub"; sourceTree = "<group>"; };
+		EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "sous-le-vent.epub"; sourceTree = "<group>"; };
+		F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-japanese-vertical-writing.epub"; sourceTree = "<group>"; };
 		F91E180A2F366F9C0029A1F0 /* Compendus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compendus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompendusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18742F37E6270029A1F0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F91E18762F37E6270029A1F0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		F91E18932F37EAAF0029A1F0 /* CompendusWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CompendusWidgetExtension.entitlements; sourceTree = "<group>"; };
+		F936D7C41466220B1F3D3926 /* epub30-spec.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "epub30-spec.epub"; sourceTree = "<group>"; };
+		FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "childrens-media-query.epub"; sourceTree = "<group>"; };
+		FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-preview.epub"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -85,14 +170,19 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		14DEB08A8F96A9EC14103C26 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				36EA78AEF80572E668BF61EC /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F91E18072F366F9C0029A1F0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F91E184F2F3677670029A1F0 /* ReadiumNavigator in Frameworks */,
-				F91E18562F3678BE0029A1F0 /* ReadiumAdapterGCDWebServer in Frameworks */,
-				F91E18532F3677670029A1F0 /* ReadiumStreamer in Frameworks */,
-				F91E18512F3677670029A1F0 /* ReadiumShared in Frameworks */,
+				F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -108,6 +198,70 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0A957213575147E9065818B7 /* CompendusTests */ = {
+			isa = PBXGroup;
+			children = (
+				44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */,
+				BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */,
+				BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */,
+				510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */,
+				AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */,
+				A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */,
+				F8FA7A8CE8AE416B7C3BBA1B /* Samples */,
+			);
+			name = CompendusTests;
+			path = CompendusTests;
+			sourceTree = SOURCE_ROOT;
+		};
+		16D7533AEB006A47F6060248 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				3198DB17E9FF90C3612D619A /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		F8FA7A8CE8AE416B7C3BBA1B /* Samples */ = {
+			isa = PBXGroup;
+			children = (
+				AE842891B44113B4A5FF6E91 /* childrens-literature.epub */,
+				36DB5DB50405C5725DA15419 /* linear-algebra.epub */,
+				EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */,
+				8F7F4934B000457C12EB9854 /* haruko-ahl.epub */,
+				F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */,
+				7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */,
+				0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */,
+				F936D7C41466220B1F3D3926 /* epub30-spec.epub */,
+				519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */,
+				EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */,
+				B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */,
+				78DE80B7B553073962261DC6 /* moby-dick-mo.epub */,
+				FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */,
+				6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */,
+				46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */,
+				0AC06FBC5F946AD5BA336870 /* page-blanche.epub */,
+				10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */,
+				5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */,
+				43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */,
+				30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */,
+				81D0A590A20E760F6386BD17 /* moby-dick.epub */,
+				6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */,
+				7D2CF6D5EA965A9EB707A473 /* internallinks.epub */,
+				9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */,
+				D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */,
+				9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */,
+				49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */,
+				AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */,
+				37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */,
+				9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */,
+				8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */,
+				1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */,
+				FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */,
+			);
+			name = Samples;
+			path = Compendus/Reader/Samples;
+			sourceTree = SOURCE_ROOT;
+		};
 		F91E18012F366F9C0029A1F0 = {
 			isa = PBXGroup;
 			children = (
@@ -116,6 +270,7 @@
 				F91E18782F37E6270029A1F0 /* CompendusWidget */,
 				F91E18542F3678BE0029A1F0 /* Frameworks */,
 				F91E180B2F366F9C0029A1F0 /* Products */,
+				0A957213575147E9065818B7 /* CompendusTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -124,6 +279,7 @@
 			children = (
 				F91E180A2F366F9C0029A1F0 /* Compendus.app */,
 				F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */,
+				3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -133,6 +289,7 @@
 			children = (
 				F91E18742F37E6270029A1F0 /* WidgetKit.framework */,
 				F91E18762F37E6270029A1F0 /* SwiftUI.framework */,
+				16D7533AEB006A47F6060248 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -140,6 +297,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		53F8C24C7D538E0B26D52E95 /* CompendusTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 53F67C695915A825E2C0CCB0 /* Build configuration list for PBXNativeTarget "CompendusTests" */;
+			buildPhases = (
+				672429F1DA95350DFA7BEDCE /* Sources */,
+				14DEB08A8F96A9EC14103C26 /* Frameworks */,
+				55CCF01634BEC55C25F3C2C5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B2D62605DE972E29095BA7EE /* PBXTargetDependency */,
+			);
+			name = CompendusTests;
+			productName = CompendusTests;
+			productReference = 3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		F91E18092F366F9C0029A1F0 /* Compendus */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F91E18182F366F9E0029A1F0 /* Build configuration list for PBXNativeTarget "Compendus" */;
@@ -159,10 +334,7 @@
 			);
 			name = Compendus;
 			packageProductDependencies = (
-				F91E184E2F3677670029A1F0 /* ReadiumNavigator */,
-				F91E18502F3677670029A1F0 /* ReadiumShared */,
-				F91E18522F3677670029A1F0 /* ReadiumStreamer */,
-				F91E18552F3678BE0029A1F0 /* ReadiumAdapterGCDWebServer */,
+				F91E18582F3679000029A1F0 /* ZIPFoundation */,
 			);
 			productName = Compendus;
 			productReference = F91E180A2F366F9C0029A1F0 /* Compendus.app */;
@@ -184,8 +356,6 @@
 				F91E18782F37E6270029A1F0 /* CompendusWidget */,
 			);
 			name = CompendusWidgetExtension;
-			packageProductDependencies = (
-			);
 			productName = CompendusWidgetExtension;
 			productReference = F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -218,7 +388,7 @@
 			mainGroup = F91E18012F366F9C0029A1F0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+				F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F91E180B2F366F9C0029A1F0 /* Products */;
@@ -227,11 +397,52 @@
 			targets = (
 				F91E18092F366F9C0029A1F0 /* Compendus */,
 				F91E18722F37E6270029A1F0 /* CompendusWidgetExtension */,
+				53F8C24C7D538E0B26D52E95 /* CompendusTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		55CCF01634BEC55C25F3C2C5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				820575CE1F29DD6B0D7235E9 /* childrens-literature.epub in Resources */,
+				85DC76F02C0503605478D3E1 /* linear-algebra.epub in Resources */,
+				7F79025BC59FF0A0853A7CB2 /* georgia-cfi.epub in Resources */,
+				4BEAEE2C3E7AA8A115739921 /* haruko-ahl.epub in Resources */,
+				1A4345B752E17BB0EEF2E496 /* kusamakura-japanese-vertical-writing.epub in Resources */,
+				5C7911140AA3EC3ED240161F /* jlreq-in-japanese.epub in Resources */,
+				630A89744C7D0C65145E2E2F /* accessible_epub_3.epub in Resources */,
+				897263B71893AA340834CB4D /* epub30-spec.epub in Resources */,
+				C87D4573BA29359834CA2ED3 /* indexing-for-eds-and-auths-3f.epub in Resources */,
+				61FB170B77C6B9A08879D801 /* sous-le-vent.epub in Resources */,
+				50B5DF7509C408F5A6458701 /* hefty-water.epub in Resources */,
+				A915BE8CBDF9617FB2542912 /* moby-dick-mo.epub in Resources */,
+				A6C8714D718D4DD9AC54683D /* childrens-media-query.epub in Resources */,
+				86CF172AA5BDE444DE12911B /* page-blanche-bitmaps-in-spine.epub in Resources */,
+				9D79A56D8B51C192714058A6 /* svg-in-spine.epub in Resources */,
+				126BA627C414AD0E8B512D3C /* page-blanche.epub in Resources */,
+				81A6ABC176F1A5D934BED888 /* cole-voyage-of-life-tol.epub in Resources */,
+				622B44296280C0CCFA49C674 /* kusamakura-preview-embedded.epub in Resources */,
+				0962C86F16A51D4580A8AB82 /* cc-shared-culture.epub in Resources */,
+				F762B7CB76CB156CFA5440F8 /* georgia-pls-ssml.epub in Resources */,
+				4E7D36E4CDF5F900FC97416B /* moby-dick.epub in Resources */,
+				922A738C682FFB9BEEC2E827 /* jlreq-in-english.epub in Resources */,
+				8F94EB0592449A47A99B4B08 /* internallinks.epub in Resources */,
+				5261468CF2191467A9AC0C75 /* mahabharata.epub in Resources */,
+				15F2A68DC8B06A14B4D9CA3D /* quiz-bindings.epub in Resources */,
+				8C2B5C770A32AFE1A92F7CC9 /* regime-anticancer-arabic.epub in Resources */,
+				4637F892513846848EC1E57C /* figure-gallery-bindings.epub in Resources */,
+				4CF97F08ACEDC367E1CF78C0 /* cole-voyage-of-life.epub in Resources */,
+				CFB6A1D78AC6A4EFA68EDFE0 /* sous-le-vent_svg-in-spine.epub in Resources */,
+				C5646A1FEF05473109666712 /* haruko-jpeg.epub in Resources */,
+				D1B527B10E02140348962F8D /* haruko-html-jpeg.epub in Resources */,
+				6930027B1C5483DF3FFA2B58 /* israelsailing.epub in Resources */,
+				60155E7648C284E88D055B26 /* kusamakura-preview.epub in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F91E18082F366F9C0029A1F0 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -249,6 +460,19 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		672429F1DA95350DFA7BEDCE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F58FD9C72A7ED05E8F046F7E /* XHTMLContentParserTests.swift in Sources */,
+				2C381E44577CB1DB692BAA8A /* AttributedStringBuilderTests.swift in Sources */,
+				740FCD4B25798FF7FA92C43B /* NativePaginationEngineTests.swift in Sources */,
+				C7B52C7FC49FDA601594006C /* NativeEPUBEngineTests.swift in Sources */,
+				22EBCD4572294F1AF8D8F9C8 /* EPUBParserTests.swift in Sources */,
+				C306A46CA6F5DEE383DFD793 /* TestHelpers.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		F91E18062F366F9C0029A1F0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -266,6 +490,12 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		B2D62605DE972E29095BA7EE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Compendus;
+			target = F91E18092F366F9C0029A1F0 /* Compendus */;
+			targetProxy = 4C01B1A11929028ABAE5A0B6 /* PBXContainerItemProxy */;
+		};
 		F91E18872F37E6280029A1F0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = F91E18722F37E6270029A1F0 /* CompendusWidgetExtension */;
@@ -274,6 +504,45 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		092AF2047513EFAA6D31CA22 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = PYQ4EQ49YL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CompendusTests;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.CompendusTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Compendus.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Compendus";
+				VALIDATE_PRODUCT = YES;
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
+		4536DCA2FB035F97BF5EFD02 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = PYQ4EQ49YL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CompendusTests;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.CompendusTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Compendus.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Compendus";
+				XROS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
 		F91E18192F366F9E0029A1F0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -580,6 +849,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		53F67C695915A825E2C0CCB0 /* Build configuration list for PBXNativeTarget "CompendusTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				092AF2047513EFAA6D31CA22 /* Release */,
+				4536DCA2FB035F97BF5EFD02 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		F91E18052F366F9C0029A1F0 /* Build configuration list for PBXProject "Compendus" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -610,36 +888,21 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */ = {
+		F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/readium/swift-toolkit";
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 3.7.0;
+				minimumVersion = 0.9.19;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		F91E184E2F3677670029A1F0 /* ReadiumNavigator */ = {
+		F91E18582F3679000029A1F0 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
-			productName = ReadiumNavigator;
-		};
-		F91E18502F3677670029A1F0 /* ReadiumShared */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
-			productName = ReadiumShared;
-		};
-		F91E18522F3677670029A1F0 /* ReadiumStreamer */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
-			productName = ReadiumStreamer;
-		};
-		F91E18552F3678BE0029A1F0 /* ReadiumAdapterGCDWebServer */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = F91E184D2F3677670029A1F0 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
-			productName = ReadiumAdapterGCDWebServer;
+			package = F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -132,6 +132,43 @@ class APIService {
         return try await fetchData(url)
     }
 
+    // MARK: - Conversions
+
+    /// Trigger PDF → EPUB conversion on the server
+    func convertPdfToEpub(bookId: String) async throws -> ConversionResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.convertToEpubURL(for: bookId) else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let message = String(data: data, encoding: .utf8)
+                throw APIError.serverError(httpResponse.statusCode, message)
+            }
+            return try JSONDecoder().decode(ConversionResponse.self, from: data)
+        } catch let error as APIError {
+            throw error
+        } catch let error as DecodingError {
+            throw APIError.decodingError(error)
+        } catch {
+            throw APIError.networkError(error)
+        }
+    }
+
+    /// Poll job progress
+    func getJobProgress(jobId: String) async throws -> JobProgressResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.jobProgressURL(for: jobId) else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
     // MARK: - Downloads
 
     /// Get URL for downloading a book file
@@ -176,4 +213,20 @@ class APIService {
 
 struct ComicInfo: Codable {
     let pageCount: Int
+}
+
+struct ConversionResponse: Codable {
+    let success: Bool
+    let jobId: String?
+    let alreadyConverted: Bool?
+    let pending: Bool?
+    let convertedEpubSize: Int?
+}
+
+struct JobProgressResponse: Codable {
+    let success: Bool
+    let id: String?
+    let status: String?
+    let progress: Int?
+    let message: String?
 }

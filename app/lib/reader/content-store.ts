@@ -89,16 +89,22 @@ async function parseInWorker(
 }
 
 /**
- * Get normalized content for a book, parsing if not cached
+ * Get normalized content for a book, parsing if not cached.
+ * When formatOverride is "epub" and the book has a convertedEpubPath,
+ * the converted EPUB is loaded instead of the original file.
  */
 export async function getContent(
   bookId: string,
+  formatOverride?: string,
 ): Promise<NormalizedContent | null> {
+  // Cache key includes format override
+  const cacheKey = formatOverride ? `${bookId}:${formatOverride}` : bookId;
+
   // Check cache first
-  if (contentCache.has(bookId)) {
+  if (contentCache.has(cacheKey)) {
     // Update LRU order
-    updateCacheOrder(bookId);
-    return contentCache.get(bookId)!;
+    updateCacheOrder(cacheKey);
+    return contentCache.get(cacheKey)!;
   }
 
   // Get book info from database
@@ -107,9 +113,16 @@ export async function getContent(
     return null;
   }
 
-  // Read book file using the stored filePath (resolve relative to project root)
-  const format = book.format as BookFormat;
-  const filePath = resolveStoragePath(book.filePath);
+  // Determine which file and format to use
+  let format = book.format as BookFormat;
+  let filePath = resolveStoragePath(book.filePath);
+
+  // If requesting EPUB format and book has a converted EPUB, use it
+  if (formatOverride === "epub" && book.convertedEpubPath) {
+    format = "epub";
+    filePath = resolveStoragePath(book.convertedEpubPath);
+  }
+
   if (!existsSync(filePath)) {
     console.error(`[Content Store] Book file not found: ${filePath}`);
     return null;
@@ -121,7 +134,7 @@ export async function getContent(
   const content = await parseByFormat(buffer, format, bookId);
 
   // Cache the result
-  cacheContent(bookId, content);
+  cacheContent(cacheKey, content);
 
   return content;
 }

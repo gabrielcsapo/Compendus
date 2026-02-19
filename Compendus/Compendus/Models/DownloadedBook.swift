@@ -31,6 +31,7 @@ final class DownloadedBook {
     var narrator: String?           // Audiobooks
     var chaptersData: Data?         // JSON encoded chapters for audiobooks
     var pageCount: Int?             // Comics page count (cached)
+    var epubLocalPath: String?       // Local path for converted EPUB version
 
     init(
         id: String,
@@ -124,6 +125,23 @@ final class DownloadedBook {
         return documentsURL.appendingPathComponent(localPath)
     }
 
+    /// Get the full file URL for the converted EPUB version
+    var epubFileURL: URL? {
+        guard let path = epubLocalPath,
+              let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documentsURL.appendingPathComponent(path)
+    }
+
+    var hasEpubVersion: Bool {
+        if let path = epubLocalPath,
+           let url = epubFileURL {
+            return !path.isEmpty && FileManager.default.fileExists(atPath: url.path)
+        }
+        return false
+    }
+
     /// Create from a Book API response
     static func from(book: Book, localPath: String, coverData: Data? = nil) -> DownloadedBook {
         var chaptersData: Data? = nil
@@ -153,7 +171,8 @@ final class DownloadedBook {
             seriesNumber: seriesNumberDouble,
             duration: book.duration,
             narrator: book.narrator,
-            chaptersData: chaptersData
+            chaptersData: chaptersData,
+            pageCount: book.pageCount
         )
     }
 }

@@ -5,8 +5,9 @@
 //  Reusable editor for adding/editing notes on highlights.
 //  Used for both "new highlight with note" and "edit existing note" flows.
 //
-//  Also contains HighlightEditSheet for editing existing highlights
-//  (change color, edit note, copy text, delete).
+//  Also contains:
+//  - EditNoteSheet: Quick note editing for an existing highlight
+//  - HighlightEditSheet: Full edit (change color, edit note, copy, delete)
 //
 
 import SwiftUI
@@ -96,6 +97,37 @@ struct HighlightNoteEditor: View {
                         .bold()
                 }
             }
+        }
+    }
+}
+
+// MARK: - Edit Note Sheet
+
+/// Simple sheet for editing the note on an existing highlight.
+/// Used by HighlightsView (app-wide) and UnifiedReaderView.
+struct EditNoteSheet: View {
+    let highlight: BookHighlight
+    let onSave: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var noteText: String = ""
+
+    var body: some View {
+        HighlightNoteEditor(
+            highlightText: highlight.text,
+            note: $noteText,
+            onSave: {
+                highlight.note = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+                onSave()
+                dismiss()
+            },
+            onCancel: {
+                dismiss()
+            }
+        )
+        .presentationDetents([.medium, .large])
+        .onAppear {
+            noteText = highlight.note ?? ""
         }
     }
 }

@@ -35,6 +35,7 @@ struct ComicReaderView: View {
     // Tutorial state
     @State private var showingTutorial = TapZoneOverlay.shouldShow
 
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -47,6 +48,10 @@ struct ComicReaderView: View {
                         Label("Error", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(error)
+                    } actions: {
+                        Button("Close") {
+                            dismiss()
+                        }
                     }
                     .foregroundStyle(.white)
                 } else if isLoading {
@@ -156,20 +161,36 @@ struct ComicReaderView: View {
                 // Controls overlay
                 if showingControls && !isLoading && errorMessage == nil {
                     VStack {
-                        // Offline indicator at top
-                        if isOfflineMode {
-                            HStack {
-                                Image(systemName: "icloud.slash")
-                                Text("Offline Mode")
+                        // Top bar with close button
+                        HStack {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
                             }
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Capsule())
-                            .padding(.top, 8)
+
+                            Spacer()
+
+                            if isOfflineMode {
+                                HStack {
+                                    Image(systemName: "icloud.slash")
+                                    Text("Offline Mode")
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Capsule())
+                            }
                         }
+                        .padding(.horizontal)
+                        .padding(.top, 8)
 
                         Spacer()
 
@@ -422,7 +443,6 @@ struct ComicReaderView: View {
     private func saveProgress() {
         book.lastPosition = String(currentPage)
         book.readingProgress = totalPages > 0 ? Double(currentPage + 1) / Double(totalPages) : 0
-        book.lastReadAt = Date()
         try? modelContext.save()
     }
 }

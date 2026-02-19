@@ -72,4 +72,16 @@ app.get("/api/jobs/:id/progress", async (c) => {
   });
 });
 
+// GET /api/jobs/:id - Get current job state (polling endpoint)
+app.get("/api/jobs/:id", async (c) => {
+  const jobId = c.req.param("id");
+  const job = getJob(jobId);
+
+  if (!job) {
+    return c.json({ success: false, error: "job_not_found" }, 404);
+  }
+
+  return c.json({ success: true, ...job });
+});
+
 export { app as jobsRoutes };

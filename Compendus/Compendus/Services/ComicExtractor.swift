@@ -10,7 +10,7 @@
 //
 
 import Foundation
-import Zip
+import ZIPFoundation
 
 enum ComicExtractorError: LocalizedError {
     case fileNotFound
@@ -184,7 +184,7 @@ class ComicExtractor {
 
         do {
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            try Zip.unzipFile(fileURL, destination: tempDir, overwrite: true, password: nil)
+            try FileManager.default.unzipItem(at: fileURL, to: tempDir)
         } catch {
             try? FileManager.default.removeItem(at: tempDir)
             throw ComicExtractorError.extractionFailed("Cannot extract archive: \(error.localizedDescription)")

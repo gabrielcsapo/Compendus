@@ -45,11 +45,9 @@ final class BookHighlight {
 
     /// Available highlight colors
     static let colors: [(name: String, hex: String)] = [
-        ("Yellow", "#ffff00"),
-        ("Green", "#00ff00"),
-        ("Blue", "#00bfff"),
-        ("Pink", "#ff69b4"),
-        ("Orange", "#ffa500"),
+        ("Yellow", "#ffeb3b"),
+        ("Blue", "#42a5f5"),
+        ("Pink", "#ef5350"),
     ]
 
     /// Convert hex string to UIColor
