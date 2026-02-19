@@ -67,10 +67,14 @@ export function ConvertToEpubButton({ bookId, hasEpub }: ConvertToEpubButtonProp
     [stopPolling],
   );
 
-  const startConversion = async () => {
+  const startConversion = async (force = false) => {
     setState({ type: "starting" });
     try {
-      const res = await fetch(`/api/books/${bookId}/convert-to-epub`, { method: "POST" });
+      const res = await fetch(`/api/books/${bookId}/convert-to-epub`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(force ? { force: true } : {}),
+      });
       const data = await res.json();
 
       if (!res.ok) {
@@ -135,6 +139,20 @@ export function ConvertToEpubButton({ bookId, hasEpub }: ConvertToEpubButtonProp
           </svg>
           Download EPUB
         </a>
+        <button
+          onClick={() => startConversion(true)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm border border-border rounded-lg hover:bg-surface-elevated text-foreground-muted hover:text-foreground transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          Reconvert EPUB
+        </button>
       </div>
     );
   }

@@ -30,8 +30,11 @@ app.post("/api/books/:id/convert-to-epub", async (c) => {
     return c.json({ success: false, error: "not_pdf", message: "Only PDF books can be converted to EPUB" }, 400);
   }
 
-  // Check if already converted
-  if (book.convertedEpubPath) {
+  // Check if already converted (allow force reconversion)
+  const body = await c.req.json().catch(() => ({}));
+  const force = body?.force === true;
+
+  if (book.convertedEpubPath && !force) {
     return c.json({
       success: true,
       alreadyConverted: true,

@@ -1,5 +1,6 @@
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import JSZip from "jszip";
+import sharp from "sharp";
 import type { OPS as OPSType } from "pdfjs-dist";
 
 // pdfjs-dist OPS enum for operator list processing
@@ -48,13 +49,9 @@ export async function convertPdfToEpub(
 
   progress(2, "Loading PDF...");
 
-  // Convert Buffer to pure Uint8Array (pdfjs requirement)
-  let data: Uint8Array;
-  if (Buffer.isBuffer(pdfBuffer)) {
-    data = new Uint8Array(pdfBuffer.buffer, pdfBuffer.byteOffset, pdfBuffer.byteLength);
-  } else {
-    data = new Uint8Array(pdfBuffer);
-  }
+  // Copy into a fresh Uint8Array (pdfjs may detach the underlying ArrayBuffer)
+  const data = new Uint8Array(pdfBuffer.byteLength);
+  data.set(pdfBuffer);
 
   const loadingTask = pdfjsLib.getDocument({
     data,
@@ -141,26 +138,42 @@ async function extractPageContent(
         if (imgName && !imgIds.has(imgName)) {
           imgIds.add(imgName);
           try {
-            const imgData = await new Promise<{ data: Uint8Array; width: number; height: number }>(
-              (resolve, reject) => {
-                page.objs.get(imgName, (obj: unknown) => {
-                  if (obj && typeof obj === "object" && "data" in obj) {
-                    resolve(obj as { data: Uint8Array; width: number; height: number });
-                  } else {
-                    reject(new Error("No image data"));
-                  }
-                });
-                // Timeout after 2 seconds
-                setTimeout(() => reject(new Error("Timeout")), 2000);
-              },
-            );
+            const imgData = await new Promise<{
+              data: Uint8Array;
+              width: number;
+              height: number;
+              kind: number;
+            }>((resolve, reject) => {
+              page.objs.get(imgName, (obj: unknown) => {
+                if (obj && typeof obj === "object" && "data" in obj) {
+                  resolve(
+                    obj as { data: Uint8Array; width: number; height: number; kind: number },
+                  );
+                } else {
+                  reject(new Error("No image data"));
+                }
+              });
+              // Timeout after 2 seconds
+              setTimeout(() => reject(new Error("Timeout")), 2000);
+            });
 
-            // Convert raw RGBA to PNG-like format using a simple approach
-            // For embedded images, we store the raw pixel data
-            const imgBuffer = Buffer.from(imgData.data);
+            // pdfjs ImageKind: 1 = GRAYSCALE_1BPP, 2 = RGB_24BPP, 3 = RGBA_32BPP
+            const channels = imgData.kind === 3 ? 4 : imgData.kind === 1 ? 1 : 3;
+
+            // Convert raw pixel data to actual PNG using sharp
+            const pngBuffer = await sharp(Buffer.from(imgData.data), {
+              raw: {
+                width: imgData.width,
+                height: imgData.height,
+                channels,
+              },
+            })
+              .png()
+              .toBuffer();
+
             images.push({
               id: `page${pageNum}_${imgName}`,
-              data: imgBuffer,
+              data: pngBuffer,
               mimeType: "image/png",
             });
           } catch {
@@ -246,8 +259,17 @@ function detectChapters(pages: PageData[], bookTitle: string): Chapter[] {
  * Convert page text items into structured HTML paragraphs
  */
 function pageToHtml(page: PageData): string {
-  if (page.textItems.length === 0) {
+  if (page.textItems.length === 0 && page.images.length === 0) {
     return "";
+  }
+
+  // Add images for this page
+  const imageHtml = page.images
+    .map((img) => `    <p><img src="images/${img.id}.png" alt=""/></p>`)
+    .join("\n");
+
+  if (page.textItems.length === 0) {
+    return imageHtml;
   }
 
   // Sort by y position (top to bottom), then x (left to right)
@@ -310,7 +332,8 @@ function pageToHtml(page: PageData): string {
     paragraphs.push(currentParagraph.join(" "));
   }
 
-  return paragraphs.map((p) => `    <p>${p}</p>`).join("\n");
+  const textHtml = paragraphs.map((p) => `    <p>${p}</p>`).join("\n");
+  return imageHtml ? `${imageHtml}\n${textHtml}` : textHtml;
 }
 
 function escapeHtml(text: string): string {
@@ -349,8 +372,9 @@ async function assembleEpub(
 </container>`,
   );
 
-  // 3. Generate chapter XHTML files
+  // 3. Generate chapter XHTML files and collect images
   const chapterFiles: { id: string; href: string; title: string }[] = [];
+  const imageEntries: { id: string; href: string; mimeType: string }[] = [];
 
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
@@ -358,6 +382,15 @@ async function assembleEpub(
     const chapterHref = `${chapterId}.xhtml`;
 
     progress(72 + Math.round((i / chapters.length) * 20), `Writing chapter ${i + 1}/${chapters.length}...`);
+
+    // Add images from all pages in this chapter to the ZIP
+    for (const page of chapter.pages) {
+      for (const img of page.images) {
+        const imgHref = `images/${img.id}.png`;
+        zip.file(`OEBPS/${imgHref}`, img.data);
+        imageEntries.push({ id: img.id, href: imgHref, mimeType: img.mimeType });
+      }
+    }
 
     // Generate chapter content
     const bodyContent = chapter.pages.map((page) => pageToHtml(page)).filter(Boolean).join("\n\n    <hr/>\n\n");
@@ -417,6 +450,9 @@ img {
     `    <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
     ...chapterFiles.map(
       (ch) => `    <item id="${ch.id}" href="${ch.href}" media-type="application/xhtml+xml"/>`,
+    ),
+    ...imageEntries.map(
+      (img) => `    <item id="${img.id}" href="${img.href}" media-type="${img.mimeType}"/>`,
     ),
   ].join("\n");
 

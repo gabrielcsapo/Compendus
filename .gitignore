@@ -33,3 +33,7 @@ xcuserdata/
 # Temporary files
 *.tmp
 *.temp
+
+# Test output (manually inspect generated EPUBs)
+tests/output/
+tests/temp/
