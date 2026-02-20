@@ -90,6 +90,7 @@ struct UnifiedReaderView: View {
         .statusBarHidden(!showingOverlay)
         #if targetEnvironment(macCatalyst)
         .focusable()
+        .focusEffectDisabled()
         .onKeyPress(.leftArrow) {
             hideOverlayIfShowing()
             showingFloatingToolbar = false
@@ -459,8 +460,8 @@ struct UnifiedReaderView: View {
             }
         }
         .padding(.horizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 8 + bottomSafeAreaInset)
+        .padding(.top, 12)
+        .padding(.bottom, max(12, bottomSafeAreaInset + 8))
         .opacity(visible ? 1 : 0)
         .background(visible ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color(uiColor: readerSettings.theme.backgroundColor)))
         .environment(\.colorScheme, readerSettings.theme.colorScheme)
