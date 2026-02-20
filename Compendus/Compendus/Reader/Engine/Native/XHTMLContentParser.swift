@@ -25,7 +25,8 @@ class XHTMLContentParser {
         "blockquote", "pre", "figure", "figcaption",
         "ul", "ol", "li", "dl", "dt", "dd",
         "table", "thead", "tbody", "tfoot", "tr", "td", "th",
-        "hr", "br", "img", "video", "audio", "address"
+        "hr", "br", "img", "video", "audio", "address",
+        "svg"
     ]
 
     // Inline tag names
@@ -158,16 +159,25 @@ class XHTMLContentParser {
         case "p":
             var runs = collectInlineRuns(from: el, inheritedStyles: [], inheritedLink: nil)
             applyBlockCSSInlineStyles(el, to: &runs)
-            // Check if p contains block children (images, etc.)
+            // Check if p contains block children (images, etc.) — searches recursively through inline wrappers
             let blockChildren = collectBlockChildNodes(from: el)
-            if !runs.isEmpty && blockChildren.isEmpty {
-                return .paragraph(runs: runs, blockStyle: blockStyle)
-            } else if !blockChildren.isEmpty {
+            if !blockChildren.isEmpty {
+                // Collect alt texts from discovered images so we can filter redundant placeholder runs
+                var imageAlts: Set<String> = []
+                for child in blockChildren {
+                    if case .image(_, let alt, _, _, _) = child, let alt {
+                        imageAlts.insert("[\(alt)]")
+                    }
+                }
+                let meaningfulRuns = runs.filter { !imageAlts.contains($0.text.trimmingCharacters(in: .whitespaces)) }
+                let trimmedRuns = trimWhitespaceRuns(meaningfulRuns)
                 var children = blockChildren
-                if !runs.isEmpty {
-                    children.insert(.paragraph(runs: runs, blockStyle: blockStyle), at: 0)
+                if !trimmedRuns.isEmpty {
+                    children.insert(.paragraph(runs: trimmedRuns, blockStyle: blockStyle), at: 0)
                 }
                 return children.count == 1 ? children[0] : .container(children: children, blockStyle: blockStyle)
+            } else if !runs.isEmpty {
+                return .paragraph(runs: runs, blockStyle: blockStyle)
             }
             return .paragraph(runs: [TextRun(text: " ")], blockStyle: blockStyle)
 
@@ -198,6 +208,9 @@ class XHTMLContentParser {
 
         case "img":
             return processImage(el)
+
+        case "svg":
+            return processSVG(el)
 
         case "video":
             return processVideo(el)
@@ -319,8 +332,8 @@ class XHTMLContentParser {
                     continue
                 }
 
-                // Handle <img> inline (fixes bug #2: a > img)
-                if tag == "img" {
+                // Handle <img> and SVG <image> inline (fixes bug #2: a > img)
+                if tag == "img" || tag == "image" {
                     let alt = try? el.attr("alt")
                     if let alt, !alt.isEmpty {
                         runs.append(TextRun(text: "[\(alt)]", styles: inheritedStyles, link: inheritedLink))
@@ -353,6 +366,7 @@ class XHTMLContentParser {
     }
 
     /// Check if an element has block-level children, and collect them as ContentNodes.
+    /// Recurses through inline wrappers (e.g. <span>, <a>) to find nested block content like <img>.
     private func collectBlockChildNodes(from element: Element) -> [ContentNode] {
         var nodes: [ContentNode] = []
         for child in element.getChildNodes() {
@@ -362,6 +376,10 @@ class XHTMLContentParser {
                 if let node = processBlockElement(el) {
                     nodes.append(node)
                 }
+            } else {
+                // Recurse into inline wrappers (e.g. <span><img/></span>)
+                let nested = collectBlockChildNodes(from: el)
+                nodes.append(contentsOf: nested)
             }
         }
         return nodes
@@ -506,17 +524,14 @@ class XHTMLContentParser {
 
     private func processImage(_ el: Element) -> ContentNode? {
         let style = resolveMediaStyle(for: el)
-        guard let src = try? el.attr("src"), !src.isEmpty else {
-            // Try xlink:href for SVG images
-            guard let xlinkSrc = try? el.attr("xlink:href"), !xlinkSrc.isEmpty else {
-                return nil
-            }
-            let url = resolveURL(xlinkSrc)
-            let alt = try? el.attr("alt")
-            let width = (try? el.attr("width")).flatMap { Double($0) }.map { CGFloat($0) }
-            let height = (try? el.attr("height")).flatMap { Double($0) }.map { CGFloat($0) }
-            return .image(url: url, alt: alt, width: width, height: height, style: style)
-        }
+        // Try src, then xlink:href (SVG1), then href (SVG2)
+        let src: String? = {
+            if let s = try? el.attr("src"), !s.isEmpty { return s }
+            if let s = try? el.attr("xlink:href"), !s.isEmpty { return s }
+            if let s = try? el.attr("href"), !s.isEmpty { return s }
+            return nil
+        }()
+        guard let src else { return nil }
 
         let imageURL = resolveURL(src)
         let alt = try? el.attr("alt")
@@ -627,6 +642,28 @@ class XHTMLContentParser {
         return children.count == 1 ? children[0] : .container(children: children, blockStyle: blockStyle)
     }
 
+    // MARK: - SVG
+
+    private func processSVG(_ el: Element) -> ContentNode? {
+        // Look for <image> children with xlink:href or href
+        for child in el.children().array() {
+            let tag = child.tagName().lowercased()
+            if tag == "image" {
+                return processImage(child)
+            }
+        }
+        // Fallback: check for nested <svg> or <img>
+        for child in el.children().array() {
+            let tag = child.tagName().lowercased()
+            if tag == "svg" {
+                return processSVG(child)
+            } else if tag == "img" {
+                return processImage(child)
+            }
+        }
+        return nil
+    }
+
     // MARK: - CSS Resolution
 
     private func resolveCSSProperties(for element: Element) -> CSSProperties {
@@ -727,7 +764,12 @@ class XHTMLContentParser {
         if src.hasPrefix("http://") || src.hasPrefix("https://") {
             return URL(string: src) ?? baseURL.appendingPathComponent(src)
         }
-        return baseURL.appendingPathComponent(src)
+        // appendingPathComponent + standardizedFileURL properly resolves ../
+        let resolved = baseURL.appendingPathComponent(src).standardizedFileURL
+        if !FileManager.default.fileExists(atPath: resolved.path) {
+            print("[ResolveURL] NOT FOUND: src='\(src)' base='\(baseURL.path)' resolved='\(resolved.path)'")
+        }
+        return resolved
     }
 
     /// Remove leading/trailing whitespace-only runs and trim edge whitespace.

@@ -11,6 +11,9 @@
 
 import UIKit
 import AVFoundation
+import os.log
+
+private let logger = Logger(subsystem: "com.compendus.reader", category: "AttrStringBuilder")
 
 // MARK: - Offset Map
 
@@ -289,7 +292,15 @@ class AttributedStringBuilder {
     private func appendImage(url: URL, alt: String?, hintWidth: CGFloat?,
                              hintHeight: CGFloat?, style: MediaStyle,
                              to result: NSMutableAttributedString) {
-        guard url.isFileURL, let image = UIImage(contentsOfFile: url.path) else {
+        guard url.isFileURL else {
+            print("[Image] URL is not a file URL: \(url.absoluteString)")
+            return
+        }
+
+        guard let image = UIImage(contentsOfFile: url.path) else {
+            let exists = FileManager.default.fileExists(atPath: url.path)
+            print("[Image] FAILED to load: \(url.path)")
+            print("[Image]   exists=\(exists), alt=\(alt ?? "none")")
             // Image not found — show alt text if available
             if let alt = alt, !alt.isEmpty {
                 let attrs: [NSAttributedString.Key: Any] = [
@@ -303,7 +314,8 @@ class AttributedStringBuilder {
 
         // Determine target width from CSS, HTML attributes, or default to content width
         let maxWidth = contentWidth
-        let maxHeight = contentHeight - fontSize * 2
+        // Reserve space for surrounding text — images shouldn't fill the entire page
+        let maxHeight = contentHeight * 0.75
         var imageWidth: CGFloat
         if let cssW = style.cssWidth {
             imageWidth = min(cssW.resolve(relativeTo: maxWidth), maxWidth)
