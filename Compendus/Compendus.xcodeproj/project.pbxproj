@@ -85,52 +85,52 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		0AC06FBC5F946AD5BA336870 /* page-blanche.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "page-blanche.epub"; sourceTree = "<group>"; };
-		0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = accessible_epub_3.epub; sourceTree = "<group>"; };
-		10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cole-voyage-of-life-tol.epub"; sourceTree = "<group>"; };
-		1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = israelsailing.epub; sourceTree = "<group>"; };
-		30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "georgia-pls-ssml.epub"; sourceTree = "<group>"; };
+		0AC06FBC5F946AD5BA336870 /* page-blanche.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "page-blanche.epub"; sourceTree = "<group>"; };
+		0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = accessible_epub_3.epub; sourceTree = "<group>"; };
+		10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cole-voyage-of-life-tol.epub"; sourceTree = "<group>"; };
+		1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = israelsailing.epub; sourceTree = "<group>"; };
+		30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "georgia-pls-ssml.epub"; sourceTree = "<group>"; };
 		3198DB17E9FF90C3612D619A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		36DB5DB50405C5725DA15419 /* linear-algebra.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "linear-algebra.epub"; sourceTree = "<group>"; };
-		37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "sous-le-vent_svg-in-spine.epub"; sourceTree = "<group>"; };
+		36DB5DB50405C5725DA15419 /* linear-algebra.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "linear-algebra.epub"; sourceTree = "<group>"; };
+		37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "sous-le-vent_svg-in-spine.epub"; sourceTree = "<group>"; };
 		3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompendusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cc-shared-culture.epub"; sourceTree = "<group>"; };
+		43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cc-shared-culture.epub"; sourceTree = "<group>"; };
 		44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = XHTMLContentParserTests.swift; sourceTree = "<group>"; };
-		46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "svg-in-spine.epub"; sourceTree = "<group>"; };
-		49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "figure-gallery-bindings.epub"; sourceTree = "<group>"; };
+		46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "svg-in-spine.epub"; sourceTree = "<group>"; };
+		49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "figure-gallery-bindings.epub"; sourceTree = "<group>"; };
 		510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeEPUBEngineTests.swift; sourceTree = "<group>"; };
-		519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "indexing-for-eds-and-auths-3f.epub"; sourceTree = "<group>"; };
-		5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-preview-embedded.epub"; sourceTree = "<group>"; };
-		6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "page-blanche-bitmaps-in-spine.epub"; sourceTree = "<group>"; };
-		6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "jlreq-in-english.epub"; sourceTree = "<group>"; };
-		78DE80B7B553073962261DC6 /* moby-dick-mo.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "moby-dick-mo.epub"; sourceTree = "<group>"; };
-		7D2CF6D5EA965A9EB707A473 /* internallinks.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = internallinks.epub; sourceTree = "<group>"; };
-		7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "jlreq-in-japanese.epub"; sourceTree = "<group>"; };
-		8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-html-jpeg.epub"; sourceTree = "<group>"; };
-		81D0A590A20E760F6386BD17 /* moby-dick.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "moby-dick.epub"; sourceTree = "<group>"; };
-		8F7F4934B000457C12EB9854 /* haruko-ahl.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-ahl.epub"; sourceTree = "<group>"; };
-		9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "regime-anticancer-arabic.epub"; sourceTree = "<group>"; };
-		9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "haruko-jpeg.epub"; sourceTree = "<group>"; };
-		9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = mahabharata.epub; sourceTree = "<group>"; };
+		519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "indexing-for-eds-and-auths-3f.epub"; sourceTree = "<group>"; };
+		5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-preview-embedded.epub"; sourceTree = "<group>"; };
+		6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "page-blanche-bitmaps-in-spine.epub"; sourceTree = "<group>"; };
+		6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "jlreq-in-english.epub"; sourceTree = "<group>"; };
+		78DE80B7B553073962261DC6 /* moby-dick-mo.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "moby-dick-mo.epub"; sourceTree = "<group>"; };
+		7D2CF6D5EA965A9EB707A473 /* internallinks.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = internallinks.epub; sourceTree = "<group>"; };
+		7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "jlreq-in-japanese.epub"; sourceTree = "<group>"; };
+		8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-html-jpeg.epub"; sourceTree = "<group>"; };
+		81D0A590A20E760F6386BD17 /* moby-dick.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "moby-dick.epub"; sourceTree = "<group>"; };
+		8F7F4934B000457C12EB9854 /* haruko-ahl.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-ahl.epub"; sourceTree = "<group>"; };
+		9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "regime-anticancer-arabic.epub"; sourceTree = "<group>"; };
+		9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-jpeg.epub"; sourceTree = "<group>"; };
+		9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = mahabharata.epub; sourceTree = "<group>"; };
 		A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
-		AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "cole-voyage-of-life.epub"; sourceTree = "<group>"; };
+		AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cole-voyage-of-life.epub"; sourceTree = "<group>"; };
 		AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EPUBParserTests.swift; sourceTree = "<group>"; };
-		AE842891B44113B4A5FF6E91 /* childrens-literature.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "childrens-literature.epub"; sourceTree = "<group>"; };
-		B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "hefty-water.epub"; sourceTree = "<group>"; };
+		AE842891B44113B4A5FF6E91 /* childrens-literature.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "childrens-literature.epub"; sourceTree = "<group>"; };
+		B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "hefty-water.epub"; sourceTree = "<group>"; };
 		BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativePaginationEngineTests.swift; sourceTree = "<group>"; };
 		BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AttributedStringBuilderTests.swift; sourceTree = "<group>"; };
-		D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "quiz-bindings.epub"; sourceTree = "<group>"; };
-		EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "georgia-cfi.epub"; sourceTree = "<group>"; };
-		EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "sous-le-vent.epub"; sourceTree = "<group>"; };
-		F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-japanese-vertical-writing.epub"; sourceTree = "<group>"; };
+		D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "quiz-bindings.epub"; sourceTree = "<group>"; };
+		EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "georgia-cfi.epub"; sourceTree = "<group>"; };
+		EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "sous-le-vent.epub"; sourceTree = "<group>"; };
+		F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-japanese-vertical-writing.epub"; sourceTree = "<group>"; };
 		F91E180A2F366F9C0029A1F0 /* Compendus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compendus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompendusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18742F37E6270029A1F0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F91E18762F37E6270029A1F0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		F91E18932F37EAAF0029A1F0 /* CompendusWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CompendusWidgetExtension.entitlements; sourceTree = "<group>"; };
-		F936D7C41466220B1F3D3926 /* epub30-spec.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "epub30-spec.epub"; sourceTree = "<group>"; };
-		FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "childrens-media-query.epub"; sourceTree = "<group>"; };
-		FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */ = {isa = PBXFileReference; includeInIndex = 1; path = "kusamakura-preview.epub"; sourceTree = "<group>"; };
+		F936D7C41466220B1F3D3926 /* epub30-spec.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "epub30-spec.epub"; sourceTree = "<group>"; };
+		FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "childrens-media-query.epub"; sourceTree = "<group>"; };
+		FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-preview.epub"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -209,7 +209,6 @@
 				A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */,
 				F8FA7A8CE8AE416B7C3BBA1B /* Samples */,
 			);
-			name = CompendusTests;
 			path = CompendusTests;
 			sourceTree = SOURCE_ROOT;
 		};

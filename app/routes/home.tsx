@@ -1,8 +1,9 @@
 import { Link } from "react-router";
-import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount } from "../actions/books";
+import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { BookGrid } from "../components/BookGrid";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 import { TypeTabs, type TypeFilter } from "../components/TypeTabs";
+import { FormatDropdown } from "../components/FormatDropdown";
 import type { BookType } from "../lib/book-types";
 
 const BOOKS_PER_PAGE = 24;
@@ -30,16 +31,19 @@ export async function loader({ request }: { request: Request }) {
   const sort = (url.searchParams.get("sort") as SortOption) || "recent";
   const typeParam = url.searchParams.get("type") as BookType | null;
   const type: TypeFilter = typeParam && ["audiobook", "ebook", "comic"].includes(typeParam) ? typeParam : "all";
+  const formatParam = url.searchParams.get("format");
+  const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
   const offset = (page - 1) * BOOKS_PER_PAGE;
   const { orderBy, order } = getSortParams(sort);
 
   const typeFilter = type !== "all" ? type : undefined;
 
-  const [books, totalCount, recentBooks, unmatchedCount] = await Promise.all([
-    getBooks({ limit: BOOKS_PER_PAGE, offset, orderBy, order, type: typeFilter }),
-    getBooksCount(typeFilter),
+  const [books, totalCount, recentBooks, unmatchedCount, formatCounts] = await Promise.all([
+    getBooks({ limit: BOOKS_PER_PAGE, offset, orderBy, order, type: typeFilter, format }),
+    getBooksCount(typeFilter, format),
     getRecentBooks(5),
     getUnmatchedBooksCount(),
+    getFormatCounts(typeFilter),
   ]);
 
   const totalPages = Math.ceil(totalCount / BOOKS_PER_PAGE);
@@ -53,6 +57,8 @@ export async function loader({ request }: { request: Request }) {
     totalPages,
     currentSort: sort,
     currentType: type,
+    currentFormats: format ?? [],
+    formatCounts,
   };
 }
 
@@ -63,17 +69,20 @@ function Pagination({
   totalPages,
   currentSort,
   currentType,
+  currentFormats,
 }: {
   currentPage: number;
   totalPages: number;
   currentSort: SortOption;
   currentType: TypeFilter;
+  currentFormats: string[];
 }) {
   if (totalPages <= 1) return null;
 
   const pages: (number | "...")[] = [];
   const sortParam = currentSort !== "recent" ? `&sort=${currentSort}` : "";
   const typeParam = currentType !== "all" ? `&type=${currentType}` : "";
+  const formatParam = currentFormats.length > 0 ? `&format=${currentFormats.join(",")}` : "";
 
   // Always show first page
   pages.push(1);
@@ -105,7 +114,7 @@ function Pagination({
       {/* Previous button */}
       {currentPage > 1 ? (
         <Link
-          to={`/?page=${currentPage - 1}${sortParam}${typeParam}`}
+          to={`/?page=${currentPage - 1}${sortParam}${typeParam}${formatParam}`}
           className="px-3 py-2 rounded-lg border border-border hover:bg-surface-elevated text-foreground transition-colors"
         >
           &larr; Prev
@@ -126,7 +135,7 @@ function Pagination({
           ) : (
             <Link
               key={page}
-              to={`/?page=${page}${sortParam}${typeParam}`}
+              to={`/?page=${page}${sortParam}${typeParam}${formatParam}`}
               className={`px-3 py-2 rounded-lg border transition-colors ${
                 page === currentPage
                   ? "bg-primary text-white border-primary"
@@ -142,7 +151,7 @@ function Pagination({
       {/* Next button */}
       {currentPage < totalPages ? (
         <Link
-          to={`/?page=${currentPage + 1}${sortParam}${typeParam}`}
+          to={`/?page=${currentPage + 1}${sortParam}${typeParam}${formatParam}`}
           className="px-3 py-2 rounded-lg border border-border hover:bg-surface-elevated text-foreground transition-colors"
         >
           Next &rarr;
@@ -157,7 +166,7 @@ function Pagination({
 }
 
 export default function Home({ loaderData }: { loaderData: LoaderData }) {
-  const { books, totalCount, recentBooks, unmatchedCount, currentPage, totalPages, currentSort, currentType } =
+  const { books, totalCount, recentBooks, unmatchedCount, currentPage, totalPages, currentSort, currentType, currentFormats, formatCounts } =
     loaderData;
 
   return (
@@ -172,27 +181,37 @@ export default function Home({ loaderData }: { loaderData: LoaderData }) {
               {totalPages > 1 && ` · Page ${currentPage} of ${totalPages}`}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          {unmatchedCount > 0 && (
+            <Link
+              to="/unmatched"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <span className="font-medium">{unmatchedCount}</span>
+            </Link>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <TypeTabs currentType={currentType} currentSort={currentSort} />
+          {formatCounts.length > 1 && (
+            <FormatDropdown
+              formatCounts={formatCounts}
+              selectedFormats={currentFormats}
+              currentType={currentType}
+              currentSort={currentSort}
+            />
+          )}
+          <div className="ml-auto">
             <SortDropdown currentSort={currentSort} />
-            {unmatchedCount > 0 && (
-              <Link
-                to="/unmatched"
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-                <span className="font-medium">{unmatchedCount}</span>
-              </Link>
-            )}
           </div>
         </div>
-        <TypeTabs currentType={currentType} currentSort={currentSort} />
       </div>
 
       {/* Recently read - only show on first page */}
@@ -209,7 +228,7 @@ export default function Home({ loaderData }: { loaderData: LoaderData }) {
           books={books}
           emptyMessage="Your library is empty. Drop some books above to get started!"
         />
-        <Pagination currentPage={currentPage} totalPages={totalPages} currentSort={currentSort} currentType={currentType} />
+        <Pagination currentPage={currentPage} totalPages={totalPages} currentSort={currentSort} currentType={currentType} currentFormats={currentFormats} />
       </section>
     </main>
   );

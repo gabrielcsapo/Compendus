@@ -37,7 +37,7 @@ interface GetBooksOptions {
   offset?: number;
   orderBy?: "title" | "createdAt" | "lastReadAt";
   order?: "asc" | "desc";
-  format?: "pdf" | "epub" | "mobi";
+  format?: string | string[];
   type?: BookType;
   collectionId?: string;
   tagId?: string;
@@ -63,7 +63,8 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<Book[]> {
   const conditions = [];
 
   if (format) {
-    conditions.push(eq(books.format, format));
+    const fmts = Array.isArray(format) ? format : [format];
+    conditions.push(inArray(books.format, fmts));
   }
 
   if (type) {
@@ -282,29 +283,64 @@ export async function getRecentBooks(limit: number = 10): Promise<Book[]> {
     .limit(limit);
 }
 
-export async function getBooksCount(type?: BookType): Promise<number> {
+export async function getBooksCount(type?: BookType, format?: string | string[]): Promise<number> {
+  const conditions = [];
+
   if (type) {
     const formats = getFormatsByType(type);
-    // Include books that either:
-    // 1. Have the matching format AND no override, OR
-    // 2. Have the bookTypeOverride set to this type
+    conditions.push(
+      sql`(
+        (${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)}) AND ${books.bookTypeOverride} IS NULL)
+        OR ${books.bookTypeOverride} = ${type}
+      )`,
+    );
+  }
+
+  if (format) {
+    const fmts = Array.isArray(format) ? format : [format];
+    conditions.push(inArray(books.format, fmts));
+  }
+
+  if (conditions.length > 0) {
     const result = await db
       .select({ count: sql<number>`count(*)` })
       .from(books)
-      .where(
-        sql`(
-          (${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)}) AND ${books.bookTypeOverride} IS NULL)
-          OR ${books.bookTypeOverride} = ${type}
-        )`,
-      )
+      .where(and(...conditions))
       .get();
     return result?.count || 0;
   }
+
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(books)
     .get();
   return result?.count || 0;
+}
+
+/**
+ * Get counts of books grouped by format, optionally filtered by type
+ */
+export async function getFormatCounts(type?: BookType): Promise<{ format: string; count: number }[]> {
+  let query = db
+    .select({
+      format: books.format,
+      count: sql<number>`count(*)`,
+    })
+    .from(books)
+    .$dynamic();
+
+  if (type) {
+    const formats = getFormatsByType(type);
+    query = query.where(
+      sql`(
+        (${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)}) AND ${books.bookTypeOverride} IS NULL)
+        OR ${books.bookTypeOverride} = ${type}
+      )`,
+    );
+  }
+
+  const results = await query.groupBy(books.format);
+  return results.map(r => ({ format: r.format, count: r.count }));
 }
 
 /**

@@ -1,12 +1,15 @@
 import { db, books } from "../db";
-import { or, like } from "drizzle-orm";
+import { or, like, and, inArray } from "drizzle-orm";
 import type { Book } from "../db/schema";
+import type { BookType } from "../book-types";
+import { getFormatsByType } from "../book-types";
 
 export interface SearchOptions {
   query: string;
   limit?: number;
   offset?: number;
   searchIn?: ("title" | "subtitle" | "authors" | "description")[];
+  type?: BookType;
 }
 
 export interface SearchResult {
@@ -21,32 +24,37 @@ export interface SearchResult {
 }
 
 export async function searchBooks(options: SearchOptions): Promise<SearchResult[]> {
-  const { query, limit = 20, offset = 0, searchIn = ["title", "subtitle", "authors", "description"] } = options;
+  const { query, limit = 20, offset = 0, searchIn = ["title", "subtitle", "authors", "description"], type } = options;
 
   if (!query || query.trim().length < 2) return [];
 
   const searchTerm = `%${query}%`;
 
-  const conditions = [];
+  const searchConditions = [];
   if (searchIn.includes("title")) {
-    conditions.push(like(books.title, searchTerm));
+    searchConditions.push(like(books.title, searchTerm));
   }
   if (searchIn.includes("subtitle")) {
-    conditions.push(like(books.subtitle, searchTerm));
+    searchConditions.push(like(books.subtitle, searchTerm));
   }
   if (searchIn.includes("authors")) {
-    conditions.push(like(books.authors, searchTerm));
+    searchConditions.push(like(books.authors, searchTerm));
   }
   if (searchIn.includes("description")) {
-    conditions.push(like(books.description, searchTerm));
+    searchConditions.push(like(books.description, searchTerm));
   }
 
-  if (conditions.length === 0) return [];
+  if (searchConditions.length === 0) return [];
+
+  const whereConditions = [or(...searchConditions)!];
+  if (type) {
+    whereConditions.push(inArray(books.format, getFormatsByType(type)));
+  }
 
   const results = await db
     .select()
     .from(books)
-    .where(or(...conditions))
+    .where(and(...whereConditions))
     .limit(limit)
     .offset(offset);
 

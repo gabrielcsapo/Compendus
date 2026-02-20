@@ -183,7 +183,7 @@ export function ConvertToEpubButton({ bookId, hasEpub }: ConvertToEpubButtonProp
           {state.message}
         </div>
         <button
-          onClick={startConversion}
+          onClick={() => startConversion()}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm border border-border rounded-lg hover:bg-surface-elevated text-foreground-muted hover:text-foreground transition-colors"
         >
           Retry Conversion
@@ -194,7 +194,7 @@ export function ConvertToEpubButton({ bookId, hasEpub }: ConvertToEpubButtonProp
 
   return (
     <button
-      onClick={startConversion}
+      onClick={() => startConversion()}
       disabled={state.type === "starting"}
       className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm border border-border rounded-lg hover:bg-surface-elevated text-foreground-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >

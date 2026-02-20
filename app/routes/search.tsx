@@ -2,6 +2,7 @@ import { Link, type LoaderFunctionArgs } from "react-router";
 import { searchBooks } from "../actions/search";
 import { SearchInput } from "../components/SearchInput";
 import { AuthorLinks } from "../components/AuthorLink";
+import type { BookType } from "../lib/book-types";
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
 
@@ -9,11 +10,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const query = url.searchParams.get("q") || "";
 
+  const typeParam = url.searchParams.get("type") as BookType | null;
+  const type = typeParam && ["ebook", "audiobook", "comic"].includes(typeParam) ? typeParam : undefined;
+
   if (!query) {
     return {
       query,
       results: [] as Awaited<ReturnType<typeof searchBooks>>,
       searchIn: [] as string[],
+      type: type ?? ("all" as const),
     };
   }
 
@@ -22,13 +27,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const results = await searchBooks(query, {
     searchIn: searchIn as ("title" | "authors" | "description" | "content")[],
     limit: 50,
+    type,
   });
 
-  return { query, results, searchIn };
+  return { query, results, searchIn, type: type ?? ("all" as const) };
 }
 
 export default function Search({ loaderData }: { loaderData: LoaderData }) {
-  const { query, results, searchIn } = loaderData;
+  const { query, results, searchIn, type } = loaderData;
 
   return (
     <main className="container my-8 px-6 mx-auto">
@@ -53,37 +59,68 @@ export default function Search({ loaderData }: { loaderData: LoaderData }) {
 
       {/* Search filters */}
       {query && (
-        <div className="mb-6 bg-surface border border-border rounded-xl p-4">
-          <span className="text-sm text-foreground-muted mr-4">Search in:</span>
-          <div className="inline-flex gap-2 flex-wrap">
-            <FilterLink
-              label="Title"
-              field="title"
-              query={query}
-              active={searchIn.includes("title")}
-              searchIn={searchIn}
-            />
-            <FilterLink
-              label="Authors"
-              field="authors"
-              query={query}
-              active={searchIn.includes("authors")}
-              searchIn={searchIn}
-            />
-            <FilterLink
-              label="Description"
-              field="description"
-              query={query}
-              active={searchIn.includes("description")}
-              searchIn={searchIn}
-            />
-            <FilterLink
-              label="Full Text"
-              field="content"
-              query={query}
-              active={searchIn.includes("content")}
-              searchIn={searchIn}
-            />
+        <div className="mb-6 bg-surface border border-border rounded-xl p-4 space-y-3">
+          <div>
+            <span className="text-sm text-foreground-muted mr-4">Type:</span>
+            <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
+              {(
+                [
+                  { value: "all", label: "All" },
+                  { value: "ebook", label: "Ebooks" },
+                  { value: "audiobook", label: "Audiobooks" },
+                  { value: "comic", label: "Comics" },
+                ] as const
+              ).map((option) => {
+                const isActive = type === option.value;
+                return (
+                  <TypeFilterLink
+                    key={option.value}
+                    label={option.label}
+                    value={option.value}
+                    query={query}
+                    searchIn={searchIn}
+                    active={isActive}
+                  />
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <span className="text-sm text-foreground-muted mr-4">Search in:</span>
+            <div className="inline-flex gap-2 flex-wrap">
+              <FilterLink
+                label="Title"
+                field="title"
+                query={query}
+                active={searchIn.includes("title")}
+                searchIn={searchIn}
+                type={type}
+              />
+              <FilterLink
+                label="Authors"
+                field="authors"
+                query={query}
+                active={searchIn.includes("authors")}
+                searchIn={searchIn}
+                type={type}
+              />
+              <FilterLink
+                label="Description"
+                field="description"
+                query={query}
+                active={searchIn.includes("description")}
+                searchIn={searchIn}
+                type={type}
+              />
+              <FilterLink
+                label="Full Text"
+                field="content"
+                query={query}
+                active={searchIn.includes("content")}
+                searchIn={searchIn}
+                type={type}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -141,18 +178,57 @@ export default function Search({ loaderData }: { loaderData: LoaderData }) {
   );
 }
 
+function buildSearchUrl(query: string, searchIn: string[], type?: string) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  params.set("in", searchIn.join(","));
+  if (type && type !== "all") {
+    params.set("type", type);
+  }
+  return `/search?${params.toString()}`;
+}
+
+function TypeFilterLink({
+  label,
+  value,
+  query,
+  searchIn,
+  active,
+}: {
+  label: string;
+  value: string;
+  query: string;
+  searchIn: string[];
+  active: boolean;
+}) {
+  return (
+    <Link
+      to={buildSearchUrl(query, searchIn, value)}
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+        active
+          ? "bg-primary text-white shadow-sm"
+          : "text-foreground-muted hover:text-foreground hover:bg-surface"
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 function FilterLink({
   label,
   field,
   query,
   active,
   searchIn,
+  type,
 }: {
   label: string;
   field: string;
   query: string;
   active: boolean;
   searchIn: string[];
+  type?: string;
 }) {
   const newSearchIn = active ? searchIn.filter((s) => s !== field) : [...searchIn, field];
 
@@ -163,7 +239,7 @@ function FilterLink({
 
   return (
     <Link
-      to={`/search?q=${encodeURIComponent(query)}&in=${newSearchIn.join(",")}`}
+      to={buildSearchUrl(query, newSearchIn, type)}
       className={`px-3 py-1.5 text-sm rounded-full font-medium transition-all duration-200 ${
         active
           ? "bg-primary text-white"
