@@ -12,7 +12,5 @@ import SwiftUI
 struct CompendusWidgetBundle: WidgetBundle {
     var body: some Widget {
         CompendusWidget()
-        CompendusWidgetControl()
-        CompendusWidgetLiveActivity()
     }
 }

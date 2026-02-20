@@ -12,7 +12,7 @@ struct ContentView: View {
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(\.modelContext) private var modelContext
     @Environment(\.deepLinkBookId) private var deepLinkBookId
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1
     @State private var deepLinkedBook: DownloadedBook?
 
     var body: some View {

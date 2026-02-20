@@ -48,8 +48,13 @@ struct UnifiedReaderView: View {
     @State private var tappedHighlight: BookHighlight?
 
     // PDF-specific
+    #if !targetEnvironment(macCatalyst)
     @State private var brightness: Double = Double(UIScreen.main.brightness)
     @State private var originalBrightness: Double = Double(UIScreen.main.brightness)
+    #else
+    @State private var brightness: Double = 1.0
+    @State private var originalBrightness: Double = 1.0
+    #endif
 
     enum ReaderState {
         case loading
@@ -83,12 +88,29 @@ struct UnifiedReaderView: View {
         }
         .ignoresSafeArea(.all)
         .statusBarHidden(!showingOverlay)
+        #if targetEnvironment(macCatalyst)
+        .focusable()
+        .onKeyPress(.leftArrow) {
+            hideOverlayIfShowing()
+            showingFloatingToolbar = false
+            Task { await engine?.goBackward() }
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            hideOverlayIfShowing()
+            showingFloatingToolbar = false
+            Task { await engine?.goForward() }
+            return .handled
+        }
+        #endif
         .task { await initializeEngine() }
         .onDisappear {
             saveProgress()
+            #if !targetEnvironment(macCatalyst)
             if engine?.isPDF == true {
                 UIScreen.main.brightness = CGFloat(originalBrightness)
             }
+            #endif
         }
         // Settings — apply changes on dismiss to avoid lag during adjustment
         .sheet(isPresented: $showingSettings, onDismiss: {
@@ -318,6 +340,7 @@ struct UnifiedReaderView: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
                 }
+                .buttonStyle(.plain)
 
                 Spacer()
 
@@ -359,6 +382,7 @@ struct UnifiedReaderView: View {
                         Image(systemName: "list.bullet")
                     }
                 }
+                .buttonStyle(.plain)
                 .foregroundStyle(.primary)
             }
             .padding(.horizontal)
@@ -372,6 +396,13 @@ struct UnifiedReaderView: View {
         .onTapGesture {
             if !visible { toggleOverlay() }
         }
+        #if targetEnvironment(macCatalyst)
+        .onHover { hovering in
+            if hovering && !visible {
+                toggleOverlay()
+            }
+        }
+        #endif
         .animation(reduceMotion ? .none : .easeInOut(duration: 0.25), value: visible)
     }
 
@@ -407,6 +438,7 @@ struct UnifiedReaderView: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
                 } else if engine.totalPositions > 0,
                           let pageIndex = engine.currentLocation?.pageIndex {
                     let pagesBeforeCurrent = calculatePagesBeforeCurrent(engine: engine)
@@ -417,6 +449,7 @@ struct UnifiedReaderView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
                 } else {
                     Text("\(Int((engine.currentLocation?.totalProgression ?? 0) * 100))%")
                         .font(.caption)
@@ -435,6 +468,13 @@ struct UnifiedReaderView: View {
         .onTapGesture {
             if !visible { toggleOverlay() }
         }
+        #if targetEnvironment(macCatalyst)
+        .onHover { hovering in
+            if hovering && !visible {
+                toggleOverlay()
+            }
+        }
+        #endif
         .animation(reduceMotion ? .none : .easeInOut(duration: 0.25), value: visible)
     }
 
@@ -457,7 +497,8 @@ struct UnifiedReaderView: View {
     @ViewBuilder
     private func pdfControlsOverlay(engine: any ReaderEngine) -> some View {
         VStack(spacing: 16) {
-            // Brightness control
+            // Brightness control (iOS only — no screen brightness API on Mac)
+            #if !targetEnvironment(macCatalyst)
             HStack(spacing: 12) {
                 Image(systemName: "sun.min")
                     .foregroundStyle(.secondary)
@@ -471,6 +512,7 @@ struct UnifiedReaderView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal)
+            #endif
 
             // Page slider
             if engine.totalPositions > 1, let pdfEngine = engine as? PDFEngine {
