@@ -11,6 +11,7 @@ export interface SeriesInfo {
     title: string;
     seriesNumber: string | null;
     coverPath: string | null;
+    updatedAt: Date | null;
   }>;
   wantedBooks: Array<{
     id: string;
@@ -85,6 +86,7 @@ export async function getSeriesDetails(seriesName: string): Promise<SeriesInfo> 
       title: books.title,
       seriesNumber: books.seriesNumber,
       coverPath: books.coverPath,
+      updatedAt: books.updatedAt,
     })
     .from(books)
     .where(eq(books.series, seriesName));

@@ -255,7 +255,10 @@ app.get("/covers/:filename", async (c) => {
 
   const buffer = await readFile(filePath);
   return new Response(buffer, {
-    headers: { "Content-Type": "image/jpeg" },
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
   });
 });
 

@@ -7,6 +7,7 @@ interface CoverDropZoneProps {
   coverPath: string | null;
   coverColor: string | null;
   title: string;
+  updatedAt?: Date | null;
   children?: React.ReactNode;
 }
 
@@ -15,6 +16,7 @@ export function CoverDropZone({
   coverPath,
   coverColor,
   title,
+  updatedAt,
   children,
 }: CoverDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -223,7 +225,7 @@ export function CoverDropZone({
         {/* Cover image or placeholder */}
         {coverPath ? (
           <img
-            src={`/covers/${bookId}.jpg`}
+            src={`/covers/${bookId}.jpg?v=${updatedAt?.getTime() || ""}`}
             alt={title}
             className="w-full h-full object-cover"
           />

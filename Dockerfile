@@ -1,4 +1,4 @@
-FROM platformatic/node-caged:25-slim
+FROM node:25-slim
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install pnpm -g
 
 WORKDIR /app
 
@@ -18,9 +18,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
-EXPOSE 3000 3001
-
-# Increase Node.js memory limit for processing large files (CBR/PDF)
 ENV NODE_OPTIONS="--max-old-space-size=4096"
+EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]

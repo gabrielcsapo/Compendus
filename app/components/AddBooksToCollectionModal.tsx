@@ -168,7 +168,7 @@ export function AddBooksToCollectionModal({
                     <div className="w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-surface-elevated">
                       {book.coverPath ? (
                         <img
-                          src={`/covers/${book.id}.jpg`}
+                          src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
                           alt={book.title}
                           className="w-full h-full object-cover"
                         />

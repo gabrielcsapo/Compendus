@@ -27,6 +27,7 @@ export interface QuickSearchResult {
   format: string;
   coverPath: string | null;
   coverColor: string | null;
+  updatedAt: Date | null;
 }
 
 export async function quickSearch(query: string): Promise<QuickSearchResult[]> {
@@ -47,5 +48,6 @@ export async function quickSearch(query: string): Promise<QuickSearchResult[]> {
     format: r.book.format,
     coverPath: r.book.coverPath,
     coverColor: r.book.coverColor,
+    updatedAt: r.book.updatedAt,
   }));
 }

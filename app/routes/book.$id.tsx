@@ -62,6 +62,7 @@ export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
               coverPath={book.coverPath}
               coverColor={book.coverColor}
               title={book.title}
+              updatedAt={book.updatedAt}
             />
             <p className="text-xs text-foreground-muted text-center mt-2">
               Drop image or <kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">⌘/Ctrl</kbd>+<kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">V</kbd> to paste

@@ -262,6 +262,7 @@ function SearchResultCard({
       format: string;
       coverPath: string | null;
       coverColor: string | null;
+      updatedAt: Date | null;
     };
     highlights: {
       title?: string;
@@ -286,7 +287,7 @@ function SearchResultCard({
         style={{ backgroundColor: book.coverColor || undefined }}
       >
         {book.coverPath ? (
-          <img src={`/covers/${book.id}.jpg`} alt="" className="w-full h-full object-cover" />
+          <img src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`} alt="" className="w-full h-full object-cover" />
         ) : null}
       </div>
 

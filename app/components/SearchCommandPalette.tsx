@@ -185,7 +185,7 @@ export function SearchCommandPalette() {
                           >
                             {book.coverPath && (
                               <img
-                                src={`/covers/${book.id}.jpg`}
+                                src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
                                 alt=""
                                 className="w-full h-full object-cover"
                               />

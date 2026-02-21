@@ -49,7 +49,7 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
       >
         {book.coverPath ? (
           <img
-            src={`/covers/${book.id}.jpg`}
+            src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
             alt={book.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />

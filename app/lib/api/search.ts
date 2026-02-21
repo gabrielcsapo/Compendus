@@ -101,7 +101,7 @@ function toApiBook(book: Book, baseUrl: string): ApiBook {
     series: book.series,
     seriesNumber: book.seriesNumber,
     format: book.format,
-    coverUrl: book.coverPath ? `${baseUrl}/covers/${book.id}.jpg` : null,
+    coverUrl: book.coverPath ? `${baseUrl}/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : null,
     addedAt: book.importedAt?.toISOString() || new Date().toISOString(),
     fileSize: book.fileSize,
     duration: book.duration,
