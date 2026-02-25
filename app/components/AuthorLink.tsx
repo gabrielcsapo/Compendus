@@ -1,6 +1,6 @@
 "use client";
 
-import { Link, useNavigate } from "react-router";
+import { Link, useRouter } from "react-flight-router/client";
 
 interface AuthorLinkProps {
   name: string;
@@ -10,7 +10,7 @@ interface AuthorLinkProps {
 }
 
 function AuthorLink({ name, className = "", asSpan = false }: AuthorLinkProps) {
-  const navigate = useNavigate();
+  const { navigate } = useRouter();
   const href = `/author/${encodeURIComponent(name)}`;
 
   if (asSpan) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useNavigate } from "react-router";
+import { useRouter } from "react-flight-router/client";
 
 export type SortOption = "recent" | "title-asc" | "title-desc" | "oldest";
 
@@ -12,7 +12,7 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 ];
 
 export function SortDropdown({ currentSort }: { currentSort: SortOption }) {
-  const navigate = useNavigate();
+  const { navigate } = useRouter();
 
   return (
     <div className="relative">

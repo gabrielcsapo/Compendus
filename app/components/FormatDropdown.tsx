@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "react-flight-router/client";
 import type { TypeFilter } from "./TypeTabs";
 import { isNativeFormat, isConvertibleFormat } from "../lib/book-types";
 
@@ -18,7 +18,7 @@ export function FormatDropdown({
   currentType,
   currentSort,
 }: FormatDropdownProps) {
-  const navigate = useNavigate();
+  const { navigate } = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

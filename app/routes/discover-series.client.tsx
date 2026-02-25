@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import { addToWantedList, isBookWanted } from "../actions/wanted";
 import {
   getAllSeriesWithCounts,
@@ -13,7 +13,7 @@ import {
 import type { MetadataSearchResult } from "../lib/metadata";
 import { badgeStyles } from "../lib/styles";
 
-export function Component() {
+export default function Component() {
   const [seriesList, setSeriesList] = useState<SeriesWithCounts[]>([]);
   const [selectedSeries, setSelectedSeries] = useState<string | null>(null);
   const [seriesDetails, setSeriesDetails] = useState<SeriesInfo | null>(null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "react-flight-router/client";
 import { createPortal } from "react-dom";
 import { quickSearch, type QuickSearchResult } from "../actions/search";
 
@@ -12,7 +12,7 @@ export function SearchCommandPalette() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
+  const { navigate } = useRouter();
 
   // Handle keyboard shortcut to open palette
   useEffect(() => {

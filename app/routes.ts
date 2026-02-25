@@ -1,35 +1,38 @@
-import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import type { RouteConfig } from "react-flight-router/router";
 
-export default [
-  index("routes/home.tsx"),
-
-  route("search", "routes/search.tsx"),
-
-  route("book/:id", "routes/book.$id.tsx"),
-  route("book/:id/read", "routes/book.$id.read.tsx"),
-  route("book/:id/edit", "routes/book.$id.edit.tsx"),
-
-  route("highlights", "routes/highlights.tsx"),
-
-  route("author/:name", "routes/author.$name.tsx"),
-
-  route("collections", "routes/collections.tsx"),
-  route("collection/:id", "routes/collection.$id.tsx"),
-
-  route("tags", "routes/tags.tsx"),
-  route("unmatched", "routes/unmatched.tsx"),
-  route("batch-edit", "routes/batch-edit.tsx"),
-
-  route("discover", "routes/discover.tsx", [
-    index("routes/discover._index.tsx"),
-    route("wishlist", "routes/discover.wishlist.tsx"),
-    route("series", "routes/discover.series.tsx"),
-  ]),
-
-  route("about", "routes/about.tsx"),
-  route("docs", "routes/docs.tsx"),
-
-  route("admin/data", "routes/admin.data.tsx"),
-
-  route("_data/library", "routes/api.library.ts"),
-] satisfies RouteConfig;
+export const routes: RouteConfig[] = [
+  {
+    id: "root",
+    path: "",
+    component: () => import("./root.js"),
+    error: () => import("./routes/error.js"),
+    notFound: () => import("./routes/not-found.js"),
+    children: [
+      { id: "home", index: true, component: () => import("./routes/home.js") },
+      { id: "search", path: "search", component: () => import("./routes/search.js") },
+      { id: "book-detail", path: "book/:id", component: () => import("./routes/book-detail.js") },
+      { id: "book-read", path: "book/:id/read", component: () => import("./routes/book-read.js") },
+      { id: "book-edit", path: "book/:id/edit", component: () => import("./routes/book-edit.js") },
+      { id: "highlights", path: "highlights", component: () => import("./routes/highlights.js") },
+      { id: "author", path: "author/:name", component: () => import("./routes/author.js") },
+      { id: "collections", path: "collections", component: () => import("./routes/collections.js") },
+      { id: "collection-detail", path: "collection/:id", component: () => import("./routes/collection-detail.js") },
+      { id: "tags", path: "tags", component: () => import("./routes/tags.js") },
+      { id: "batch-edit", path: "batch-edit", component: () => import("./routes/batch-edit.js") },
+      { id: "unmatched", path: "unmatched", component: () => import("./routes/unmatched.js") },
+      {
+        id: "discover",
+        path: "discover",
+        component: () => import("./routes/discover.js"),
+        children: [
+          { id: "discover-index", index: true, component: () => import("./routes/discover-index.js") },
+          { id: "discover-wishlist", path: "wishlist", component: () => import("./routes/discover-wishlist.js") },
+          { id: "discover-series", path: "series", component: () => import("./routes/discover-series.js") },
+        ],
+      },
+      { id: "about", path: "about", component: () => import("./routes/about.js") },
+      { id: "docs", path: "docs", component: () => import("./routes/docs.js") },
+      { id: "admin-data", path: "admin/data", component: () => import("./routes/admin-data.js") },
+    ],
+  },
+];

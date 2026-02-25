@@ -1,10 +1,8 @@
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import { getCollections, getCollectionBookCount } from "../actions/collections";
 import { CreateCollectionButton } from "../components/CreateCollectionModal";
 
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-
-export async function loader() {
+export default async function Collections() {
   const collections = await getCollections();
 
   // Get book counts for each collection
@@ -15,27 +13,21 @@ export async function loader() {
     })),
   );
 
-  return { collections: collectionsWithCounts };
-}
-
-export default function Collections({ loaderData }: { loaderData: LoaderData }) {
-  const { collections } = loaderData;
-
   return (
     <main className="container my-8 px-6 mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Collections</h1>
           <p className="text-foreground-muted">
-            {collections.length} {collections.length === 1 ? "collection" : "collections"}
+            {collectionsWithCounts.length} {collectionsWithCounts.length === 1 ? "collection" : "collections"}
           </p>
         </div>
         <CreateCollectionButton />
       </div>
 
-      {collections.length > 0 ? (
+      {collectionsWithCounts.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {collections.map((collection) => (
+          {collectionsWithCounts.map((collection) => (
             <Link
               key={collection.id}
               to={`/collection/${collection.id}`}

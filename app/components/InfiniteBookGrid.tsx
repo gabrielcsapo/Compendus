@@ -57,7 +57,7 @@ export function InfiniteBookGrid({
     if (currentType !== "all") params.set("type", currentType);
     if (currentFormats.length > 0) params.set("format", currentFormats.join(","));
     if (seriesFilter) params.set("series", seriesFilter);
-    return `/_data/library?${params.toString()}`;
+    return `/api/library?${params.toString()}`;
   }, [currentSort, currentType, currentFormats, seriesFilter]);
 
   const loadMore = useCallback(async () => {

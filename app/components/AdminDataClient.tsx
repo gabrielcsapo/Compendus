@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import {
   deleteOrphanedFile,
   deleteMissingFileRecord,

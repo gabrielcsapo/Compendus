@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useRouter, useSearchParams } from "react-flight-router/client";
 import { useReader } from "./hooks/useReader";
 import { ReaderContent } from "./ReaderContent";
 import { ReaderToolbar } from "./ReaderToolbar";
@@ -19,8 +19,10 @@ interface ReaderShellProps {
 /**
  * Main reader shell that orchestrates all reader components
  */
-export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", formatOverride }: ReaderShellProps) {
-  const navigate = useNavigate();
+export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", formatOverride: formatOverrideProp }: ReaderShellProps) {
+  const { navigate } = useRouter();
+  const [searchParams] = useSearchParams();
+  const formatOverride = formatOverrideProp || searchParams.get("format") || undefined;
 
   const handleClose = useCallback(() => {
     navigate(returnUrl);

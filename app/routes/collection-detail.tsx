@@ -1,24 +1,16 @@
-import { Link, type LoaderFunctionArgs } from "react-router";
+import { Link } from "react-flight-router/client";
 import { getCollection, getBooksInCollection } from "../actions/collections";
 import { BookGrid } from "../components/BookGrid";
 import { CollectionActions } from "../components/CollectionActions";
 
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-
-export async function loader({ params }: LoaderFunctionArgs) {
-  const id = params.id as string;
+export default async function CollectionDetail({ params }: { params?: Record<string, string> }) {
+  const id = params?.id as string;
   const collection = await getCollection(id);
   if (!collection) {
     throw new Response("Collection not found", { status: 404 });
   }
 
   const books = await getBooksInCollection(id);
-
-  return { collection, books };
-}
-
-export default function CollectionDetail({ loaderData }: { loaderData: LoaderData }) {
-  const { collection, books } = loaderData;
 
   return (
     <main className="container my-8 px-8 mx-auto">

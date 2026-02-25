@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
-import { serve } from "@hono/node-server";
 
 import { searchRoutes } from "./routes/search";
 import { booksRoutes } from "./routes/books";
@@ -15,6 +14,7 @@ import { readerRoutes } from "./routes/reader";
 import { convertRoutes } from "./routes/convert";
 import { editorRoutes } from "./routes/editor";
 import { assetsRoutes } from "./routes/assets";
+import { libraryRoutes } from "./routes/library";
 
 const app = new Hono();
 
@@ -45,6 +45,7 @@ app.route("/", wishlistRoutes);
 app.route("/", readerRoutes);
 app.route("/", convertRoutes);
 app.route("/", editorRoutes);
+app.route("/", libraryRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);
@@ -69,22 +70,11 @@ app.all("/api/*", (c) => {
         readerResource: "GET /api/reader/:bookId/resource/* (returns EPUB embedded resources)",
         convertToEpub: "POST /api/books/:id/convert-to-epub (converts PDF to EPUB)",
         epubStatus: "GET /api/books/:id/epub-status (check conversion status)",
+        library: "GET /api/library?offset=0&sort=recent&type=ebook&format=epub",
       },
     },
     404,
   );
 });
-
-const PORT = parseInt(process.env.API_PORT || "3001", 10);
-console.log(`[API Server] Starting on port ${PORT}`);
-
-const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`[API Server] Listening on http://localhost:${info.port}`);
-});
-
-// Disable default timeouts so large file uploads (1GB+ audiobooks) don't get killed
-server.setTimeout(0);
-(server as any).requestTimeout = 0;
-(server as any).headersTimeout = 0;
 
 export { app };

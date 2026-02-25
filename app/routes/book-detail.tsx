@@ -1,4 +1,4 @@
-import { Link, type LoaderFunctionArgs } from "react-router";
+import { Link } from "react-flight-router/client";
 import { buttonStyles, badgeStyles } from "../lib/styles";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
 import { getTagsForBook } from "../actions/tags";
@@ -14,10 +14,8 @@ import { DeleteBookButton } from "../components/DeleteBookButton";
 import { AuthorLinks } from "../components/AuthorLink";
 import { ConvertToEpubButton } from "../components/ConvertToEpubButton";
 
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-
-export async function loader({ params }: LoaderFunctionArgs) {
-  const id = params.id as string;
+export default async function BookDetail({ params }: { params?: Record<string, string> }) {
+  const id = params?.id as string;
   const book = await getBook(id);
   if (!book) {
     throw new Response("Book not found", { status: 404 });
@@ -30,11 +28,6 @@ export async function loader({ params }: LoaderFunctionArgs) {
     getRelatedBooks(book),
   ]);
 
-  return { book, tags, collections, linkedFormats, relatedBooks };
-}
-
-export default function BookDetail({ loaderData }: { loaderData: LoaderData }) {
-  const { book, tags, collections, linkedFormats, relatedBooks } = loaderData;
   // Parse authors with defensive handling for corrupted data
   const rawAuthors = book.authors ? JSON.parse(book.authors) : [];
   const authors = Array.isArray(rawAuthors)

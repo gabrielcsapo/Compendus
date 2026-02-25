@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router";
 import {
   getWantedBooks,
   removeFromWantedList,
@@ -38,8 +37,7 @@ async function uploadFileWithMetadata(
   return response.json();
 }
 
-export function Component() {
-  const navigate = useNavigate();
+export default function Component() {
   const [wantedBooks, setWantedBooksState] = useState<WantedBook[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -112,7 +110,7 @@ export function Component() {
         setWantedBooksState((prev) => prev.filter((b) => b.id !== book.id));
         setMessage({ type: "success", text: `"${book.title}" added to your library` });
         // Refresh after a short delay to show the message
-        setTimeout(() => navigate(0), 1500);
+        setTimeout(() => window.location.reload(), 1500);
       } else if (result.error === "duplicate") {
         setMessage({ type: "error", text: `"${book.title}" already exists in your library` });
       } else {

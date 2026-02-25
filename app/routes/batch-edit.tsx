@@ -2,18 +2,13 @@ import { getAllBooksWithTags, getDistinctSeries, getDistinctAuthors } from "../a
 import { getTags } from "../actions/tags";
 import { BatchEditClient } from "../components/BatchEditClient";
 
-export async function loader() {
+export default async function BatchEdit() {
   const [{ books, bookTags }, allTags, seriesNames, authorNames] = await Promise.all([
     getAllBooksWithTags(),
     getTags(),
     getDistinctSeries(),
     getDistinctAuthors(),
   ]);
-  return { books, bookTags, allTags, seriesNames, authorNames };
-}
 
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-
-export default function BatchEdit({ loaderData }: { loaderData: LoaderData }) {
-  return <BatchEditClient {...loaderData} />;
+  return <BatchEditClient books={books} bookTags={bookTags} allTags={allTags} seriesNames={seriesNames} authorNames={authorNames} />;
 }

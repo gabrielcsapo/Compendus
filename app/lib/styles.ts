@@ -10,7 +10,7 @@ export const buttonStyles = {
   base: [
     "inline-flex items-center justify-center gap-2 cursor-pointer",
     "bg-surface border border-btn-border rounded-lg",
-    "px-4 py-2.5 text-sm font-medium text-foreground",
+    "px-4 py-2.5 text-sm font-medium",
     "shadow-btn",
     "transition-all duration-150 ease-[cubic-bezier(0.4,0,0.2,1)]",
     "hover:shadow-btn-hover hover:-translate-y-px hover:border-border-hover",
@@ -20,15 +20,15 @@ export const buttonStyles = {
   ].join(" "),
 
   primary:
-    "bg-primary text-white border-primary hover:bg-primary-hover hover:border-primary-hover",
+    "!bg-primary !text-white !border-primary hover:!bg-primary-hover hover:!border-primary-hover",
 
   secondary:
-    "border-secondary text-secondary hover:bg-secondary hover:text-white",
+    "!border-secondary !text-secondary hover:!bg-secondary hover:!text-white",
 
   ghost:
-    "bg-transparent border-transparent shadow-none hover:bg-surface-elevated hover:shadow-none hover:translate-y-0",
+    "!bg-transparent !border-transparent !shadow-none hover:!bg-surface-elevated hover:!shadow-none hover:!translate-y-0",
 
-  danger: "border-danger text-white bg-danger hover:bg-danger/90",
+  danger: "!border-danger !text-white !bg-danger hover:!bg-danger/90",
 } as const;
 
 // ── Badges ───────────────────────────────────────────────────────

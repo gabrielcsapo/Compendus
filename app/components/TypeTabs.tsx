@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import type { BookType } from "../lib/book-types";
 
 export type TypeFilter = BookType | "all";

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { buttonStyles } from "../lib/styles";
 import { batchUpdateBooks } from "../actions/batch";

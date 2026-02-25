@@ -1,16 +1,16 @@
 "use client";
 
-import { useFetcher } from "react-router";
 import { useState, useRef, useEffect } from "react";
 
 export function HighlightNote({
   highlightId,
   note,
+  onUpdateNote,
 }: {
   highlightId: string;
   note?: string;
+  onUpdateNote: (highlightId: string, note: string | null) => void;
 }) {
-  const fetcher = useFetcher();
   const [isEditing, setIsEditing] = useState(false);
   const [noteText, setNoteText] = useState(note || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -21,7 +21,7 @@ export function HighlightNote({
     }
   }, [isEditing]);
 
-  // Update local state when prop changes (e.g., after fetcher submission)
+  // Update local state when prop changes (e.g., after save)
   useEffect(() => {
     if (!isEditing) {
       setNoteText(note || "");
@@ -30,10 +30,7 @@ export function HighlightNote({
 
   const handleSave = () => {
     const trimmed = noteText.trim();
-    fetcher.submit(
-      { intent: "updateNote", highlightId, note: trimmed },
-      { method: "post" },
-    );
+    onUpdateNote(highlightId, trimmed || null);
     setIsEditing(false);
   };
 

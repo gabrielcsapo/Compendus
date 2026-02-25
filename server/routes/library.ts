@@ -1,6 +1,8 @@
-import { getBooks } from "../actions/books";
-import type { SortOption } from "../components/SortDropdown";
-import type { BookType } from "../lib/book-types";
+import { Hono } from "hono";
+import { getBooks } from "../../app/actions/books";
+import type { BookType } from "../../app/lib/book-types";
+
+type SortOption = "recent" | "oldest" | "title-asc" | "title-desc";
 
 const BOOKS_PER_PAGE = 24;
 
@@ -21,15 +23,16 @@ function getSortParams(sort: SortOption): {
   }
 }
 
-export async function loader({ request }: { request: Request }) {
-  const url = new URL(request.url);
-  const offset = parseInt(url.searchParams.get("offset") || "0", 10);
-  const sort = (url.searchParams.get("sort") as SortOption) || "recent";
-  const typeParam = url.searchParams.get("type") as BookType | null;
+export const libraryRoutes = new Hono();
+
+libraryRoutes.get("/api/library", async (c) => {
+  const offset = parseInt(c.req.query("offset") || "0", 10);
+  const sort = (c.req.query("sort") as SortOption) || "recent";
+  const typeParam = c.req.query("type") as BookType | null;
   const type = typeParam && ["audiobook", "ebook", "comic"].includes(typeParam) ? typeParam : undefined;
-  const formatParam = url.searchParams.get("format");
+  const formatParam = c.req.query("format");
   const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
-  const series = url.searchParams.get("series") || undefined;
+  const series = c.req.query("series") || undefined;
   const { orderBy, order } = getSortParams(sort);
 
   const books = await getBooks({
@@ -51,5 +54,5 @@ export async function loader({ request }: { request: Request }) {
     importedAt: book.importedAt?.toISOString() ?? null,
   }));
 
-  return Response.json({ books: serializedBooks });
-}
+  return c.json({ books: serializedBooks });
+});

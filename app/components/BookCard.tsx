@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import type { Book } from "../lib/db/schema";
 import { AuthorLinks } from "./AuthorLink";
 import { getBookType, isConvertibleFormat, getConversionTarget, type BookType } from "../lib/book-types";

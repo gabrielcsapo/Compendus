@@ -5,7 +5,7 @@ import { searchAllSources, type MetadataSearchResult } from "../lib/metadata";
 import { addToWantedList, isBookWanted, isBookOwned } from "../actions/wanted";
 import { badgeStyles } from "../lib/styles";
 
-export function Component() {
+export default function Component() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<MetadataSearchResult[]>([]);
   const [searching, setSearching] = useState(false);

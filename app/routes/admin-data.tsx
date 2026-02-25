@@ -21,7 +21,7 @@ interface BookRecord {
   format: string;
 }
 
-export async function loader() {
+export default async function AdminData() {
   // Get all files from data/books directory
   const files: FileInfo[] = [];
   try {
@@ -102,20 +102,16 @@ export async function loader() {
   const orphanedSize = orphanedFiles.reduce((sum, f) => sum + f.size, 0);
   const matchedSize = matchedFiles.reduce((sum, f) => sum + f.size, 0);
 
-  return {
-    orphanedFiles,
-    matchedFiles,
-    missingFiles,
-    totalFiles: files.length,
-    totalBooks: allBooks.length,
-    orphanedSize,
-    matchedSize,
-    booksDir: BOOKS_DIR,
-  };
-}
-
-type LoaderData = Awaited<ReturnType<typeof loader>>;
-
-export default function AdminData({ loaderData }: { loaderData: LoaderData }) {
-  return <AdminDataClient {...loaderData} />;
+  return (
+    <AdminDataClient
+      orphanedFiles={orphanedFiles}
+      matchedFiles={matchedFiles}
+      missingFiles={missingFiles}
+      totalFiles={files.length}
+      totalBooks={allBooks.length}
+      orphanedSize={orphanedSize}
+      matchedSize={matchedSize}
+      booksDir={BOOKS_DIR}
+    />
+  );
 }

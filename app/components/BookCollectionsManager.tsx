@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Link } from "react-router";
+import { Link } from "react-flight-router/client";
 import {
   getCollections,
   addBookToCollection,
