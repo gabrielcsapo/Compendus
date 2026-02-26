@@ -37,7 +37,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
 
   return (
-    <main className="container my-8 px-6 mx-auto">
+    <main className="max-w-5xl my-8 px-4 sm:px-6 mx-auto">
       <div className="mb-8">
         <Link
           to="/"
@@ -53,7 +53,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
         </Link>
       </div>
 
-      <div className="grid md:grid-cols-[280px_1fr] gap-8 items-start">
+      <div className="grid md:grid-cols-[280px_1fr] gap-6 md:gap-8 items-start">
         {/* Cover & Actions */}
         <aside className="space-y-4 md:sticky md:top-8 md:self-start max-w-xs mx-auto md:max-w-none md:mx-0">
           {/* Cover */}
@@ -168,11 +168,11 @@ export default async function BookDetail({ params }: { params?: Record<string, s
         </aside>
 
         {/* Content */}
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           {/* Header — no card background, page-level prominence */}
           <div className="space-y-3">
             <div className="flex items-start justify-between gap-4">
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground leading-tight">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-foreground leading-tight break-words">
                 {book.title}
               </h1>
               <div className="flex items-center gap-2 shrink-0 pt-1">
@@ -192,7 +192,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             </div>
 
             {book.subtitle && (
-              <p className="text-xl text-foreground-muted font-light">{book.subtitle}</p>
+              <p className="text-lg sm:text-xl text-foreground-muted font-light break-words">{book.subtitle}</p>
             )}
 
             {authors.length > 0 && (
@@ -238,7 +238,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
                 Description
               </h2>
-              <p className="text-foreground whitespace-pre-line leading-relaxed">
+              <p className="text-foreground whitespace-pre-line leading-relaxed break-words">
                 {book.description}
               </p>
             </section>
@@ -285,44 +285,44 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             </h2>
             <dl className="divide-y divide-border text-sm">
               {book.pageCount && (
-                <div className="flex justify-between py-3">
-                  <dt className="text-foreground-muted">Pages</dt>
-                  <dd className="font-medium text-foreground">{book.pageCount}</dd>
+                <div className="flex justify-between gap-4 py-3">
+                  <dt className="text-foreground-muted shrink-0">Pages</dt>
+                  <dd className="font-medium text-foreground text-right">{book.pageCount}</dd>
                 </div>
               )}
               {book.publisher && (
-                <div className="flex justify-between py-3">
-                  <dt className="text-foreground-muted">Publisher</dt>
-                  <dd className="font-medium text-foreground">{book.publisher}</dd>
+                <div className="flex justify-between gap-4 py-3">
+                  <dt className="text-foreground-muted shrink-0">Publisher</dt>
+                  <dd className="font-medium text-foreground text-right truncate">{book.publisher}</dd>
                 </div>
               )}
               {book.publishedDate && (
-                <div className="flex justify-between py-3">
-                  <dt className="text-foreground-muted">Published</dt>
-                  <dd className="font-medium text-foreground">{book.publishedDate}</dd>
+                <div className="flex justify-between gap-4 py-3">
+                  <dt className="text-foreground-muted shrink-0">Published</dt>
+                  <dd className="font-medium text-foreground text-right">{book.publishedDate}</dd>
                 </div>
               )}
               {book.isbn && (
-                <div className="flex justify-between py-3">
-                  <dt className="text-foreground-muted">ISBN</dt>
-                  <dd className="font-medium text-foreground font-mono">{book.isbn}</dd>
+                <div className="flex justify-between gap-4 py-3">
+                  <dt className="text-foreground-muted shrink-0">ISBN</dt>
+                  <dd className="font-medium text-foreground font-mono text-right break-all">{book.isbn}</dd>
                 </div>
               )}
-              <div className="flex justify-between py-3">
-                <dt className="text-foreground-muted">File Size</dt>
-                <dd className="font-medium text-foreground">{formatFileSize(book.fileSize)}</dd>
+              <div className="flex justify-between gap-4 py-3">
+                <dt className="text-foreground-muted shrink-0">File Size</dt>
+                <dd className="font-medium text-foreground text-right">{formatFileSize(book.fileSize)}</dd>
               </div>
-              <div className="flex justify-between py-3">
-                <dt className="text-foreground-muted">Added</dt>
-                <dd className="font-medium text-foreground">{book.importedAt?.toLocaleDateString()}</dd>
+              <div className="flex justify-between gap-4 py-3">
+                <dt className="text-foreground-muted shrink-0">Added</dt>
+                <dd className="font-medium text-foreground text-right">{book.importedAt?.toLocaleDateString()}</dd>
               </div>
               <div className="flex justify-between gap-4 py-3">
                 <dt className="text-foreground-muted shrink-0">Filename</dt>
-                <dd className="font-medium text-foreground break-all text-right">{book.fileName}</dd>
+                <dd className="font-medium text-foreground break-all text-right min-w-0">{book.fileName}</dd>
               </div>
               <div className="flex justify-between gap-4 py-3">
                 <dt className="text-foreground-muted shrink-0">Location</dt>
-                <dd className="text-foreground break-all font-mono text-xs text-right">{book.filePath}</dd>
+                <dd className="text-foreground break-all font-mono text-xs text-right min-w-0">{book.filePath}</dd>
               </div>
             </dl>
 

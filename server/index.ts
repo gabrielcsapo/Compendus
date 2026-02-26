@@ -29,8 +29,8 @@ app.use(
   }),
 );
 
-// Compression for text-based responses (JSON, HTML, CSS, JS)
-app.use("*", compress());
+// Compression for API responses only (not binary file streams like audio/books/covers)
+app.use("/api/*", compress());
 
 // ETag support for API routes (conditional 304 responses)
 app.use("/api/*", etag());

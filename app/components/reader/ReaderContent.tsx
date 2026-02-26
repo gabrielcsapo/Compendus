@@ -618,9 +618,10 @@ function AudioContent({
   const [currentTime, setCurrentTime] = useState(content.startTime || 0);
   const [showLyrics, setShowLyrics] = useState(false);
   const [volume, setVolume] = useState(settings.audioVolume);
+  const [browserDuration, setBrowserDuration] = useState(0);
 
   const theme = THEMES[settings.theme];
-  const duration = totalDuration || content.endTime || 0;
+  const duration = totalDuration || browserDuration || content.endTime || 0;
 
   // Sync playback speed
   useEffect(() => {
@@ -709,6 +710,16 @@ function AudioContent({
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={() => {
+          if (audioRef.current && isFinite(audioRef.current.duration)) {
+            setBrowserDuration(audioRef.current.duration);
+          }
+        }}
+        onDurationChange={() => {
+          if (audioRef.current && isFinite(audioRef.current.duration)) {
+            setBrowserDuration(audioRef.current.duration);
+          }
+        }}
       />
 
       {/* Chapter info */}

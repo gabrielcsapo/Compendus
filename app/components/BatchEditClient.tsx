@@ -6,6 +6,7 @@ import { Link } from "react-flight-router/client";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { buttonStyles } from "../lib/styles";
 import { batchUpdateBooks } from "../actions/batch";
+import { deleteBook } from "../actions/books";
 import { getFormatsByType } from "../lib/book-types";
 import type { Book, Tag } from "../lib/db/schema";
 import type { BookType } from "../lib/book-types";
@@ -132,6 +133,9 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
   const [bulkRemoveTag, setBulkRemoveTag] = useState("");
   const [bulkLanguage, setBulkLanguage] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [previewBookId, setPreviewBookId] = useState<string | null>(null);
 
   // Column filter state
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -502,6 +506,43 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
     });
     setBulkCategory("");
   }, [bulkCategory, selectedIds]);
+
+  const handleBulkDelete = useCallback(async () => {
+    setIsDeleting(true);
+    setMessage(null);
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    const errors: string[] = [];
+
+    for (const id of ids) {
+      try {
+        const success = await deleteBook(id);
+        if (success) {
+          deleted++;
+        } else {
+          const book = allBooks.find((b) => b.id === id);
+          errors.push(book?.title ?? id);
+        }
+      } catch {
+        const book = allBooks.find((b) => b.id === id);
+        errors.push(book?.title ?? id);
+      }
+    }
+
+    setIsDeleting(false);
+    setShowDeleteConfirm(false);
+    setSelectedIds(new Set());
+
+    if (errors.length > 0) {
+      setMessage({
+        type: "error",
+        text: `Deleted ${deleted} book${deleted !== 1 ? "s" : ""}. Failed: ${errors.slice(0, 3).join(", ")}${errors.length > 3 ? "..." : ""}`,
+      });
+    } else {
+      setMessage({ type: "success", text: `Deleted ${deleted} book${deleted !== 1 ? "s" : ""}.` });
+      setTimeout(() => window.location.reload(), 1500);
+    }
+  }, [selectedIds, allBooks]);
 
   const isDirty = useMemo(() => {
     if (edits.size > 0) return true;
@@ -1176,6 +1217,259 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
               Apply
             </button>
           </div>
+
+          <div className="w-px h-6 bg-border" />
+
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className={`${buttonStyles.base} !px-3 !py-1 text-xs text-danger border border-danger/30 bg-danger-light hover:bg-danger hover:text-white transition-colors`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete Selected
+          </button>
+        </div>
+      )}
+
+      {/* Book Preview Modal */}
+      {previewBookId && (() => {
+        const book = allBooks.find((b) => b.id === previewBookId);
+        if (!book) return null;
+        const authors = (() => {
+          try {
+            const parsed = book.authors ? JSON.parse(book.authors) : [];
+            return Array.isArray(parsed) ? parsed.filter((a: unknown): a is string => typeof a === "string") : [];
+          } catch { return []; }
+        })();
+        const tags = bookTagsState[book.id] || [];
+        const progressPercent = Math.round((book.readingProgress || 0) * 100);
+        const formatFileSize = (bytes: number) => {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        };
+
+        return (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
+            onClick={(e) => { if (e.target === e.currentTarget) setPreviewBookId(null); }}
+          >
+            <div className="bg-surface rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto">
+              {/* Modal Header */}
+              <div className="sticky top-0 bg-surface border-b border-border px-6 py-4 flex items-center justify-between rounded-t-xl z-10">
+                <h3 className="text-lg font-semibold text-foreground truncate pr-4">{book.title}</h3>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Link
+                    to={`/book/${book.id}`}
+                    className={`${buttonStyles.base} ${buttonStyles.ghost} !px-3 !py-1.5 text-sm`}
+                  >
+                    Open Full Page
+                  </Link>
+                  <button
+                    onClick={() => setPreviewBookId(null)}
+                    className="p-1.5 rounded-lg hover:bg-surface-elevated transition-colors text-foreground-muted hover:text-foreground"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <div className="flex gap-6">
+                  {/* Cover */}
+                  <div className="shrink-0">
+                    {book.coverPath ? (
+                      <img
+                        src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
+                        alt={book.title}
+                        className="w-36 aspect-[2/3] object-cover rounded-lg shadow-md"
+                      />
+                    ) : (
+                      <div
+                        className="w-36 aspect-[2/3] rounded-lg shadow-md bg-surface-elevated border border-border flex items-center justify-center"
+                        style={{ backgroundColor: book.coverColor || undefined }}
+                      >
+                        <svg className="w-10 h-10 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                      </div>
+                    )}
+
+                    {/* Progress */}
+                    {progressPercent > 0 && (
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs text-foreground-muted mb-1">
+                          <span>Progress</span>
+                          <span className="font-medium text-foreground">{progressPercent}%</span>
+                        </div>
+                        <div className="h-1.5 bg-surface-elevated rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="mt-3 space-y-1.5">
+                      <Link
+                        to={`/book/${book.id}/read`}
+                        className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center !py-2 !text-xs`}
+                      >
+                        {progressPercent > 0 ? "Continue Reading" : "Start Reading"}
+                      </Link>
+                      <a
+                        href={`/books/${book.id}.${book.format}`}
+                        download={book.fileName}
+                        className={`${buttonStyles.base} ${buttonStyles.secondary} w-full text-center justify-center !py-2 !text-xs`}
+                      >
+                        Download {book.format.toUpperCase()}
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0 space-y-4">
+                    {/* Title & Authors */}
+                    <div>
+                      {book.subtitle && (
+                        <p className="text-sm text-foreground-muted mb-1">{book.subtitle}</p>
+                      )}
+                      {authors.length > 0 && (
+                        <p className="text-sm text-foreground-muted">
+                          by <span className="text-primary font-medium">{authors.join(", ")}</span>
+                        </p>
+                      )}
+                      {book.series && (
+                        <p className="text-sm text-foreground-muted mt-1">
+                          {book.seriesNumber && <span>Book {book.seriesNumber} in </span>}
+                          <span className="text-primary font-medium">{book.series}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Badges */}
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-light text-primary border border-primary/20 uppercase">
+                        {book.format}
+                      </span>
+                      {book.language && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface-elevated text-foreground-muted border border-border">
+                          {book.language}
+                        </span>
+                      )}
+                      {book.pageCount && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface-elevated text-foreground-muted border border-border">
+                          {book.pageCount} pages
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Tags */}
+                    {tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {tags.map((tag) => (
+                          <span
+                            key={tag.id}
+                            className="inline-block px-2 py-0.5 text-xs rounded-full"
+                            style={
+                              tag.color
+                                ? { backgroundColor: tag.color + "20", color: tag.color }
+                                : { backgroundColor: "var(--color-surface-elevated)", color: "var(--color-foreground-muted)" }
+                            }
+                          >
+                            {tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Description */}
+                    {book.description && (
+                      <p className="text-sm text-foreground leading-relaxed line-clamp-4">
+                        {book.description}
+                      </p>
+                    )}
+
+                    {/* Details */}
+                    <dl className="text-xs divide-y divide-border">
+                      {book.publisher && (
+                        <div className="flex justify-between py-2">
+                          <dt className="text-foreground-muted">Publisher</dt>
+                          <dd className="font-medium text-foreground">{book.publisher}</dd>
+                        </div>
+                      )}
+                      {book.publishedDate && (
+                        <div className="flex justify-between py-2">
+                          <dt className="text-foreground-muted">Published</dt>
+                          <dd className="font-medium text-foreground">{book.publishedDate}</dd>
+                        </div>
+                      )}
+                      {(book.isbn13 || book.isbn10 || book.isbn) && (
+                        <div className="flex justify-between py-2">
+                          <dt className="text-foreground-muted">ISBN</dt>
+                          <dd className="font-medium text-foreground font-mono">{book.isbn13 || book.isbn10 || book.isbn}</dd>
+                        </div>
+                      )}
+                      <div className="flex justify-between py-2">
+                        <dt className="text-foreground-muted">File Size</dt>
+                        <dd className="font-medium text-foreground">{formatFileSize(book.fileSize)}</dd>
+                      </div>
+                      {book.importedAt && (
+                        <div className="flex justify-between py-2">
+                          <dt className="text-foreground-muted">Added</dt>
+                          <dd className="font-medium text-foreground">{book.importedAt.toLocaleDateString()}</dd>
+                        </div>
+                      )}
+                      <div className="flex justify-between gap-4 py-2">
+                        <dt className="text-foreground-muted shrink-0">Filename</dt>
+                        <dd className="font-medium text-foreground break-all text-right">{book.fileName}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+          <div className="bg-surface rounded-xl shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Delete {selectedIds.size} Book{selectedIds.size !== 1 ? "s" : ""}?</h3>
+            <p className="text-sm text-foreground-muted mb-4">
+              This will permanently delete the selected book{selectedIds.size !== 1 ? "s" : ""} and their files from your library. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className={`${buttonStyles.base} ${buttonStyles.ghost}`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={isDeleting}
+                className={`${buttonStyles.base} bg-danger text-white hover:bg-danger/90 transition-colors`}
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  `Delete ${selectedIds.size} Book${selectedIds.size !== 1 ? "s" : ""}`
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1222,23 +1516,29 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
 
                 {/* Cover */}
                 <div className="px-2 w-12 shrink-0">
-                  {book.coverPath ? (
-                    <img
-                      src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                      alt=""
-                      className="w-8 h-10 object-cover rounded"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div
-                      className="w-8 h-10 rounded bg-surface-elevated flex items-center justify-center"
-                      style={{ backgroundColor: book.coverColor || undefined }}
-                    >
-                      <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                    </div>
-                  )}
+                  <button
+                    onClick={() => setPreviewBookId(book.id)}
+                    className="cursor-pointer hover:opacity-80 transition-opacity"
+                    title="View book details"
+                  >
+                    {book.coverPath ? (
+                      <img
+                        src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
+                        alt=""
+                        className="w-8 h-10 object-cover rounded"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div
+                        className="w-8 h-10 rounded bg-surface-elevated flex items-center justify-center"
+                        style={{ backgroundColor: book.coverColor || undefined }}
+                      >
+                        <svg className="w-4 h-4 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
                 </div>
 
                 {/* Title */}

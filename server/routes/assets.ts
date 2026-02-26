@@ -232,13 +232,14 @@ app.get("/comic/:id/:format/info", async (c) => {
 });
 
 // GET /book/:id/* - serve EPUB internal resources with disk caching
-app.get("/book/:id/:rest{.+}", async (c) => {
+// Uses middleware pattern (next) so React page routes fall through to the flight router
+app.get("/book/:id/:rest{.+}", async (c, next) => {
   const bookId = c.req.param("id");
   const resourcePath = c.req.param("rest");
 
-  // Skip if this looks like a React Router route
+  // Let React page routes fall through to the flight router
   if (resourcePath === "read" || resourcePath === "edit") {
-    return new Response("Not found", { status: 404 });
+    return next();
   }
 
   const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
