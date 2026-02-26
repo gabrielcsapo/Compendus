@@ -175,7 +175,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
       if (selectedIds.has(book.id)) return true;
       // Apply search filter across all fields
       if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+        const q = searchQuery.toLowerCase().replace(/[^\w\s]/g, "");
         const bookEdits = edits.get(book.id);
         const fields = [
           bookEdits?.title ?? book.title,
@@ -194,14 +194,14 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
         // Also search tags
         const tagNames = (bookTagsState[book.id] || []).map((t) => t.name).join(" ");
         fields.push(tagNames);
-        const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+        const haystack = fields.filter(Boolean).join(" ").toLowerCase().replace(/[^\w\s]/g, "");
         if (!haystack.includes(q)) return false;
       }
       // Apply column filters
       const bookEditsForFilter = edits.get(book.id);
       for (const [col, filterVal] of Object.entries(columnFilters)) {
         if (!filterVal) continue;
-        const q = filterVal.toLowerCase();
+        const q = filterVal.toLowerCase().replace(/[^\w\s]/g, "");
         let cellValue = "";
         switch (col) {
           case "title":
@@ -226,7 +226,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
             cellValue = (bookEditsForFilter?.language ?? book.language ?? "").toLowerCase();
             break;
         }
-        if (!cellValue.includes(q)) return false;
+        if (!cellValue.replace(/[^\w\s]/g, "").includes(q)) return false;
       }
       // Apply type filter
       if (typeFilter !== "all") {

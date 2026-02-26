@@ -13,6 +13,7 @@ struct AudioLyricsView: View {
     let currentTime: Double
     let onSeek: (Double) -> Void
 
+    @Environment(ThemeManager.self) private var themeManager
     @State private var activeSegmentIndex: Int = -1
 
     var body: some View {
@@ -24,7 +25,8 @@ struct AudioLyricsView: View {
                             segment: segment,
                             isActive: index == activeSegmentIndex,
                             isPast: activeSegmentIndex > -1 && index < activeSegmentIndex,
-                            currentTime: currentTime
+                            currentTime: currentTime,
+                            accentColor: themeManager.accentColor
                         )
                         .id(index)
                         .onTapGesture {
@@ -93,6 +95,7 @@ private struct LyricsLineView: View {
     let isActive: Bool
     let isPast: Bool
     let currentTime: Double
+    let accentColor: Color
 
     var body: some View {
         Group {
@@ -110,7 +113,7 @@ private struct LyricsLineView: View {
         .background(
             isActive
                 ? RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(0.1))
+                    .fill(accentColor.opacity(0.1))
                 : nil
         )
         .contentShape(Rectangle())
@@ -132,7 +135,7 @@ private struct LyricsLineView: View {
                 let isWordPast = currentTime >= word.end
 
                 let color: Color = isWordActive
-                    ? .accentColor
+                    ? accentColor
                     : isWordPast
                         ? .primary
                         : .secondary

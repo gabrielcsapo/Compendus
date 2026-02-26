@@ -103,7 +103,7 @@ struct ActiveDownloadRow: View {
                 Button(action: onRetry) {
                     Image(systemName: "arrow.clockwise.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Retry download")

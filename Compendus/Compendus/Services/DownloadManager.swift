@@ -352,10 +352,12 @@ class DownloadManager: NSObject {
     private static let lastSyncKey = "lastMetadataSyncTimestamp"
 
     @MainActor
-    func syncDownloadedBooksMetadata(modelContext: ModelContext) async {
-        let lastSync = UserDefaults.standard.double(forKey: Self.lastSyncKey)
-        if lastSync > 0 && Date.now.timeIntervalSince1970 - lastSync < Self.syncInterval {
-            return
+    func syncDownloadedBooksMetadata(modelContext: ModelContext, force: Bool = false) async {
+        if !force {
+            let lastSync = UserDefaults.standard.double(forKey: Self.lastSyncKey)
+            if lastSync > 0 && Date.now.timeIntervalSince1970 - lastSync < Self.syncInterval {
+                return
+            }
         }
 
         guard config.isConfigured else { return }

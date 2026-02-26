@@ -18,6 +18,7 @@ struct UnifiedReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
 
     // Engine
     @State private var engine: (any ReaderEngine)?
@@ -33,6 +34,8 @@ struct UnifiedReaderView: View {
     @State private var showingThumbnails = false
     @State private var showingPageJump = false
     @State private var showingSearch = false
+    @State private var showingHighlightSetup = false
+    @State private var showingBookColorEditor = false
 
     // Highlighting
     @State private var highlights: [BookHighlight] = []
@@ -212,6 +215,32 @@ struct UnifiedReaderView: View {
                 }
             )
             .presentationDetents([.medium, .large])
+            .readerThemed(readerSettings)
+        }
+        // First-time highlight setup
+        .sheet(isPresented: $showingHighlightSetup) {
+            HighlightSetupSheet(
+                bookId: book.id,
+                bookTitle: book.title,
+                onUseDefaults: {},
+                onCustomize: {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showingBookColorEditor = true
+                    }
+                }
+            )
+            .readerThemed(readerSettings)
+        }
+        // Book-specific color editor
+        .sheet(isPresented: $showingBookColorEditor) {
+            NavigationStack {
+                BookHighlightColorsEditor(bookId: book.id)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showingBookColorEditor = false }
+                        }
+                    }
+            }
             .readerThemed(readerSettings)
         }
         // Page jump
@@ -433,7 +462,7 @@ struct UnifiedReaderView: View {
     private func progressBar(engine: any ReaderEngine, visible: Bool) -> some View {
         VStack(spacing: 4) {
             ProgressView(value: engine.currentLocation?.totalProgression ?? 0)
-                .tint(.blue)
+                .tint(.accentColor)
 
             HStack {
                 if engine.isPDF {
@@ -705,6 +734,7 @@ struct UnifiedReaderView: View {
         tocItems = await nativeEngine.tableOfContents()
 
         readerState = .ready
+        showHighlightSetupIfNeeded()
     }
 
     private func initializePDFEngine(fileURL: URL) {
@@ -730,6 +760,13 @@ struct UnifiedReaderView: View {
         }
 
         readerState = .ready
+        showHighlightSetupIfNeeded()
+    }
+
+    private func showHighlightSetupIfNeeded() {
+        if book.lastReadAt == nil && !highlightColorManager.hasCustomColors(for: book.id) {
+            showingHighlightSetup = true
+        }
     }
 
     private func configureEngineCallbacks(_ engine: any ReaderEngine) {

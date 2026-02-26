@@ -75,6 +75,39 @@ export function AdminDataClient({
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
 
+  // Matched files: search, filter, pagination
+  const [matchedSearch, setMatchedSearch] = useState("");
+  const [matchedFormatFilter, setMatchedFormatFilter] = useState<string>("all");
+  const [matchedPage, setMatchedPage] = useState(1);
+  const [matchedPageSize, setMatchedPageSize] = useState(50);
+
+  const matchedFormats = Array.from(
+    new Set(matchedFiles.map((f) => f.book.format.toLowerCase())),
+  ).sort();
+
+  const filteredMatchedFiles = matchedFiles.filter((file) => {
+    const search = matchedSearch.toLowerCase().replace(/[^\w\s]/g, "");
+    const matchesSearch =
+      !search ||
+      file.book.title.toLowerCase().replace(/[^\w\s]/g, "").includes(search) ||
+      file.name.toLowerCase().replace(/[^\w\s]/g, "").includes(search) ||
+      file.book.format.toLowerCase().includes(search);
+    const matchesFormat =
+      matchedFormatFilter === "all" ||
+      file.book.format.toLowerCase() === matchedFormatFilter;
+    return matchesSearch && matchesFormat;
+  });
+
+  const matchedTotalPages = Math.max(
+    1,
+    Math.ceil(filteredMatchedFiles.length / matchedPageSize),
+  );
+  const clampedPage = Math.min(matchedPage, matchedTotalPages);
+  const paginatedMatchedFiles = filteredMatchedFiles.slice(
+    (clampedPage - 1) * matchedPageSize,
+    clampedPage * matchedPageSize,
+  );
+
   const handleCancelJob = async (job: JobRecord) => {
     const action = job.status === "running"
       ? "Cancel"
@@ -475,79 +508,197 @@ export function AdminDataClient({
           These files are properly linked to database records. Total size:{" "}
           {formatBytes(matchedSize)}
         </p>
+
+        {/* Search and Filter Controls */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+          <input
+            type="text"
+            placeholder="Search by title, filename, or format..."
+            value={matchedSearch}
+            onChange={(e) => {
+              setMatchedSearch(e.target.value);
+              setMatchedPage(1);
+            }}
+            className="flex-1 px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <select
+            value={matchedFormatFilter}
+            onChange={(e) => {
+              setMatchedFormatFilter(e.target.value);
+              setMatchedPage(1);
+            }}
+            className="px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="all">All Formats</option>
+            {matchedFormats.map((fmt) => (
+              <option key={fmt} value={fmt}>
+                {fmt.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <select
+            value={matchedPageSize}
+            onChange={(e) => {
+              setMatchedPageSize(Number(e.target.value));
+              setMatchedPage(1);
+            }}
+            className="px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value={25}>25 per page</option>
+            <option value={50}>50 per page</option>
+            <option value={100}>100 per page</option>
+          </select>
+        </div>
+
+        {(matchedSearch || matchedFormatFilter !== "all") && (
+          <p className="text-xs text-foreground-muted mb-3">
+            Showing {filteredMatchedFiles.length} of {matchedFiles.length} files
+          </p>
+        )}
+
         {matchedFiles.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
             No matched files found.
           </div>
-        ) : (
-          <div className="bg-surface-elevated rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-3 text-foreground-muted font-medium">
-                    Title
-                  </th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">
-                    Filename
-                  </th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">
-                    Format
-                  </th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">
-                    Size
-                  </th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {matchedFiles.slice(0, 100).map((file) => (
-                  <tr
-                    key={file.name}
-                    className="border-b border-border last:border-0 hover:bg-surface"
-                  >
-                    <td className="p-3 text-foreground">
-                      <Link
-                        to={`/book/${file.book.id}`}
-                        className="hover:text-primary"
-                      >
-                        {file.book.title}
-                      </Link>
-                    </td>
-                    <td className="p-3 text-foreground-muted font-mono text-xs">
-                      {file.name}
-                    </td>
-                    <td className="p-3 text-foreground-muted uppercase">
-                      {file.book.format}
-                    </td>
-                    <td className="p-3 text-foreground-muted text-right">
-                      {formatBytes(file.size)}
-                    </td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleDeleteMatchedBook(file)}
-                        disabled={deleting === file.book.id}
-                        className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
-                      >
-                        {deleting === file.book.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {matchedFiles.length > 100 && (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="p-3 text-center text-foreground-muted"
-                    >
-                      ... and {matchedFiles.length - 100} more files
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        ) : filteredMatchedFiles.length === 0 ? (
+          <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
+            No files match your search criteria.
           </div>
+        ) : (
+          <>
+            <div className="bg-surface-elevated rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-3 text-foreground-muted font-medium">
+                      Title
+                    </th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">
+                      Filename
+                    </th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">
+                      Format
+                    </th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">
+                      Size
+                    </th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedMatchedFiles.map((file) => (
+                    <tr
+                      key={file.name}
+                      className="border-b border-border last:border-0 hover:bg-surface"
+                    >
+                      <td className="p-3 text-foreground">
+                        <Link
+                          to={`/book/${file.book.id}`}
+                          className="hover:text-primary"
+                        >
+                          {file.book.title}
+                        </Link>
+                      </td>
+                      <td className="p-3 text-foreground-muted font-mono text-xs">
+                        {file.name}
+                      </td>
+                      <td className="p-3 text-foreground-muted uppercase">
+                        {file.book.format}
+                      </td>
+                      <td className="p-3 text-foreground-muted text-right">
+                        {formatBytes(file.size)}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          onClick={() => handleDeleteMatchedBook(file)}
+                          disabled={deleting === file.book.id}
+                          className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                        >
+                          {deleting === file.book.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {matchedTotalPages > 1 && (
+              <div className="flex items-center justify-between mt-4">
+                <p className="text-xs text-foreground-muted">
+                  Page {clampedPage} of {matchedTotalPages}
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setMatchedPage(1)}
+                    disabled={clampedPage <= 1}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setMatchedPage(clampedPage - 1)}
+                    disabled={clampedPage <= 1}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Prev
+                  </button>
+                  {Array.from({ length: matchedTotalPages }, (_, i) => i + 1)
+                    .filter(
+                      (p) =>
+                        p === 1 ||
+                        p === matchedTotalPages ||
+                        Math.abs(p - clampedPage) <= 2,
+                    )
+                    .reduce<(number | "ellipsis")[]>((acc, p, i, arr) => {
+                      if (i > 0 && p - (arr[i - 1] as number) > 1)
+                        acc.push("ellipsis");
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === "ellipsis" ? (
+                        <span
+                          key={`ellipsis-${i}`}
+                          className="px-1 text-xs text-foreground-muted"
+                        >
+                          ...
+                        </span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setMatchedPage(p)}
+                          className={`px-2 py-1 text-xs rounded border ${
+                            p === clampedPage
+                              ? "bg-primary text-white border-primary"
+                              : "bg-surface-elevated border-border text-foreground hover:bg-surface"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ),
+                    )}
+                  <button
+                    onClick={() => setMatchedPage(clampedPage + 1)}
+                    disabled={clampedPage >= matchedTotalPages}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setMatchedPage(matchedTotalPages)}
+                    disabled={clampedPage >= matchedTotalPages}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </section>
     </main>

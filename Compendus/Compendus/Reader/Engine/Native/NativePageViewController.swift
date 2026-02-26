@@ -157,7 +157,7 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         tv.isSelectable = true
         tv.textContainerInset = NativePaginationEngine.defaultInsets
         tv.textContainer.lineFragmentPadding = 0
-        tv.backgroundColor = .white
+        tv.backgroundColor = .systemBackground
         tv.delegate = self
         tv.translatesAutoresizingMaskIntoConstraints = false
 

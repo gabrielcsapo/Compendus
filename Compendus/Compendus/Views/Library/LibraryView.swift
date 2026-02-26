@@ -87,14 +87,6 @@ struct LibraryView: View {
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(\.modelContext) private var modelContext
 
-    // Query for recently read books (for Continue Reading section)
-    @Query(
-        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil },
-        sort: \DownloadedBook.lastReadAt,
-        order: .reverse
-    )
-    private var recentlyReadBooks: [DownloadedBook]
-
     // Query for all downloaded books (to check download status)
     @Query private var downloadedBooks: [DownloadedBook]
 
@@ -264,22 +256,6 @@ struct LibraryView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if !recentlyReadBooks.isEmpty && searchText.isEmpty && selectedFilter == .all && selectedSeriesName == nil {
-                ContinueReadingSection(books: recentlyReadBooks) { book in
-                    if book.isAudiobook {
-                        Task {
-                            await audiobookPlayer.loadBook(book)
-                            audiobookPlayer.play()
-                            audiobookPlayer.isFullPlayerPresented = true
-                        }
-                    } else {
-                        bookToRead = book
-                    }
-                }
-                .padding(.top, 16)
-                .padding(.bottom, 8)
             }
 
             LazyVGrid(columns: columns, spacing: 16) {

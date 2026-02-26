@@ -434,6 +434,7 @@ struct ChaptersListView: View {
     let onSelect: (Chapter) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
         NavigationStack {
@@ -444,7 +445,7 @@ struct ChaptersListView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(chapter.title)
-                                .foregroundStyle(isCurrentChapter(chapter) ? .blue : .primary)
+                                .foregroundStyle(isCurrentChapter(chapter) ? themeManager.accentColor : Color.primary)
 
                             HStack(spacing: 8) {
                                 Text(chapter.startTimeDisplay)
@@ -455,7 +456,7 @@ struct ChaptersListView: View {
                                 if let progress = chapterProgress(chapter) {
                                     ProgressView(value: progress)
                                         .frame(width: 50)
-                                        .tint(.blue)
+                                        .tint(themeManager.accentColor)
                                 }
                             }
                         }
@@ -464,7 +465,7 @@ struct ChaptersListView: View {
 
                         if isCurrentChapter(chapter) {
                             Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(themeManager.accentColor)
                                 .symbolEffect(.variableColor.iterative, isActive: true)
                         }
                     }

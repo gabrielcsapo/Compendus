@@ -51,10 +51,19 @@ struct DownloadsView: View {
     @Environment(APIService.self) private var apiService
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
+    @Environment(ReaderSettings.self) private var readerSettings
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
     private var books: [DownloadedBook]
+
+    @Query(
+        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil },
+        sort: \DownloadedBook.lastReadAt,
+        order: .reverse
+    )
+    private var recentlyReadBooks: [DownloadedBook]
 
     @Query(sort: \PendingDownload.queuedAt, order: .reverse)
     private var pendingDownloads: [PendingDownload]
@@ -64,6 +73,7 @@ struct DownloadsView: View {
     @State private var searchText = ""
     @State private var selectedFilter: DownloadFilter = .all
     @State private var showingStorageBreakdown = false
+    @State private var bookToRead: DownloadedBook?
     @State private var viewMode: DownloadViewMode = .books
     @State private var selectedSeriesName: String? = nil
 
@@ -160,8 +170,15 @@ struct DownloadsView: View {
                 } message: {
                     Text(deleteDialogMessage)
                 }
+                .fullScreenCover(item: $bookToRead) { book in
+                    ReaderContainerView(book: book)
+                        .environment(readerSettings)
+                }
                 .sheet(isPresented: $showingStorageBreakdown) {
                     StorageBreakdownView()
+                }
+                .refreshable {
+                    await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext, force: true)
                 }
                 .task {
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
@@ -269,6 +286,23 @@ struct DownloadsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Continue Reading section
+            if !recentlyReadBooks.isEmpty && searchText.isEmpty && selectedFilter == .all && selectedSeriesName == nil {
+                ContinueReadingSection(books: recentlyReadBooks) { book in
+                    if book.isAudiobook {
+                        Task {
+                            await audiobookPlayer.loadBook(book)
+                            audiobookPlayer.play()
+                            audiobookPlayer.isFullPlayerPresented = true
+                        }
+                    } else {
+                        bookToRead = book
+                    }
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 8)
             }
 
             // Active downloads section
@@ -562,6 +596,8 @@ struct DownloadsView: View {
         .environment(api)
         .environment(DownloadManager(config: config, apiService: api))
         .environment(StorageManager())
+        .environment(AudiobookPlayer())
+        .environment(ReaderSettings())
         .environment(OnDeviceTranscriptionService())
         .modelContainer(for: [DownloadedBook.self, PendingDownload.self], inMemory: true)
 }

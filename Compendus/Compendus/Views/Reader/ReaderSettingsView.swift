@@ -10,6 +10,7 @@ import SwiftUI
 struct ReaderSettingsView: View {
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(ThemeManager.self) private var themeManager
     @Environment(\.dismiss) private var dismiss
 
     let format: ReaderFormat
@@ -68,7 +69,7 @@ struct ReaderSettingsView: View {
                                 .overlay {
                                     Circle()
                                         .strokeBorder(
-                                            settings.theme == theme ? .accentColor : theme.previewBorderColor,
+                                            settings.theme == theme ? themeManager.accentColor : theme.previewBorderColor,
                                             lineWidth: settings.theme == theme ? 3 : 1
                                         )
                                 }
@@ -104,7 +105,7 @@ struct ReaderSettingsView: View {
                         Spacer()
                         if settings.layout == layout {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(themeManager.accentColor)
                                 .fontWeight(.semibold)
                         }
                     }
@@ -151,7 +152,7 @@ struct ReaderSettingsView: View {
 
                         if isSelected {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(themeManager.accentColor)
                                 .fontWeight(.semibold)
                         }
                     }
@@ -228,75 +229,63 @@ struct ReaderSettingsView: View {
     @ViewBuilder
     private var highlightCategoriesSection: some View {
         Section {
-            ForEach(highlightColorManager.colors) { preset in
-                HighlightCategoryRow(
-                    preset: preset,
-                    bookId: bookId,
-                    highlightColorManager: highlightColorManager
-                )
-            }
+            if let bookId {
+                ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                            .frame(width: 24, height: 24)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                            }
+                        Text(item.label)
+                            .font(.subheadline)
+                    }
+                }
 
-            if bookId != nil, highlightColorManager.bookLabels[bookId!] != nil {
-                Button(role: .destructive) {
-                    highlightColorManager.resetLabels(for: bookId!)
+                NavigationLink {
+                    BookHighlightColorsEditor(bookId: bookId)
                 } label: {
-                    Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                    Label("Edit Colors for This Book", systemImage: "paintpalette")
                         .font(.subheadline)
+                }
+
+                if highlightColorManager.hasCustomColors(for: bookId) {
+                    Button(role: .destructive) {
+                        highlightColorManager.resetBookColors(for: bookId)
+                    } label: {
+                        Label("Reset to App Defaults", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline)
+                    }
+                }
+            } else {
+                ForEach(highlightColorManager.colors) { preset in
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(Color(uiColor: UIColor(hex: preset.hex) ?? .yellow))
+                            .frame(width: 24, height: 24)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                            }
+                        Text(preset.name)
+                            .font(.subheadline)
+                    }
                 }
             }
         } header: {
             Text("Highlight Categories")
         } footer: {
-            if bookId != nil {
-                Text("Customize labels for this book. Changes only apply to this book.")
+            if let bookId {
+                if highlightColorManager.hasCustomColors(for: bookId) {
+                    Text("This book uses custom highlight colors.")
+                } else {
+                    Text("Using app-wide default colors. Tap edit to customize for this book.")
+                }
             } else {
-                Text("Default labels for highlight colors.")
+                Text("Default highlight colors. Customize per-book in Reader Settings.")
             }
-        }
-    }
-}
-
-// MARK: - Highlight Category Row
-
-private struct HighlightCategoryRow: View {
-    let preset: HighlightPresetColor
-    let bookId: String?
-    let highlightColorManager: HighlightColorManager
-
-    @State private var labelText: String = ""
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Color(uiColor: UIColor(hex: preset.hex) ?? .yellow))
-                .frame(width: 24, height: 24)
-                .overlay {
-                    Circle()
-                        .strokeBorder(.white.opacity(0.3), lineWidth: 1)
-                }
-
-            TextField(preset.name, text: $labelText)
-                .font(.subheadline)
-                .focused($isFocused)
-                .onChange(of: isFocused) { _, focused in
-                    if !focused {
-                        saveLabel()
-                    }
-                }
-                .onSubmit {
-                    saveLabel()
-                }
-        }
-        .onAppear {
-            labelText = highlightColorManager.label(for: preset.id, bookId: bookId)
-        }
-    }
-
-    private func saveLabel() {
-        let trimmed = labelText.trimmingCharacters(in: .whitespaces)
-        if let bookId {
-            highlightColorManager.setLabel(for: preset.id, bookId: bookId, label: trimmed)
         }
     }
 }

@@ -139,13 +139,12 @@ class InlineMediaPlayerView: UIView {
         backgroundColor = .secondarySystemBackground
         layer.cornerRadius = 10
 
-        // Play/pause
+        // Play/pause — tintColor inherits from parent view hierarchy
         playPauseButton.setImage(
             UIImage(systemName: "play.fill")?
                 .withConfiguration(UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)),
             for: .normal
         )
-        playPauseButton.tintColor = .systemBlue
         playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(playPauseButton)
@@ -163,8 +162,7 @@ class InlineMediaPlayerView: UIView {
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(durationLabel)
 
-        // Slider
-        slider.minimumTrackTintColor = .systemBlue
+        // Slider — uses inherited tintColor for minimum track
         slider.maximumTrackTintColor = .systemGray4
         slider.addTarget(self, action: #selector(sliderChanged), for: .valueChanged)
         slider.translatesAutoresizingMaskIntoConstraints = false

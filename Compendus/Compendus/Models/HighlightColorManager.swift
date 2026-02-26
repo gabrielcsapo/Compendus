@@ -3,7 +3,7 @@
 //  Compendus
 //
 //  Observable manager for user-customizable highlight preset colors.
-//  Supports app-wide default labels and per-book label overrides.
+//  Supports app-wide defaults and per-book custom color sets.
 //  Persists to UserDefaults following the ThemeManager pattern.
 //
 
@@ -28,9 +28,10 @@ class HighlightColorManager {
         didSet { persistColors() }
     }
 
-    /// Per-book label overrides: [bookId: [colorId: label]]
-    var bookLabels: [String: [String: String]] {
-        didSet { persistBookLabels() }
+    /// Per-book custom color sets. When a book has an entry, those colors
+    /// are used instead of app-wide defaults.
+    var bookColors: [String: [HighlightPresetColor]] {
+        didSet { persistBookColors() }
     }
 
     static let maxColors = 5
@@ -59,15 +60,34 @@ class HighlightColorManager {
             self.colors = Self.defaultColors
         }
 
-        if let data = UserDefaults.standard.data(forKey: "highlightBookLabels"),
-           let saved = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
-            self.bookLabels = saved
+        if let data = UserDefaults.standard.data(forKey: "highlightBookColors"),
+           let saved = try? JSONDecoder().decode([String: [HighlightPresetColor]].self, from: data) {
+            self.bookColors = saved
         } else {
-            self.bookLabels = [:]
+            self.bookColors = [:]
+        }
+
+        // Migration: convert old per-book label overrides to per-book color sets
+        if bookColors.isEmpty,
+           let oldData = UserDefaults.standard.data(forKey: "highlightBookLabels"),
+           let oldLabels = try? JSONDecoder().decode([String: [String: String]].self, from: oldData),
+           !oldLabels.isEmpty {
+            var migrated: [String: [HighlightPresetColor]] = [:]
+            for (bookId, labelOverrides) in oldLabels {
+                var bookSet = self.colors
+                for i in bookSet.indices {
+                    if let overrideName = labelOverrides[bookSet[i].id], !overrideName.isEmpty {
+                        bookSet[i].name = overrideName
+                    }
+                }
+                migrated[bookId] = bookSet
+            }
+            self.bookColors = migrated
+            UserDefaults.standard.removeObject(forKey: "highlightBookLabels")
         }
     }
 
-    // MARK: - Color management
+    // MARK: - App-wide color management
 
     func addColor(name: String, hex: String) {
         guard canAddMore else { return }
@@ -93,45 +113,60 @@ class HighlightColorManager {
         colors = Self.defaultColors
     }
 
-    // MARK: - Per-book labels
+    // MARK: - Per-book colors
 
-    /// Get the label for a color, resolving per-book overrides
-    func label(for colorId: String, bookId: String?) -> String {
-        if let bookId,
-           let overrides = bookLabels[bookId],
-           let label = overrides[colorId],
-           !label.isEmpty {
-            return label
-        }
-        return colors.first { $0.id == colorId }?.name ?? ""
+    /// Whether a book has custom colors (not using app-wide defaults)
+    func hasCustomColors(for bookId: String) -> Bool {
+        bookColors[bookId] != nil
     }
 
-    /// Set a per-book label override for a color
-    func setLabel(for colorId: String, bookId: String, label: String) {
-        var overrides = bookLabels[bookId] ?? [:]
-        let defaultName = colors.first { $0.id == colorId }?.name ?? ""
-        if label == defaultName || label.isEmpty {
-            overrides.removeValue(forKey: colorId)
-        } else {
-            overrides[colorId] = label
-        }
-        if overrides.isEmpty {
-            bookLabels.removeValue(forKey: bookId)
-        } else {
-            bookLabels[bookId] = overrides
-        }
+    /// Set a complete custom color set for a book
+    func setBookColors(_ colors: [HighlightPresetColor], for bookId: String) {
+        bookColors[bookId] = colors
     }
 
-    /// Remove all per-book label overrides for a book
-    func resetLabels(for bookId: String) {
-        bookLabels.removeValue(forKey: bookId)
+    /// Remove per-book custom colors, reverting to app-wide defaults
+    func resetBookColors(for bookId: String) {
+        bookColors.removeValue(forKey: bookId)
     }
 
-    /// Returns colors with labels resolved for a specific book
+    /// Returns colors resolved for a specific book.
+    /// If the book has custom colors, uses those; otherwise uses app-wide defaults.
     func colorsForBook(_ bookId: String?) -> [(preset: HighlightPresetColor, label: String)] {
-        colors.map { preset in
-            (preset: preset, label: label(for: preset.id, bookId: bookId))
+        let resolved: [HighlightPresetColor]
+        if let bookId, let custom = bookColors[bookId] {
+            resolved = custom
+        } else {
+            resolved = colors
         }
+        return resolved.map { ($0, $0.name) }
+    }
+
+    func addBookColor(name: String, hex: String, for bookId: String) {
+        var bookSet = bookColors[bookId] ?? colors
+        guard bookSet.count < Self.maxColors else { return }
+        bookSet.append(HighlightPresetColor(name: name, hex: hex))
+        bookColors[bookId] = bookSet
+    }
+
+    func removeBookColor(id: String, for bookId: String) {
+        guard var bookSet = bookColors[bookId], bookSet.count > Self.minColors else { return }
+        bookSet.removeAll { $0.id == id }
+        bookColors[bookId] = bookSet
+    }
+
+    func updateBookColor(id: String, name: String, hex: String, for bookId: String) {
+        guard var bookSet = bookColors[bookId],
+              let index = bookSet.firstIndex(where: { $0.id == id }) else { return }
+        bookSet[index].name = name
+        bookSet[index].hex = hex
+        bookColors[bookId] = bookSet
+    }
+
+    func moveBookColor(from source: IndexSet, to destination: Int, for bookId: String) {
+        guard var bookSet = bookColors[bookId] else { return }
+        bookSet.move(fromOffsets: source, toOffset: destination)
+        bookColors[bookId] = bookSet
     }
 
     // MARK: - Persistence
@@ -142,9 +177,9 @@ class HighlightColorManager {
         }
     }
 
-    private func persistBookLabels() {
-        if let data = try? JSONEncoder().encode(bookLabels) {
-            UserDefaults.standard.set(data, forKey: "highlightBookLabels")
+    private func persistBookColors() {
+        if let data = try? JSONEncoder().encode(bookColors) {
+            UserDefaults.standard.set(data, forKey: "highlightBookColors")
         }
     }
 }

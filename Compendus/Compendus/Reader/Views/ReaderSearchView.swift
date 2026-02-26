@@ -16,6 +16,7 @@ struct ReaderSearchView: View {
     @State private var isSearching = false
     @State private var hasSearched = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
         NavigationStack {
@@ -97,7 +98,7 @@ struct ReaderSearchView: View {
         let afterMatch = String(snippet[matchRange.upperBound..<snippet.endIndex])
 
         (Text(beforeMatch) +
-         Text(matchText).bold().foregroundColor(.accentColor) +
+         Text(matchText).bold().foregroundColor(themeManager.accentColor) +
          Text(afterMatch))
     }
 }

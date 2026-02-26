@@ -1,23 +1,35 @@
 //
-//  HighlightColorsSettingsView.swift
+//  BookHighlightColorsEditor.swift
 //  Compendus
 //
-//  Settings view for customizing highlight color presets
+//  Per-book highlight color editor. Allows adding, removing, editing,
+//  and reordering custom colors for a specific book.
 //
 
 import SwiftUI
 
-struct HighlightColorsSettingsView: View {
+struct BookHighlightColorsEditor: View {
+    let bookId: String
+
     @Environment(HighlightColorManager.self) private var colorManager
     @State private var showingAddSheet = false
     @State private var showingResetConfirmation = false
     @State private var editingColor: HighlightPresetColor?
 
+    private var bookColorSet: [HighlightPresetColor] {
+        colorManager.bookColors[bookId] ?? colorManager.colors
+    }
+
+    private var hasCustom: Bool {
+        colorManager.hasCustomColors(for: bookId)
+    }
+
     var body: some View {
         List {
             Section {
-                ForEach(colorManager.colors) { preset in
+                ForEach(bookColorSet) { preset in
                     Button {
+                        ensureCustomColorsExist()
                         editingColor = preset
                     } label: {
                         HStack(spacing: 12) {
@@ -41,67 +53,84 @@ struct HighlightColorsSettingsView: View {
                     }
                 }
                 .onDelete { indexSet in
+                    ensureCustomColorsExist()
                     for index in indexSet {
-                        let color = colorManager.colors[index]
-                        colorManager.removeColor(id: color.id)
+                        let color = bookColorSet[index]
+                        colorManager.removeBookColor(id: color.id, for: bookId)
                     }
                 }
                 .onMove { source, destination in
-                    colorManager.moveColor(from: source, to: destination)
+                    ensureCustomColorsExist()
+                    colorManager.moveBookColor(from: source, to: destination, for: bookId)
                 }
-                .deleteDisabled(!colorManager.canRemove)
+                .deleteDisabled(bookColorSet.count <= HighlightColorManager.minColors)
             } header: {
-                Text("Highlight Colors")
+                Text("Colors for This Book")
             } footer: {
-                Text("These colors are the default quick-select options when highlighting text. Each book can have its own custom colors, configurable from Reader Settings.")
+                if hasCustom {
+                    Text("These colors are specific to this book.")
+                } else {
+                    Text("Using app-wide default colors. Changes here will create a custom set for this book.")
+                }
             }
 
             Section {
                 Button {
+                    ensureCustomColorsExist()
                     showingAddSheet = true
                 } label: {
                     Label("Add Color", systemImage: "plus.circle")
                 }
-                .disabled(!colorManager.canAddMore)
+                .disabled(bookColorSet.count >= HighlightColorManager.maxColors)
             } footer: {
-                if !colorManager.canAddMore {
-                    Text("Maximum of \(HighlightColorManager.maxColors) preset colors reached.")
+                if bookColorSet.count >= HighlightColorManager.maxColors {
+                    Text("Maximum of \(HighlightColorManager.maxColors) colors reached.")
                 }
             }
 
-            Section {
-                Button(role: .destructive) {
-                    showingResetConfirmation = true
-                } label: {
-                    Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+            if hasCustom {
+                Section {
+                    Button(role: .destructive) {
+                        showingResetConfirmation = true
+                    } label: {
+                        Label("Reset to App Defaults", systemImage: "arrow.counterclockwise")
+                    }
                 }
             }
         }
-        .navigationTitle("Highlight Colors")
+        .navigationTitle("Book Highlight Colors")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             EditButton()
         }
         .sheet(isPresented: $showingAddSheet) {
-            AddHighlightColorSheet()
+            BookAddColorSheet(bookId: bookId)
         }
         .sheet(item: $editingColor) { preset in
-            EditHighlightColorSheet(preset: preset)
+            BookEditColorSheet(bookId: bookId, preset: preset)
         }
         .confirmationDialog("Reset to Defaults?", isPresented: $showingResetConfirmation) {
             Button("Reset", role: .destructive) {
-                colorManager.resetToDefaults()
+                colorManager.resetBookColors(for: bookId)
             }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will replace your highlight colors with the defaults (Highlight, Note, Important).")
+            Text("This will remove custom colors for this book and use the app-wide defaults instead.")
+        }
+    }
+
+    private func ensureCustomColorsExist() {
+        if !hasCustom {
+            colorManager.setBookColors(colorManager.colors, for: bookId)
         }
     }
 }
 
 // MARK: - Add Color Sheet
 
-private struct AddHighlightColorSheet: View {
+private struct BookAddColorSheet: View {
+    let bookId: String
+
     @Environment(HighlightColorManager.self) private var colorManager
     @Environment(\.dismiss) private var dismiss
 
@@ -114,7 +143,7 @@ private struct AddHighlightColorSheet: View {
                 Section {
                     TextField("e.g. Theme, Character, Quote", text: $labelName)
                 } header: {
-                    Text("Default Label")
+                    Text("Label")
                 }
 
                 Section {
@@ -137,7 +166,7 @@ private struct AddHighlightColorSheet: View {
                     Text("Color")
                 }
             }
-            .navigationTitle("New Highlight Color")
+            .navigationTitle("New Color")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -146,7 +175,7 @@ private struct AddHighlightColorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         let hex = UIColor(selectedColor).hexString
-                        colorManager.addColor(name: labelName, hex: hex)
+                        colorManager.addBookColor(name: labelName, hex: hex, for: bookId)
                         dismiss()
                     }
                     .disabled(labelName.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -159,7 +188,8 @@ private struct AddHighlightColorSheet: View {
 
 // MARK: - Edit Color Sheet
 
-private struct EditHighlightColorSheet: View {
+private struct BookEditColorSheet: View {
+    let bookId: String
     let preset: HighlightPresetColor
 
     @Environment(HighlightColorManager.self) private var colorManager
@@ -174,7 +204,7 @@ private struct EditHighlightColorSheet: View {
                 Section {
                     TextField("e.g. Theme, Character, Quote", text: $labelName)
                 } header: {
-                    Text("Default Label")
+                    Text("Label")
                 }
 
                 Section {
@@ -197,7 +227,7 @@ private struct EditHighlightColorSheet: View {
                     Text("Color")
                 }
             }
-            .navigationTitle("Edit Highlight Color")
+            .navigationTitle("Edit Color")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -205,8 +235,11 @@ private struct EditHighlightColorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        if !colorManager.hasCustomColors(for: bookId) {
+                            colorManager.setBookColors(colorManager.colors, for: bookId)
+                        }
                         let hex = UIColor(selectedColor).hexString
-                        colorManager.updateColor(id: preset.id, name: labelName, hex: hex)
+                        colorManager.updateBookColor(id: preset.id, name: labelName, hex: hex, for: bookId)
                         dismiss()
                     }
                     .disabled(labelName.trimmingCharacters(in: .whitespaces).isEmpty)

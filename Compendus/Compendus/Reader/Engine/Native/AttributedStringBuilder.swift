@@ -67,6 +67,7 @@ class AttributedStringBuilder {
     private let boldItalicFont: UIFont
     private let monoFont: UIFont
     private let textColor: UIColor
+    private let accentColor: UIColor
     private let fontSize: CGFloat
     private let lineHeight: CGFloat
     private let fontFamily: ReaderFont
@@ -79,13 +80,14 @@ class AttributedStringBuilder {
     /// Floating elements (CSS float:left/right images) found during build.
     private(set) var floatingElements: [FloatingElement] = []
 
-    init(settings: ReaderSettings, contentWidth: CGFloat, contentHeight: CGFloat = .greatestFiniteMagnitude) {
+    init(settings: ReaderSettings, contentWidth: CGFloat, contentHeight: CGFloat = .greatestFiniteMagnitude, accentColor: UIColor = .tintColor) {
         self.font = settings.nativeFont
         self.boldFont = settings.nativeBoldFont
         self.italicFont = settings.nativeItalicFont
         self.boldItalicFont = settings.nativeBoldItalicFont
         self.monoFont = settings.nativeMonoFont
         self.textColor = settings.theme.textColor
+        self.accentColor = accentColor
         self.fontSize = CGFloat(settings.fontSize)
         self.lineHeight = CGFloat(settings.lineHeight)
         self.fontFamily = settings.fontFamily
@@ -94,11 +96,12 @@ class AttributedStringBuilder {
     }
 
     init(theme: ReaderTheme, fontFamily: ReaderFont, fontSize: Double,
-         lineHeight: Double, contentWidth: CGFloat, contentHeight: CGFloat = .greatestFiniteMagnitude) {
+         lineHeight: Double, contentWidth: CGFloat, contentHeight: CGFloat = .greatestFiniteMagnitude, accentColor: UIColor = .tintColor) {
         self.fontFamily = fontFamily
         self.fontSize = CGFloat(fontSize)
         self.lineHeight = CGFloat(lineHeight)
         self.textColor = theme.textColor
+        self.accentColor = accentColor
         self.contentWidth = contentWidth
         self.contentHeight = contentHeight
 
@@ -490,7 +493,7 @@ class AttributedStringBuilder {
             if let base = baseImage {
                 base.draw(in: CGRect(origin: .zero, size: size))
             } else {
-                UIColor.secondarySystemBackground.setFill()
+                textColor.withAlphaComponent(0.1).setFill()
                 ctx.fill(CGRect(origin: .zero, size: size))
             }
         }
@@ -544,7 +547,7 @@ class AttributedStringBuilder {
 
             // Rounded background
             let bgPath = UIBezierPath(roundedRect: rect, cornerRadius: 10)
-            UIColor.secondarySystemBackground.setFill()
+            textColor.withAlphaComponent(0.1).setFill()
             bgPath.fill()
 
             // Play button circle on the left
@@ -552,10 +555,10 @@ class AttributedStringBuilder {
             let circleX: CGFloat = 12
             let circleY: CGFloat = (height - circleSize) / 2
             let circleRect = CGRect(x: circleX, y: circleY, width: circleSize, height: circleSize)
-            UIColor.systemBlue.setFill()
+            accentColor.setFill()
             UIBezierPath(ovalIn: circleRect).fill()
 
-            // Play triangle
+            // Play triangle (contrast color against accent)
             let triInset = circleSize * 0.3
             let triPath = UIBezierPath()
             let tLeft = circleRect.minX + triInset + circleSize * 0.05
@@ -577,14 +580,14 @@ class AttributedStringBuilder {
             let trackRect = CGRect(x: trackLeft, y: trackY - trackHeight / 2,
                                    width: trackRight - trackLeft, height: trackHeight)
             let trackPath = UIBezierPath(roundedRect: trackRect, cornerRadius: 2)
-            UIColor.systemGray4.setFill()
+            textColor.withAlphaComponent(0.2).setFill()
             trackPath.fill()
 
             // Time label "0:00" at bottom-right of track
             let timeStr = "0:00" as NSString
             let timeAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.monospacedDigitSystemFont(ofSize: max(10, height * 0.25), weight: .medium),
-                .foregroundColor: UIColor.secondaryLabel
+                .foregroundColor: textColor.withAlphaComponent(0.5)
             ]
             let timeSize = timeStr.size(withAttributes: timeAttrs)
             timeStr.draw(
@@ -827,7 +830,7 @@ class AttributedStringBuilder {
             }
             if let link = run.link {
                 attrs[.link] = link
-                attrs[.foregroundColor] = UIColor.systemBlue
+                attrs[.foregroundColor] = accentColor
             }
             if run.styles.contains(.superscript) {
                 attrs[.baselineOffset] = fontSize * 0.3

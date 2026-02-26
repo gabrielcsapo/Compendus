@@ -15,6 +15,7 @@ struct ReaderHighlightsListView: View {
     var onEditNote: ((BookHighlight) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
         NavigationStack {
@@ -81,7 +82,7 @@ struct ReaderHighlightsListView: View {
                                     } label: {
                                         Label("Note", systemImage: "note.text")
                                     }
-                                    .tint(.accentColor)
+                                    .tint(themeManager.accentColor)
                                 }
                             }
                         }

@@ -466,7 +466,7 @@ struct BookDetailView: View {
                         .padding(.vertical, 10)
                 }
                 .buttonStyle(.bordered)
-                .tint(.blue)
+                .tint(.accentColor)
             }
 
         case .starting:
@@ -492,7 +492,7 @@ struct BookDetailView: View {
                         .fontWeight(.medium)
                 }
                 ProgressView(value: Double(conversionProgress), total: 100)
-                    .tint(.blue)
+                    .tint(.accentColor)
             }
             .padding(.vertical, 4)
 
@@ -546,7 +546,7 @@ struct BookDetailView: View {
                             .padding(.vertical, 10)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.blue)
+                    .tint(.accentColor)
                 } else {
                     Button {
                         downloadEpubVersion()
@@ -557,7 +557,7 @@ struct BookDetailView: View {
                             .padding(.vertical, 10)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.blue)
+                    .tint(.accentColor)
                 }
             } else {
                 HStack(spacing: 6) {

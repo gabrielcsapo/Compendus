@@ -14,6 +14,7 @@ struct ReaderTOCView: View {
     let onSelect: (TOCItem) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(ThemeManager.self) private var themeManager
 
     var body: some View {
         NavigationStack {
@@ -54,7 +55,7 @@ struct ReaderTOCView: View {
             HStack(spacing: 8) {
                 Text(item.title)
                     .font(fontForLevel(item.level))
-                    .foregroundStyle(isCurrent ? Color.accentColor : Color.primary)
+                    .foregroundStyle(isCurrent ? themeManager.accentColor : Color.primary)
                     .lineLimit(2)
 
                 Spacer(minLength: 4)
@@ -69,12 +70,12 @@ struct ReaderTOCView: View {
                 if isCurrent {
                     Image(systemName: "bookmark.fill")
                         .font(.caption)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(themeManager.accentColor)
                 }
             }
             .padding(.leading, CGFloat(item.level) * 20)
         }
-        .listRowBackground(isCurrent ? Color.accentColor.opacity(0.1) : Color.clear)
+        .listRowBackground(isCurrent ? themeManager.accentColor.opacity(0.1) : Color.clear)
     }
 
     private func fontForLevel(_ level: Int) -> Font {
