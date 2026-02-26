@@ -12,6 +12,7 @@ struct AudiobookPlayerView: View {
     let book: DownloadedBook
 
     @Environment(AudiobookPlayer.self) private var player
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
 
     @State private var showingChapters = false
     @State private var sleepTimerMinutes: Int?
@@ -19,6 +20,24 @@ struct AudiobookPlayerView: View {
     @State private var showLyrics = false
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
+    /// When live transcribing, we pause playback until the transcript has
+    /// buffered at least 30 s ahead of this position, then auto-resume.
+    @State private var liveBufferResumeTime: Double?
+    /// True when the current transcription was started as "live" (tied to playback).
+    @State private var isLiveTranscription = false
+
+    /// Uses the full transcript if available, otherwise the partial transcript
+    /// from an in-progress on-device transcription for this book.
+    private var effectiveTranscript: Transcript? {
+        if let loaded = loadedTranscript {
+            return loaded
+        }
+        if transcriptionService.activeBookId == book.id,
+           let partial = transcriptionService.partialTranscript {
+            return partial
+        }
+        return nil
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -35,7 +54,21 @@ struct AudiobookPlayerView: View {
                 }
 
                 VStack(spacing: 0) {
-                    if showLyrics, let transcript = loadedTranscript {
+                    if showLyrics, liveBufferResumeTime != nil {
+                        // Buffering transcript before playback resumes
+                        VStack(spacing: 16) {
+                            Spacer()
+                            ProgressView()
+                            Text("Buffering transcript...")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Playback will resume once enough text is ready")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else if showLyrics, let transcript = effectiveTranscript {
                         // Lyrics view (replaces cover when active)
                         VStack(spacing: 8) {
                             Text(book.title)
@@ -57,7 +90,7 @@ struct AudiobookPlayerView: View {
                         }
                     } else {
                         // Cover and info (centered in available space)
-                        VStack(spacing: 20) {
+                        VStack(spacing: 14) {
                             Spacer()
 
                             // Cover image — tap to show details
@@ -162,12 +195,15 @@ struct AudiobookPlayerView: View {
             }
             Button("Cancel", role: .cancel) { }
         }
+        .onChange(of: transcriptionService.partialTranscript?.segments.count) { _, _ in
+            checkTranscriptBuffer()
+        }
     }
 
     // MARK: - Player Controls
 
     private var playerControls: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             // Progress slider
             VStack(spacing: 4) {
                 Slider(
@@ -195,12 +231,21 @@ struct AudiobookPlayerView: View {
             }
 
             // Playback controls
-            HStack(spacing: 40) {
+            HStack(spacing: 28) {
                 Button {
                     player.skipBackward()
                 } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
+                }
+
+                Button {
+                    cancelLiveTranscriptionIfNeeded()
+                    player.isFullPlayerPresented = false
+                    player.stop()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 36))
                 }
 
                 Button {
@@ -248,12 +293,36 @@ struct AudiobookPlayerView: View {
 
                 Spacer()
 
-                if loadedTranscript != nil {
+                if effectiveTranscript != nil {
+                    // Transcript available — toggle lyrics view
                     Button {
                         showLyrics.toggle()
                     } label: {
                         Image(systemName: showLyrics ? "text.quote.fill" : "text.quote")
                             .font(.title3)
+                    }
+                } else if transcriptionService.activeBookId == book.id {
+                    // Transcription in progress for this book
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else if book.isAudiobook, transcriptionService.isAvailable {
+                    // No transcript — offer transcription options
+                    Menu {
+                        Button {
+                            startLiveTranscription()
+                        } label: {
+                            Label("Live Transcribe", systemImage: "waveform")
+                        }
+
+                        Button {
+                            startFullTranscription()
+                        } label: {
+                            Label("Full Book", systemImage: "book.closed")
+                        }
+                    } label: {
+                        Image(systemName: "text.quote")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -292,6 +361,67 @@ struct AudiobookPlayerView: View {
             return String(format: "%d:%02d:%02d", hours, minutes, secs)
         }
         return String(format: "%d:%02d", minutes, secs)
+    }
+
+    // MARK: - Transcription
+
+    private func startLiveTranscription() {
+        guard let fileURL = book.fileURL else { return }
+        let duration = Double(book.duration ?? 0)
+        guard duration > 0 else { return }
+
+        let resumeTime = player.currentTime
+        player.pause()
+        liveBufferResumeTime = resumeTime
+        isLiveTranscription = true
+
+        transcriptionService.transcribe(
+            fileURL: fileURL,
+            duration: duration,
+            bookId: book.id,
+            title: book.title,
+            coverData: book.coverData,
+            startFromTime: resumeTime
+        )
+        showLyrics = true
+    }
+
+    /// Resume playback once the partial transcript covers at least 30 s
+    /// ahead of the position where we paused for live transcription.
+    private func checkTranscriptBuffer() {
+        guard let resumeTime = liveBufferResumeTime,
+              let transcript = effectiveTranscript,
+              let lastSegment = transcript.segments.last else { return }
+
+        if lastSegment.end >= resumeTime + 30 {
+            liveBufferResumeTime = nil
+            player.play()
+        }
+    }
+
+    /// Cancel an in-progress live transcription (tied to playback session).
+    private func cancelLiveTranscriptionIfNeeded() {
+        guard isLiveTranscription,
+              transcriptionService.activeBookId == book.id else { return }
+        transcriptionService.cancel()
+        isLiveTranscription = false
+        liveBufferResumeTime = nil
+        showLyrics = false
+    }
+
+    private func startFullTranscription() {
+        guard let fileURL = book.fileURL else { return }
+        let duration = Double(book.duration ?? 0)
+        guard duration > 0 else { return }
+
+        transcriptionService.transcribe(
+            fileURL: fileURL,
+            duration: duration,
+            bookId: book.id,
+            title: book.title,
+            coverData: book.coverData
+        )
+        showLyrics = true
     }
 }
 

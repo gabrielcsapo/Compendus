@@ -9,9 +9,11 @@ import SwiftUI
 
 struct ReaderSettingsView: View {
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(\.dismiss) private var dismiss
 
     let format: ReaderFormat
+    var bookId: String? = nil
 
     enum ReaderFormat {
         case epub
@@ -33,6 +35,8 @@ struct ReaderSettingsView: View {
                 if format == .pdf {
                     pdfInfoSection
                 }
+
+                highlightCategoriesSection
             }
             .navigationTitle("Reader Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -64,7 +68,7 @@ struct ReaderSettingsView: View {
                                 .overlay {
                                     Circle()
                                         .strokeBorder(
-                                            settings.theme == theme ? .blue : theme.previewBorderColor,
+                                            settings.theme == theme ? .accentColor : theme.previewBorderColor,
                                             lineWidth: settings.theme == theme ? 3 : 1
                                         )
                                 }
@@ -219,9 +223,86 @@ struct ReaderSettingsView: View {
         }
     }
 
+    // MARK: - Highlight Categories Section
+
+    @ViewBuilder
+    private var highlightCategoriesSection: some View {
+        Section {
+            ForEach(highlightColorManager.colors) { preset in
+                HighlightCategoryRow(
+                    preset: preset,
+                    bookId: bookId,
+                    highlightColorManager: highlightColorManager
+                )
+            }
+
+            if bookId != nil, highlightColorManager.bookLabels[bookId!] != nil {
+                Button(role: .destructive) {
+                    highlightColorManager.resetLabels(for: bookId!)
+                } label: {
+                    Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                        .font(.subheadline)
+                }
+            }
+        } header: {
+            Text("Highlight Categories")
+        } footer: {
+            if bookId != nil {
+                Text("Customize labels for this book. Changes only apply to this book.")
+            } else {
+                Text("Default labels for highlight colors.")
+            }
+        }
+    }
+}
+
+// MARK: - Highlight Category Row
+
+private struct HighlightCategoryRow: View {
+    let preset: HighlightPresetColor
+    let bookId: String?
+    let highlightColorManager: HighlightColorManager
+
+    @State private var labelText: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(Color(uiColor: UIColor(hex: preset.hex) ?? .yellow))
+                .frame(width: 24, height: 24)
+                .overlay {
+                    Circle()
+                        .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                }
+
+            TextField(preset.name, text: $labelText)
+                .font(.subheadline)
+                .focused($isFocused)
+                .onChange(of: isFocused) { _, focused in
+                    if !focused {
+                        saveLabel()
+                    }
+                }
+                .onSubmit {
+                    saveLabel()
+                }
+        }
+        .onAppear {
+            labelText = highlightColorManager.label(for: preset.id, bookId: bookId)
+        }
+    }
+
+    private func saveLabel() {
+        let trimmed = labelText.trimmingCharacters(in: .whitespaces)
+        if let bookId {
+            highlightColorManager.setLabel(for: preset.id, bookId: bookId, label: trimmed)
+        }
+    }
 }
 
 #Preview {
     ReaderSettingsView(format: .epub)
         .environment(ReaderSettings())
+        .environment(HighlightColorManager())
 }

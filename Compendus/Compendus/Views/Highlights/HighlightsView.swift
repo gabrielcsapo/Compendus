@@ -185,7 +185,7 @@ private struct BookHighlightsDetailView: View {
                         } label: {
                             Label("Note", systemImage: "note.text")
                         }
-                        .tint(.blue)
+                        .tint(.accentColor)
                     }
             }
             .onDelete { indexSet in

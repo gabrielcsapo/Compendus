@@ -116,6 +116,7 @@ export default async function AdminData() {
       status: job.status,
       progress: job.progress ?? 0,
       message: job.message ?? "",
+      logs: job.logs ?? "",
       createdAt: job.createdAt ? job.createdAt.getTime() : 0,
       updatedAt: job.updatedAt ? job.updatedAt.getTime() : 0,
     }));

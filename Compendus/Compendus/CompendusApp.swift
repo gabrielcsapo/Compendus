@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import BackgroundTasks
 
 @main
 struct CompendusApp: App {
@@ -36,6 +37,10 @@ struct CompendusApp: App {
     @State private var readerSettings = ReaderSettings()
     @State private var appNavigation = AppNavigation()
     @State private var audiobookPlayer = AudiobookPlayer()
+    @State private var onDeviceTranscriptionService = OnDeviceTranscriptionService()
+    @State private var themeManager = ThemeManager()
+    @State private var appSettings = AppSettings()
+    @State private var highlightColorManager = HighlightColorManager()
 
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
@@ -51,6 +56,8 @@ struct CompendusApp: App {
         _downloadManager = State(initialValue: download)
     }
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -63,7 +70,13 @@ struct CompendusApp: App {
                 .environment(readerSettings)
                 .environment(appNavigation)
                 .environment(audiobookPlayer)
+                .environment(onDeviceTranscriptionService)
+                .environment(themeManager)
+                .environment(appSettings)
+                .environment(highlightColorManager)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
+                .tint(themeManager.accentColor)
+                .preferredColorScheme(appSettings.colorScheme)
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }
@@ -72,9 +85,22 @@ struct CompendusApp: App {
                     downloadManager.modelContainer = sharedModelContainer
                     downloadManager.reconnectBackgroundSession()
                     audiobookPlayer.modelContainer = sharedModelContainer
+                    OnDeviceTranscriptionService.registerBackgroundTask(
+                        service: onDeviceTranscriptionService
+                    )
                 }
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .background:
+                onDeviceTranscriptionService.handleAppBackgrounded()
+            case .active:
+                onDeviceTranscriptionService.handleAppForegrounded()
+            default:
+                break
+            }
+        }
     }
 
     private func handleDeepLink(_ url: URL) {

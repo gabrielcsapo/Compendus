@@ -123,7 +123,7 @@ struct AnimatedDownloadButton: View {
     private var backgroundColor: Color {
         switch state {
         case .idle:
-            return .blue
+            return .accentColor
         case .downloading:
             return .gray
         case .completed:

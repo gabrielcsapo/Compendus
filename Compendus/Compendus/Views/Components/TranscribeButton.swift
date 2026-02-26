@@ -2,8 +2,8 @@
 //  TranscribeButton.swift
 //  Compendus
 //
-//  Transcription trigger button for audiobooks — triggers server-side
-//  Whisper transcription and downloads the result for lyrics display.
+//  Transcription trigger button for audiobooks — supports both server-side
+//  Whisper transcription and on-device Speech framework transcription.
 //
 
 import SwiftUI
@@ -13,6 +13,7 @@ struct TranscribeButton: View {
     let book: DownloadedBook
 
     @Environment(APIService.self) private var apiService
+    @Environment(OnDeviceTranscriptionService.self) private var onDeviceService
     @Environment(\.modelContext) private var modelContext
 
     enum TranscriptionState: Equatable {
@@ -20,6 +21,7 @@ struct TranscribeButton: View {
         case idle
         case starting
         case transcribing(progress: Int, message: String)
+        case onDeviceTranscribing(progress: Double, message: String)
         case completed
         case error(String)
     }
@@ -34,13 +36,33 @@ struct TranscribeButton: View {
                 EmptyView()
 
             case .idle:
-                Button {
-                    Task { await startTranscription() }
-                } label: {
-                    Label("Transcribe", systemImage: "waveform")
-                        .frame(maxWidth: .infinity)
+                if onDeviceService.isAvailable {
+                    Menu {
+                        Button {
+                            Task { await startTranscription() }
+                        } label: {
+                            Label("Server Transcription", systemImage: "cloud")
+                        }
+
+                        Button {
+                            startOnDeviceTranscription()
+                        } label: {
+                            Label("On-Device Transcription", systemImage: "iphone")
+                        }
+                    } label: {
+                        Label("Transcribe", systemImage: "waveform")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button {
+                        Task { await startTranscription() }
+                    } label: {
+                        Label("Transcribe", systemImage: "waveform")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
             case .starting:
                 HStack(spacing: 8) {
@@ -64,6 +86,29 @@ struct TranscribeButton: View {
                         Text("\(progress)%")
                             .font(.caption)
                             .fontWeight(.medium)
+                    }
+                }
+
+            case .onDeviceTranscribing(let progress, let message):
+                VStack(spacing: 6) {
+                    ProgressView(value: progress)
+                        .tint(.accentColor)
+                    HStack {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Button {
+                            onDeviceService.cancel()
+                            state = .idle
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -97,12 +142,27 @@ struct TranscribeButton: View {
             }
         }
         .task {
-            await checkStatus()
+            // If the service is actively transcribing this book, sync state
+            if onDeviceService.activeBookId == book.id {
+                handleOnDeviceStateChange(onDeviceService.state)
+            } else {
+                await checkStatus()
+            }
         }
         .onDisappear {
             pollingTask?.cancel()
         }
+        .onChange(of: onDeviceService.state) { _, newState in
+            handleOnDeviceStateChange(newState)
+        }
+        .onChange(of: book.transcriptData) { _, newValue in
+            if newValue == nil && state == .completed {
+                state = .idle
+            }
+        }
     }
+
+    // MARK: - Status Check
 
     private func checkStatus() async {
         // If we already have transcript data locally, we're done
@@ -111,7 +171,7 @@ struct TranscribeButton: View {
             return
         }
 
-        // Check server for transcript availability
+        // Check server for transcript availability (from any source)
         do {
             let status = try await apiService.getTranscriptStatus(bookId: book.id)
             if status.hasTranscript == true {
@@ -124,6 +184,8 @@ struct TranscribeButton: View {
             state = .idle
         }
     }
+
+    // MARK: - Server Transcription
 
     private func startTranscription() async {
         state = .starting
@@ -190,6 +252,57 @@ struct TranscribeButton: View {
             }
         } catch {
             state = .error("Failed to download transcript")
+        }
+    }
+
+    // MARK: - On-Device Transcription
+
+    private func startOnDeviceTranscription() {
+        guard let fileURL = book.fileURL else {
+            state = .error("Audio file not found")
+            return
+        }
+        let duration = Double(book.duration ?? 0)
+        guard duration > 0 else {
+            state = .error("Unknown audio duration")
+            return
+        }
+        onDeviceService.transcribe(
+            fileURL: fileURL,
+            duration: duration,
+            bookId: book.id,
+            title: book.title,
+            coverData: book.coverData
+        )
+    }
+
+    private func handleOnDeviceStateChange(_ newState: OnDeviceTranscriptionService.TranscriptionState) {
+        // Only handle state changes for this book
+        guard onDeviceService.activeBookId == book.id else { return }
+
+        switch newState {
+        case .idle:
+            break
+        case .preparing:
+            state = .onDeviceTranscribing(progress: 0, message: "Preparing...")
+        case .transcribing(let progress, let message):
+            state = .onDeviceTranscribing(progress: progress, message: message)
+        case .completed(let transcript):
+            // Save transcript locally
+            if let data = try? JSONEncoder().encode(transcript) {
+                book.transcriptData = data
+                try? modelContext.save()
+            }
+            state = .completed
+            onDeviceService.state = .idle
+
+            // Upload to server so other clients can use it (fire-and-forget)
+            Task {
+                try? await apiService.uploadTranscript(bookId: book.id, transcript: transcript)
+            }
+        case .error(let message):
+            state = .error(message)
+            onDeviceService.state = .idle
         }
     }
 }

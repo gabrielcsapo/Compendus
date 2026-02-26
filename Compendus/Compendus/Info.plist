@@ -13,7 +13,14 @@
 		<string>remote-notification</string>
 		<string>fetch</string>
 		<string>audio</string>
+		<string>processing</string>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.compendus.transcription</string>
+	</array>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Compendus uses speech recognition to generate transcripts for audiobook lyrics display.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>Launch Screen</string>
 </dict>

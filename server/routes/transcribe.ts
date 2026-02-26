@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { readFile } from "fs/promises";
+import { readFile, writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { resolve, extname } from "path";
 import { eq } from "drizzle-orm";
@@ -100,6 +100,78 @@ app.get("/api/books/:id/transcript", async (c) => {
 
   const data = await readFile(fullPath, "utf-8");
   return c.json({ success: true, transcript: JSON.parse(data) });
+});
+
+/**
+ * PUT /api/books/:id/transcript
+ * Upload a transcript (e.g., from on-device transcription).
+ * Saves to disk and updates the database so other clients can use it.
+ */
+app.put("/api/books/:id/transcript", async (c) => {
+  const bookId = c.req.param("id");
+
+  const book = await db.query.books.findFirst({
+    where: eq(books.id, bookId),
+  });
+
+  if (!book) {
+    return c.json({ success: false, error: "Book not found" }, 404);
+  }
+
+  const body = await c.req.json();
+  const transcript = body?.transcript;
+
+  if (!transcript) {
+    return c.json({ success: false, error: "No transcript data provided" }, 400);
+  }
+
+  const transcriptsDir = resolve(process.cwd(), "data", "transcripts");
+  if (!existsSync(transcriptsDir)) {
+    await mkdir(transcriptsDir, { recursive: true });
+  }
+
+  const outputPath = resolve(transcriptsDir, `${bookId}.json`);
+  const relativePath = `data/transcripts/${bookId}.json`;
+
+  await writeFile(outputPath, JSON.stringify(transcript, null, 2), "utf-8");
+
+  await db
+    .update(books)
+    .set({ transcriptPath: relativePath })
+    .where(eq(books.id, bookId));
+
+  return c.json({ success: true });
+});
+
+/**
+ * DELETE /api/books/:id/transcript
+ * Remove a transcript from disk and database.
+ */
+app.delete("/api/books/:id/transcript", async (c) => {
+  const bookId = c.req.param("id");
+
+  const book = await db.query.books.findFirst({
+    where: eq(books.id, bookId),
+  });
+
+  if (!book) {
+    return c.json({ success: false, error: "Book not found" }, 404);
+  }
+
+  if (book.transcriptPath) {
+    const fullPath = resolve(process.cwd(), book.transcriptPath);
+    if (existsSync(fullPath)) {
+      const { unlink } = await import("fs/promises");
+      await unlink(fullPath).catch(() => {});
+    }
+
+    await db
+      .update(books)
+      .set({ transcriptPath: null })
+      .where(eq(books.id, bookId));
+  }
+
+  return c.json({ success: true });
 });
 
 /**

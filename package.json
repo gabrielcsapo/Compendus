@@ -44,7 +44,7 @@
     "pdfjs-dist": "^5.4.624",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-flight-router": "^0.1.6",
+    "react-flight-router": "^0.2.1",
     "react-server-dom-webpack": "^19.2.4",
     "sharp": "^0.34.5",
     "uuid": "^13.0.0"

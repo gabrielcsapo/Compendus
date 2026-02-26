@@ -78,7 +78,7 @@ struct StorageUsageView: View {
         } else if ratio > 0.7 {
             return .orange
         } else {
-            return .blue
+            return .accentColor
         }
     }
 }

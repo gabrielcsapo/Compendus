@@ -31,7 +31,7 @@ struct ContinueReadingSection: View {
             .padding(.horizontal, 20)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     ForEach(books.prefix(10)) { book in
                         ContinueReadingCard(book: book)
                             .onTapGesture {

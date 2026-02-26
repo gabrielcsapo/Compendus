@@ -27,6 +27,7 @@ struct DownloadedBookDetailView: View {
     @State private var isDescriptionExpanded = false
     @State private var relatedBooks: [Book] = []
     @State private var selectedRelatedBook: Book?
+    @State private var showingManagementSheet = false
 
     var body: some View {
         ScrollView {
@@ -34,39 +35,29 @@ struct DownloadedBookDetailView: View {
                 heroCoverSection
 
                 titleBlock
-                    .padding(.top, 16)
+                    .padding(.top, 12)
 
                 metadataRow
                     .padding(.top, 12)
 
                 actionSection
-                    .padding(.top, 20)
+                    .padding(.top, 16)
                     .padding(.horizontal, 20)
-
-                if book.isAudiobook {
-                    TranscribeButton(book: book)
-                        .padding(.top, 12)
-                        .padding(.horizontal, 20)
-                }
 
                 if let description = book.bookDescription, !description.isEmpty {
                     descriptionSection(description)
-                        .padding(.top, 24)
+                        .padding(.top, 16)
                         .padding(.horizontal, 20)
                 }
 
                 detailsCardSection
-                    .padding(.top, 24)
+                    .padding(.top, 16)
                     .padding(.horizontal, 20)
 
                 relatedBooksContent
-                    .padding(.top, 24)
+                    .padding(.top, 16)
                     .padding(.horizontal, 20)
-
-                downloadInfoSection
-                    .padding(.top, 24)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 32)
             }
         }
         .navigationTitle("")
@@ -77,24 +68,17 @@ struct DownloadedBookDetailView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    showingDeleteConfirmation = true
+                Button {
+                    showingManagementSheet = true
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
-        .confirmationDialog(
-            "Delete Book?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
+        .sheet(isPresented: $showingManagementSheet) {
+            BookManagementSheet(book: book) {
                 deleteBook()
             }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will remove \"\(book.title)\" from your device. You can download it again from your library.")
         }
         .fullScreenCover(item: $bookToRead) { bookToOpen in
             ReaderContainerView(book: bookToOpen)
@@ -365,26 +349,6 @@ struct DownloadedBookDetailView: View {
         }
     }
 
-    // MARK: - Download Info
-
-    @ViewBuilder
-    private var downloadInfoSection: some View {
-        HStack {
-            Label(
-                "Downloaded \(book.downloadedAt.formatted(date: .abbreviated, time: .omitted))",
-                systemImage: "arrow.down.circle"
-            )
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-
-            Spacer()
-
-            Text(book.fileSizeDisplay)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
     // MARK: - Components
 
     @ViewBuilder
@@ -469,6 +433,163 @@ struct DownloadedBookDetailView: View {
             dismiss()
         } catch {
             // Handle error silently
+        }
+    }
+}
+
+// MARK: - Book Management Sheet
+
+struct BookManagementSheet: View {
+    let book: DownloadedBook
+    let onDelete: () -> Void
+
+    @Environment(APIService.self) private var apiService
+    @Environment(OnDeviceTranscriptionService.self) private var onDeviceService
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showingDeleteBookConfirmation = false
+    @State private var showingDeleteTranscriptConfirmation = false
+    @State private var isDeletingTranscript = false
+
+    /// Whether a transcript exists (saved or in-progress partial)
+    private var hasAnyTranscript: Bool {
+        book.transcriptData != nil || onDeviceService.activeBookId == book.id
+    }
+
+    /// Whether transcription is actively running for this book
+    private var isTranscribing: Bool {
+        onDeviceService.activeBookId == book.id && onDeviceService.isActive
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // Transcription section (audiobooks only)
+                if book.isAudiobook {
+                    Section {
+                        TranscribeButton(book: book)
+
+                        if hasAnyTranscript {
+                            Button(role: .destructive) {
+                                showingDeleteTranscriptConfirmation = true
+                            } label: {
+                                Label {
+                                    if isDeletingTranscript {
+                                        HStack(spacing: 8) {
+                                            Text("Deleting...")
+                                            Spacer()
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        }
+                                    } else {
+                                        Text(isTranscribing ? "Stop & Delete Transcript" : "Delete Transcript")
+                                    }
+                                } icon: {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                            .disabled(isDeletingTranscript)
+                        }
+                    } header: {
+                        Text("Transcription")
+                    }
+                }
+
+                // Book actions
+                Section {
+                    Button(role: .destructive) {
+                        showingDeleteBookConfirmation = true
+                    } label: {
+                        Label("Delete from Device", systemImage: "trash")
+                    }
+                } header: {
+                    Text("Book")
+                }
+
+                // Information section
+                Section {
+                    LabeledContent("Downloaded") {
+                        Text(book.downloadedAt.formatted(date: .abbreviated, time: .omitted))
+                    }
+
+                    LabeledContent("File Size") {
+                        Text(book.fileSizeDisplay)
+                    }
+
+                    if book.isAudiobook {
+                        LabeledContent("Transcript") {
+                            if book.transcriptData != nil {
+                                Label("Available", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else if isTranscribing {
+                                Label("In progress", systemImage: "waveform")
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Text("Not available")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Information")
+                }
+            }
+            .navigationTitle("Manage Book")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Delete Book?",
+                isPresented: $showingDeleteBookConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        onDelete()
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will remove \"\(book.title)\" from your device. You can download it again from your library.")
+            }
+            .confirmationDialog(
+                "Delete Transcript?",
+                isPresented: $showingDeleteTranscriptConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    deleteTranscript()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will remove the transcript for \"\(book.title)\". You can transcribe it again later.")
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func deleteTranscript() {
+        isDeletingTranscript = true
+
+        // Cancel any in-progress transcription for this book
+        if onDeviceService.activeBookId == book.id {
+            onDeviceService.cancel()
+        }
+
+        book.transcriptData = nil
+        try? modelContext.save()
+
+        // Also delete from server (fire-and-forget)
+        Task {
+            try? await apiService.deleteTranscript(bookId: book.id)
+            isDeletingTranscript = false
         }
     }
 }

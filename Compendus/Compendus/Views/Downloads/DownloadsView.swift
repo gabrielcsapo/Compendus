@@ -51,6 +51,7 @@ struct DownloadsView: View {
     @Environment(APIService.self) private var apiService
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
     private var books: [DownloadedBook]
@@ -191,11 +192,11 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if books.isEmpty && !hasActiveDownloads {
+        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
             DownloadsEmptyStateView()
         } else if viewMode == .series && selectedSeriesName == nil {
             seriesGridContent
-        } else if filteredBooks.isEmpty && !hasActiveDownloads {
+        } else if filteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -273,6 +274,11 @@ struct DownloadsView: View {
             // Active downloads section
             if hasActiveDownloads && selectedSeriesName == nil {
                 activeDownloadsSection
+            }
+
+            // Active transcription section
+            if transcriptionService.isActive && selectedSeriesName == nil {
+                activeTranscriptionSection
             }
 
             // Storage summary (only show when not searching, filtering, or in series view)
@@ -407,6 +413,113 @@ struct DownloadsView: View {
         }
     }
 
+    // MARK: - Active Transcription Section
+
+    private var activeTranscriptionSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Section header
+            HStack {
+                Label("Transcribing", systemImage: "waveform")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Cancel", role: .destructive) {
+                    transcriptionService.cancel()
+                }
+                .font(.caption)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            // Transcription row
+            HStack(spacing: 12) {
+                // Cover thumbnail
+                if let coverData = transcriptionService.activeBookCoverData,
+                   let uiImage = UIImage(data: coverData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(2/3, contentMode: .fit)
+                        .frame(width: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.gray.opacity(0.2))
+                        .aspectRatio(2/3, contentMode: .fit)
+                        .frame(width: 50)
+                        .overlay {
+                            Image(systemName: "headphones")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                }
+
+                // Info + progress
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(transcriptionService.activeBookTitle ?? "")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+
+                    switch transcriptionService.state {
+                    case .preparing:
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(width: 12, height: 12)
+                            Text("Preparing...")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                    case .transcribing(let progress, let message):
+                        VStack(alignment: .leading, spacing: 2) {
+                            ProgressView(value: progress)
+                                .progressViewStyle(LinearProgressViewStyle())
+
+                            HStack {
+                                Text(message)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(Int(progress * 100))%")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+
+                    default:
+                        EmptyView()
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                // Cancel button
+                Button {
+                    transcriptionService.cancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 20)
+        }
+    }
+
     // MARK: - Delete Helpers
 
     private var deleteDialogTitle: String {
@@ -449,5 +562,6 @@ struct DownloadsView: View {
         .environment(api)
         .environment(DownloadManager(config: config, apiService: api))
         .environment(StorageManager())
+        .environment(OnDeviceTranscriptionService())
         .modelContainer(for: [DownloadedBook.self, PendingDownload.self], inMemory: true)
 }

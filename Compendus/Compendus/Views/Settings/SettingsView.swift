@@ -14,7 +14,9 @@ struct SettingsView: View {
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(\.modelContext) private var modelContext
 
-    @State private var appSettings = AppSettings()
+    @Environment(AppSettings.self) private var appSettings
+    @Environment(ThemeManager.self) private var themeManager
+    @Environment(HighlightColorManager.self) private var highlightColorManager
     @State private var editedServerURL = ""
     @State private var isTestingConnection = false
     @State private var connectionStatus: ConnectionStatus = .unknown
@@ -28,6 +30,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        @Bindable var appSettings = appSettings
         NavigationStack {
             Form {
                 // Server section
@@ -73,7 +76,46 @@ struct SettingsView: View {
 
                 // Appearance section
                 Section {
-                    Picker("Theme", selection: $appSettings.colorSchemePreference) {
+                    NavigationLink {
+                        ThemePickerView()
+                    } label: {
+                        HStack {
+                            Text("App Theme")
+                            Spacer()
+                            Circle()
+                                .fill(themeManager.accentColor)
+                                .frame(width: 20, height: 20)
+                            Text(themeManager.activeTheme.name)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    NavigationLink {
+                        HighlightColorsSettingsView()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Highlight Colors")
+                            Spacer()
+                            HStack(spacing: -4) {
+                                ForEach(highlightColorManager.colors.prefix(3)) { preset in
+                                    Circle()
+                                        .fill(Color(uiColor: UIColor(hex: preset.hex) ?? .yellow))
+                                        .frame(width: 16, height: 16)
+                                        .overlay {
+                                            Circle()
+                                                .strokeBorder(.white, lineWidth: 1)
+                                        }
+                                }
+                            }
+                            if highlightColorManager.colors.count > 3 {
+                                Text("+\(highlightColorManager.colors.count - 3)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Picker("Appearance", selection: $appSettings.colorSchemePreference) {
                         ForEach(ColorSchemePreference.allCases) { scheme in
                             Label(scheme.displayName, systemImage: scheme.icon)
                                 .tag(scheme)
@@ -255,7 +297,6 @@ struct SettingsView: View {
                 }
                 .presentationDetents([.medium])
             }
-            .preferredColorScheme(appSettings.colorScheme)
         }
     }
 
@@ -346,5 +387,8 @@ struct SettingsView: View {
         .environment(ServerConfig())
         .environment(StorageManager())
         .environment(DownloadManager(config: ServerConfig(), apiService: APIService(config: ServerConfig())))
+        .environment(AppSettings())
+        .environment(ThemeManager())
+        .environment(HighlightColorManager())
         .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

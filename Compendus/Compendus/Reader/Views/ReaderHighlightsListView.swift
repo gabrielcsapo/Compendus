@@ -81,7 +81,7 @@ struct ReaderHighlightsListView: View {
                                     } label: {
                                         Label("Note", systemImage: "note.text")
                                     }
-                                    .tint(.blue)
+                                    .tint(.accentColor)
                                 }
                             }
                         }

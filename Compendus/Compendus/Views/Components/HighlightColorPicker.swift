@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct HighlightColorPicker: View {
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+
+    var bookId: String? = nil
     let text: String
     let onSelectColor: (String) -> Void
     let onCancel: () -> Void
@@ -28,17 +31,17 @@ struct HighlightColorPicker: View {
 
                 // Color options
                 HStack(spacing: 16) {
-                    ForEach(BookHighlight.colors, id: \.hex) { color in
+                    ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
                         Button {
-                            onSelectColor(color.hex)
+                            onSelectColor(item.preset.hex)
                         } label: {
                             VStack(spacing: 6) {
                                 Circle()
-                                    .fill(Color(uiColor: UIColor(hex: color.hex) ?? .yellow))
+                                    .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
                                     .frame(width: 44, height: 44)
                                     .shadow(radius: 2)
 
-                                Text(color.name)
+                                Text(item.label)
                                     .font(.caption2)
                                     .foregroundStyle(.primary)
                             }

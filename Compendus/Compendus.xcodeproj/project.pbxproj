@@ -53,6 +53,7 @@
 		F91E18882F37E6280029A1F0 /* CompendusWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F9A1B0022F4500000029A1F0 /* SwiftSoup */; };
 		F9CF53942F4848380099E42C /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F9CF53932F4848380099E42C /* Launch Screen.storyboard */; };
+		F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000002WHISPER /* whisper */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,6 +186,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */,
 				F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */,
 				F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */,
 			);
@@ -340,6 +342,7 @@
 			packageProductDependencies = (
 				F91E18582F3679000029A1F0 /* ZIPFoundation */,
 				F9A1B0022F4500000029A1F0 /* SwiftSoup */,
+				AA00000000000002WHISPER /* whisper */,
 			);
 			productName = Compendus;
 			productReference = F91E180A2F366F9C0029A1F0 /* Compendus.app */;
@@ -395,6 +398,7 @@
 			packageReferences = (
 				F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				F9A1B0032F4500000029A1F0 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
+				AA00000000000001WHISPER /* XCLocalSwiftPackageReference "Packages/whisper.cpp" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F91E180B2F366F9C0029A1F0 /* Products */;
@@ -898,6 +902,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		AA00000000000001WHISPER /* XCLocalSwiftPackageReference "Packages/whisper.cpp" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/whisper.cpp;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -918,6 +929,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		AA00000000000002WHISPER /* whisper */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = whisper;
+		};
 		F91E18582F3679000029A1F0 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;

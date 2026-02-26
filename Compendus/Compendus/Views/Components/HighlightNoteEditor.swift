@@ -13,6 +13,9 @@
 import SwiftUI
 
 struct HighlightNoteEditor: View {
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+
+    var bookId: String? = nil
     let highlightText: String
     @Binding var note: String
     /// When non-nil, shows a color picker row (used for new highlights)
@@ -52,31 +55,38 @@ struct HighlightNoteEditor: View {
                 // Color picker row (only for new highlights)
                 if let colorBinding = selectedColor {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Color")
+                        Text("Category")
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
 
                         HStack(spacing: 12) {
-                            ForEach(BookHighlight.colors, id: \.hex) { color in
+                            ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
                                 Button {
-                                    colorBinding.wrappedValue = color.hex
+                                    colorBinding.wrappedValue = item.preset.hex
                                 } label: {
-                                    Circle()
-                                        .fill(Color(uiColor: UIColor(hex: color.hex) ?? .yellow))
-                                        .frame(width: 36, height: 36)
-                                        .overlay {
-                                            if colorBinding.wrappedValue == color.hex {
-                                                Image(systemName: "checkmark")
-                                                    .font(.system(size: 14, weight: .bold))
-                                                    .foregroundStyle(.white)
-                                                    .shadow(radius: 1)
+                                    VStack(spacing: 4) {
+                                        Circle()
+                                            .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                                            .frame(width: 36, height: 36)
+                                            .overlay {
+                                                if colorBinding.wrappedValue == item.preset.hex {
+                                                    Image(systemName: "checkmark")
+                                                        .font(.system(size: 14, weight: .bold))
+                                                        .foregroundStyle(.white)
+                                                        .shadow(radius: 1)
+                                                }
                                             }
-                                        }
-                                        .overlay {
-                                            Circle()
-                                                .strokeBorder(.white.opacity(0.3), lineWidth: 1)
-                                        }
+                                            .overlay {
+                                                Circle()
+                                                    .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                                            }
+
+                                        Text(item.label)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
                                 }
                             }
                         }
@@ -136,6 +146,9 @@ struct EditNoteSheet: View {
 
 /// Sheet for editing an existing highlight: change color, edit note, copy text, or delete.
 struct HighlightEditSheet: View {
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+
+    var bookId: String? = nil
     let highlight: BookHighlight
     let onChangeColor: (String) -> Void
     let onSaveNote: (String?) -> Void
@@ -162,32 +175,39 @@ struct HighlightEditSheet: View {
 
                 // Color picker
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Color")
+                    Text("Category")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
                     HStack(spacing: 12) {
-                        ForEach(BookHighlight.colors, id: \.hex) { color in
+                        ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
                             Button {
-                                selectedColor = color.hex
-                                onChangeColor(color.hex)
+                                selectedColor = item.preset.hex
+                                onChangeColor(item.preset.hex)
                             } label: {
-                                Circle()
-                                    .fill(Color(uiColor: UIColor(hex: color.hex) ?? .yellow))
-                                    .frame(width: 36, height: 36)
-                                    .overlay {
-                                        if selectedColor == color.hex {
-                                            Image(systemName: "checkmark")
-                                                .font(.system(size: 14, weight: .bold))
-                                                .foregroundStyle(.white)
-                                                .shadow(radius: 1)
+                                VStack(spacing: 4) {
+                                    Circle()
+                                        .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                                        .frame(width: 36, height: 36)
+                                        .overlay {
+                                            if selectedColor == item.preset.hex {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 14, weight: .bold))
+                                                    .foregroundStyle(.white)
+                                                    .shadow(radius: 1)
+                                            }
                                         }
-                                    }
-                                    .overlay {
-                                        Circle()
-                                            .strokeBorder(.white.opacity(0.3), lineWidth: 1)
-                                    }
+                                        .overlay {
+                                            Circle()
+                                                .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                                        }
+
+                                    Text(item.label)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                             }
                         }
                     }

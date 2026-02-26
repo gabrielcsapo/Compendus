@@ -24,6 +24,7 @@ export interface Transcript {
 
 interface TranscribeOptions {
   onProgress?: (progress: number, message: string) => void;
+  onLog?: (line: string) => void;
 }
 
 /** whisper.cpp full JSON output format */
@@ -216,6 +217,9 @@ async function splitAudioToChunks(
   return chunks;
 }
 
+/** Timeout per chunk: 30 minutes of audio should not take more than 2 hours */
+const CHUNK_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
 /**
  * Run whisper-cli on a single WAV chunk and return parsed segments.
  */
@@ -223,6 +227,7 @@ async function transcribeChunk(
   chunkPath: string,
   modelPath: string,
   threads: number,
+  onLog?: (line: string) => void,
 ): Promise<WhisperCppOutput> {
   const tempOutputBase = chunkPath.replace(/\.wav$/, ".whisper");
 
@@ -238,17 +243,50 @@ async function transcribeChunk(
     "--best-of", "1",
   ];
 
+  onLog?.(`[whisper-cli] ${args.join(" ")}`);
+
   await new Promise<void>((resolvePromise, reject) => {
     let settled = false;
     let stderrBuffer = "";
+    let stderrLineBuffer = "";
     let spawnError: Error | null = null;
+    let lastOutputTime = Date.now();
 
     const proc = spawn("whisper-cli", args, {
       env: { ...process.env },
     });
 
+    // Timeout check — kill the process if no output for too long
+    const timeoutCheck = setInterval(() => {
+      const elapsed = Date.now() - lastOutputTime;
+      if (elapsed > CHUNK_TIMEOUT_MS) {
+        clearInterval(timeoutCheck);
+        onLog?.(`[timeout] No output for ${Math.round(elapsed / 60000)}min, killing process`);
+        proc.kill("SIGKILL");
+      }
+    }, 30000);
+
     proc.stderr.on("data", (data: Buffer) => {
-      stderrBuffer += data.toString();
+      const text = data.toString();
+      stderrBuffer += text;
+      lastOutputTime = Date.now();
+
+      // Stream stderr line-by-line to the log callback
+      stderrLineBuffer += text;
+      const lines = stderrLineBuffer.split("\n");
+      stderrLineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim()) onLog?.(line);
+      }
+    });
+
+    proc.stdout.on("data", (data: Buffer) => {
+      lastOutputTime = Date.now();
+      const text = data.toString();
+      const lines = text.split("\n");
+      for (const line of lines) {
+        if (line.trim()) onLog?.(`[stdout] ${line}`);
+      }
     });
 
     proc.on("error", (err) => {
@@ -256,8 +294,14 @@ async function transcribeChunk(
     });
 
     proc.on("close", (code) => {
+      clearInterval(timeoutCheck);
+      // Flush remaining stderr
+      if (stderrLineBuffer.trim()) onLog?.(stderrLineBuffer);
+
       if (settled) return;
       settled = true;
+
+      onLog?.(`[whisper-cli] exited with code ${code}`);
 
       if (code === 0) {
         resolvePromise();
@@ -352,7 +396,8 @@ export async function transcribeAudio(
       options.onProgress?.(chunkPct, `Transcribing chunk ${i + 1}/${chunks.length}...`);
 
       console.log(`[Transcribe] Processing chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s)`);
-      const whisperOutput = await transcribeChunk(chunk.path, modelPath, threads);
+      options.onLog?.(`--- Chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s) ---`);
+      const whisperOutput = await transcribeChunk(chunk.path, modelPath, threads, options.onLog);
 
       if (i === 0 && whisperOutput.result?.language) {
         language = whisperOutput.result.language;

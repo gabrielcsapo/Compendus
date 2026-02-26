@@ -77,6 +77,39 @@ extension UIImage {
     }
 }
 
+// MARK: - UIColor Hex Extension (for theme accent)
+
+extension UIColor {
+    convenience init?(hex: String) {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+
+        var rgb: UInt64 = 0
+        guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else { return nil }
+
+        let r, g, b: CGFloat
+        switch hexSanitized.count {
+        case 6:
+            r = CGFloat((rgb & 0xFF0000) >> 16) / 255.0
+            g = CGFloat((rgb & 0x00FF00) >> 8) / 255.0
+            b = CGFloat(rgb & 0x0000FF) / 255.0
+        default:
+            return nil
+        }
+
+        self.init(red: r, green: g, blue: b, alpha: 1.0)
+    }
+}
+
+// MARK: - Theme Accent Helper
+
+private func readThemeAccent() -> Color? {
+    guard let shared = UserDefaults(suiteName: appGroupIdentifier),
+          let hex = shared.string(forKey: "themeAccentLightHex"),
+          let uiColor = UIColor(hex: hex) else { return nil }
+    return Color(uiColor: uiColor)
+}
+
 // MARK: - Timeline Provider
 
 struct ContinueReadingProvider: TimelineProvider {
@@ -91,21 +124,24 @@ struct ContinueReadingProvider: TimelineProvider {
                 progress: 0.45,
                 coverData: nil,
                 lastReadAt: Date()
-            )
+            ),
+            themeAccent: nil
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ContinueReadingEntry) -> Void) {
         let entry = ContinueReadingEntry(
             date: Date(),
-            book: WidgetDataManager.shared.getCurrentBook()
+            book: WidgetDataManager.shared.getCurrentBook(),
+            themeAccent: readThemeAccent()
         )
         completion(entry)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ContinueReadingEntry>) -> Void) {
         let currentBook = WidgetDataManager.shared.getCurrentBook()
-        let entry = ContinueReadingEntry(date: Date(), book: currentBook)
+        let accent = readThemeAccent()
+        let entry = ContinueReadingEntry(date: Date(), book: currentBook, themeAccent: accent)
 
         // Refresh every 30 minutes
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 30, to: Date())!
@@ -119,6 +155,7 @@ struct ContinueReadingProvider: TimelineProvider {
 struct ContinueReadingEntry: TimelineEntry {
     let date: Date
     let book: WidgetBook?
+    let themeAccent: Color?
 }
 
 // MARK: - Widget Views
@@ -131,20 +168,21 @@ struct ContinueReadingWidgetEntryView: View {
         if let book = entry.book {
             switch family {
             case .systemSmall:
-                SmallWidgetView(book: book)
+                SmallWidgetView(book: book, themeAccent: entry.themeAccent)
             case .systemMedium:
-                MediumWidgetView(book: book)
+                MediumWidgetView(book: book, themeAccent: entry.themeAccent)
             default:
-                SmallWidgetView(book: book)
+                SmallWidgetView(book: book, themeAccent: entry.themeAccent)
             }
         } else {
-            EmptyWidgetView()
+            EmptyWidgetView(themeAccent: entry.themeAccent)
         }
     }
 }
 
 struct SmallWidgetView: View {
     let book: WidgetBook
+    var themeAccent: Color?
 
     private var coverImage: UIImage? {
         if let data = book.coverData {
@@ -154,7 +192,7 @@ struct SmallWidgetView: View {
     }
 
     private var backgroundColor: Color {
-        coverImage?.prominentColor() ?? Color(.systemGray4)
+        coverImage?.prominentColor() ?? themeAccent ?? Color(.systemGray4)
     }
 
     var body: some View {
@@ -223,6 +261,7 @@ struct SmallWidgetView: View {
 
 struct MediumWidgetView: View {
     let book: WidgetBook
+    var themeAccent: Color?
 
     private var coverImage: UIImage? {
         if let data = book.coverData {
@@ -232,7 +271,7 @@ struct MediumWidgetView: View {
     }
 
     private var dominantColor: Color {
-        coverImage?.prominentColor() ?? Color(.systemGray4)
+        coverImage?.prominentColor() ?? themeAccent ?? Color(.systemGray4)
     }
 
     var body: some View {
@@ -299,11 +338,13 @@ struct MediumWidgetView: View {
 }
 
 struct EmptyWidgetView: View {
+    var themeAccent: Color?
+
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "books.vertical")
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(themeAccent ?? .secondary)
 
             Text("No Recent Books")
                 .font(.caption)
@@ -348,7 +389,8 @@ struct CompendusWidget: Widget {
             progress: 0.45,
             coverData: nil,
             lastReadAt: Date()
-        )
+        ),
+        themeAccent: nil
     )
 }
 
@@ -365,12 +407,13 @@ struct CompendusWidget: Widget {
             progress: 0.45,
             coverData: nil,
             lastReadAt: Date()
-        )
+        ),
+        themeAccent: nil
     )
 }
 
 #Preview("Empty", as: .systemSmall) {
     CompendusWidget()
 } timeline: {
-    ContinueReadingEntry(date: .now, book: nil)
+    ContinueReadingEntry(date: .now, book: nil, themeAccent: nil)
 }

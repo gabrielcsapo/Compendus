@@ -205,6 +205,21 @@ export function updateJobProgress(
 }
 
 /**
+ * Append a line to the job's logs column. Keeps the last 500 lines max.
+ */
+export function appendJobLog(id: string, line: string): void {
+  const row = db.select({ logs: backgroundJobs.logs }).from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
+  if (!row) return;
+
+  const existing = row.logs ?? "";
+  const lines = existing ? existing.split("\n") : [];
+  lines.push(line);
+  // Keep last 500 lines to prevent unbounded growth
+  const trimmed = lines.length > 500 ? lines.slice(-500) : lines;
+  db.update(backgroundJobs).set({ logs: trimmed.join("\n") }).where(eq(backgroundJobs.id, id)).run();
+}
+
+/**
  * Cancel a job. Pending jobs are marked as error immediately.
  * Running jobs are signalled to abort — the processor will stop them.
  * Completed/error jobs are deleted from the database.
@@ -253,6 +268,9 @@ async function processTranscribeJob(jobId: string, payload: TranscribePayload): 
   await transcribeAudio(bookPath, outputPath, {
     onProgress: (progress, message) => {
       updateJobProgress(jobId, { status: "running", progress, message });
+    },
+    onLog: (line) => {
+      appendJobLog(jobId, line);
     },
   });
 

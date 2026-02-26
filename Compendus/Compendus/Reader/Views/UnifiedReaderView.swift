@@ -117,7 +117,7 @@ struct UnifiedReaderView: View {
         .sheet(isPresented: $showingSettings, onDismiss: {
             engine?.applySettings(readerSettings)
         }) {
-            ReaderSettingsView(format: engine?.isPDF == true ? .pdf : .epub)
+            ReaderSettingsView(format: engine?.isPDF == true ? .pdf : .epub, bookId: book.id)
                 .readerThemed(readerSettings)
         }
         // TOC
@@ -160,6 +160,7 @@ struct UnifiedReaderView: View {
         // Note input
         .sheet(isPresented: $showingNoteInput) {
             HighlightNoteEditor(
+                bookId: book.id,
                 highlightText: pendingSelection?.text ?? "",
                 note: $noteInputText,
                 selectedColor: $noteInputColor,
@@ -188,6 +189,7 @@ struct UnifiedReaderView: View {
         // Tapped highlight actions
         .sheet(item: $tappedHighlight) { highlight in
             HighlightEditSheet(
+                bookId: book.id,
                 highlight: highlight,
                 onChangeColor: { color in
                     highlight.color = color
@@ -299,6 +301,7 @@ struct UnifiedReaderView: View {
                 // Floating highlight toolbar (always overlaid at selection position)
                 if showingFloatingToolbar, let frame = selectionFrame {
                     FloatingHighlightToolbar(
+                        bookId: book.id,
                         selectionRect: frame,
                         containerSize: geometry.size,
                         onSelectColor: { color in

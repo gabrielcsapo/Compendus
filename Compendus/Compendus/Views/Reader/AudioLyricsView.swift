@@ -45,6 +45,10 @@ struct AudioLyricsView: View {
         .onChange(of: currentTime) { _, newTime in
             updateActiveSegment(for: newTime)
         }
+        .onChange(of: transcript.segments.count) { _, _ in
+            // Resync when new segments are added (partial transcript growing)
+            updateActiveSegment(for: currentTime)
+        }
         .onAppear {
             updateActiveSegment(for: currentTime)
         }
@@ -72,8 +76,9 @@ struct AudioLyricsView: View {
             }
         }
 
-        // If between segments, show the previous one
-        if lo > 0 && lo < segments.count && time < segments[lo].start {
+        // If between segments or past all segments, keep showing the
+        // previous one so the lyrics don't go blank during recognition gaps.
+        if lo > 0 {
             activeSegmentIndex = lo - 1
         } else {
             activeSegmentIndex = -1

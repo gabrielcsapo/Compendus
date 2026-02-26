@@ -2,7 +2,7 @@
 //  MiniPlayerView.swift
 //  Compendus
 //
-//  Compact audiobook player bar shown above the tab bar
+//  Inline mini player shown inside the custom bottom bar, above the tab icons.
 //
 
 import SwiftUI
@@ -11,20 +11,20 @@ struct MiniPlayerView: View {
     @Environment(AudiobookPlayer.self) private var player
 
     var body: some View {
-        if player.hasActiveSession && !player.isFullPlayerPresented {
+        VStack(spacing: 0) {
             HStack(spacing: 12) {
-                // Cover art thumbnail
+                // Cover art
                 if let coverData = player.currentBook?.coverData,
                    let uiImage = UIImage(data: coverData) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 8)
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 48, height: 48)
                         .overlay {
                             Image(systemName: "headphones")
                                 .font(.caption)
@@ -46,6 +46,15 @@ struct MiniPlayerView: View {
 
                 Spacer()
 
+                // Stop
+                Button {
+                    player.stop()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.callout)
+                        .frame(width: 36, height: 36)
+                }
+
                 // Play/Pause
                 Button {
                     if player.isPlaying {
@@ -56,7 +65,7 @@ struct MiniPlayerView: View {
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.title3)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 36, height: 36)
                 }
 
                 // Skip forward
@@ -65,37 +74,31 @@ struct MiniPlayerView: View {
                 } label: {
                     Image(systemName: "forward.fill")
                         .font(.callout)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 36, height: 36)
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
-            .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(.ultraThickMaterial)
-                    .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 4)
-                    .shadow(color: .black.opacity(0.08), radius: 2, x: 0, y: 1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            // Progress bar at bottom edge
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Color.primary.opacity(0.3))
+                    .frame(height: 3)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.primary)
+                            .frame(
+                                width: geo.size.width * (player.duration > 0 ? player.currentTime / player.duration : 0)
+                            )
+                    }
             }
-            .overlay(alignment: .bottom) {
-                // Progress bar along bottom edge
-                GeometryReader { geo in
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.accentColor)
-                        .frame(
-                            width: geo.size.width * (player.duration > 0 ? player.currentTime / player.duration : 0),
-                            height: 3
-                        )
-                }
-                .frame(height: 3)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .padding(.horizontal, 1)
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 6)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                player.isFullPlayerPresented = true
-            }
+            .frame(height: 3)
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            player.isFullPlayerPresented = true
+        }
+        .frame(height: 67)
     }
 }

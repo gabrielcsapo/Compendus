@@ -9,6 +9,9 @@
 import SwiftUI
 
 struct FloatingHighlightToolbar: View {
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+
+    var bookId: String? = nil
     let selectionRect: CGRect
     let containerSize: CGSize
     let onSelectColor: (String) -> Void
@@ -30,9 +33,16 @@ struct FloatingHighlightToolbar: View {
         }
     }
 
+    private var toolbarWidth: CGFloat {
+        let count = CGFloat(highlightColorManager.colors.count + 1)
+        let dotSize: CGFloat = 28
+        let spacing: CGFloat = highlightColorManager.colors.count > 3 ? 8 : 12
+        let padding: CGFloat = 32
+        return max(220, count * dotSize + (count - 1) * spacing + padding)
+    }
+
     private var toolbarX: CGFloat {
-        let menuWidth: CGFloat = 220
-        let half = menuWidth / 2
+        let half = toolbarWidth / 2
         let x = selectionRect.midX
         return max(half + 8, min(x, containerSize.width - half - 8))
     }
@@ -46,15 +56,22 @@ struct FloatingHighlightToolbar: View {
 
             // Context menu
             VStack(spacing: 0) {
-                // Color dots row
-                HStack(spacing: 12) {
-                    ForEach(BookHighlight.colors, id: \.hex) { color in
+                // Color dots row with labels
+                HStack(spacing: highlightColorManager.colors.count > 3 ? 8 : 12) {
+                    ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
                         Button {
-                            onSelectColor(color.hex)
+                            onSelectColor(item.preset.hex)
                         } label: {
-                            Circle()
-                                .fill(Color(uiColor: UIColor(hex: color.hex) ?? .yellow))
-                                .frame(width: 28, height: 28)
+                            VStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                                    .frame(width: 28, height: 28)
+
+                                Text(item.label)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
                         }
                     }
 
@@ -62,18 +79,25 @@ struct FloatingHighlightToolbar: View {
                     Button {
                         onCustomColor()
                     } label: {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    AngularGradient(
-                                        colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
-                                        center: .center
+                        VStack(spacing: 4) {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        AngularGradient(
+                                            colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
+                                            center: .center
+                                        )
                                     )
-                                )
-                                .frame(width: 28, height: 28)
-                            Circle()
-                                .fill(.white)
-                                .frame(width: 12, height: 12)
+                                    .frame(width: 28, height: 28)
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 12, height: 12)
+                            }
+
+                            Text("Custom")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
                 }
@@ -93,7 +117,7 @@ struct FloatingHighlightToolbar: View {
                     onCopy()
                 }
             }
-            .frame(width: 220)
+            .frame(width: toolbarWidth)
             .background {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.regularMaterial)

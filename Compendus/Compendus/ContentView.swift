@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  Compendus
 //
-//  Main navigation with TabView for Library, Downloads, and Settings
+//  Main navigation with custom bottom bar integrating mini player and tabs
 //
 
 import SwiftUI
@@ -22,35 +22,31 @@ struct ContentView: View {
             if serverConfig.isConfigured {
                 @Bindable var nav = appNavigation
                 @Bindable var player = audiobookPlayer
-                ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
                     TabView(selection: $nav.selectedTab) {
                         LibraryView()
-                            .tabItem {
-                                Label("Library", systemImage: "books.vertical")
-                            }
+                            .tabItem { Label("Library", systemImage: "books.vertical") }
                             .tag(0)
+                            .toolbar(.hidden, for: .tabBar)
 
                         DownloadsView()
-                            .tabItem {
-                                Label("Downloads", systemImage: "arrow.down.circle")
-                            }
+                            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
                             .tag(1)
+                            .toolbar(.hidden, for: .tabBar)
 
                         HighlightsView()
-                            .tabItem {
-                                Label("Highlights", systemImage: "highlighter")
-                            }
+                            .tabItem { Label("Highlights", systemImage: "highlighter") }
                             .tag(2)
+                            .toolbar(.hidden, for: .tabBar)
 
                         SettingsView()
-                            .tabItem {
-                                Label("Settings", systemImage: "gear")
-                            }
+                            .tabItem { Label("Settings", systemImage: "gear") }
                             .tag(3)
+                            .toolbar(.hidden, for: .tabBar)
                     }
 
-                    MiniPlayerView()
-                        .padding(.bottom, 49)
+                    // Integrated bottom bar: mini player + tab icons
+                    CustomBottomBar(selectedTab: $nav.selectedTab)
                 }
                 .sheet(isPresented: $player.isFullPlayerPresented) {
                     if let book = audiobookPlayer.currentBook {
@@ -68,7 +64,6 @@ struct ContentView: View {
                         .environment(readerSettings)
                 }
                 .task {
-                    // One-time migration of old Readium-format highlight locators
                     HighlightMigration.migrateIfNeeded(modelContext: modelContext)
                 }
             } else {
@@ -78,7 +73,6 @@ struct ContentView: View {
     }
 
     private func openBookFromDeepLink(_ bookId: String) {
-        // Find the downloaded book
         let descriptor = FetchDescriptor<DownloadedBook>(
             predicate: #Predicate { $0.id == bookId }
         )
@@ -93,12 +87,64 @@ struct ContentView: View {
             } else {
                 deepLinkedBook = book
             }
-            // Switch to downloads tab
             appNavigation.selectedTab = 1
         }
 
-        // Clear the deep link
         deepLinkBookId.wrappedValue = nil
+    }
+}
+
+// MARK: - Custom Bottom Bar
+
+struct CustomBottomBar: View {
+    @Binding var selectedTab: Int
+    @Environment(AudiobookPlayer.self) private var player
+    @Environment(ThemeManager.self) private var themeManager
+
+    private struct TabItem {
+        let icon: String
+        let activeIcon: String
+        let label: String
+    }
+
+    private let tabs: [TabItem] = [
+        TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
+        TabItem(icon: "arrow.down.circle", activeIcon: "arrow.down.circle.fill", label: "Downloads"),
+        TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
+        TabItem(icon: "gear", activeIcon: "gearshape.fill", label: "Settings"),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Mini player (when active)
+            if player.hasActiveSession && !player.isFullPlayerPresented {
+                MiniPlayerView()
+            }
+
+            Divider()
+
+            // Tab buttons
+            HStack(spacing: 0) {
+                ForEach(0..<tabs.count, id: \.self) { index in
+                    Button {
+                        selectedTab = index
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: selectedTab == index ? tabs[index].activeIcon : tabs[index].icon)
+                                .font(.system(size: 20))
+
+                            Text(tabs[index].label)
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(selectedTab == index ? themeManager.accentColor : .secondary)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+        }
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -118,7 +164,7 @@ struct ServerSetupView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "books.vertical.fill")
                         .font(.system(size: 80))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(.accent)
 
                     Text("Compendus")
                         .font(.largeTitle)
@@ -149,7 +195,7 @@ struct ServerSetupView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(serverURL.isEmpty ? Color.gray : Color.blue)
+                        .background(serverURL.isEmpty ? Color.gray : Color.accentColor)
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
@@ -179,7 +225,6 @@ struct ServerSetupView: View {
         isTestingConnection = true
         connectionError = nil
 
-        // Temporarily set the URL for testing
         let tempConfig = ServerConfig()
         tempConfig.serverURL = serverURL
 

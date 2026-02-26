@@ -234,6 +234,41 @@ class APIService {
         return try await fetch(url)
     }
 
+    /// Upload a transcript to the server (e.g., from on-device transcription)
+    func uploadTranscript(bookId: String, transcript: Transcript) async throws {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/transcript") else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = ["transcript": transcript]
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let message = String(data: data, encoding: .utf8)
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, message)
+        }
+    }
+
+    /// Delete a transcript from the server
+    func deleteTranscript(bookId: String) async throws {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/transcript") else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
+        }
+    }
+
     // MARK: - Downloads
 
     /// Get URL for downloading a book file

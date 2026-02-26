@@ -285,7 +285,7 @@ class AudiobookPlayer: NSObject {
     // MARK: - Timers
 
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, let player = self.player else { return }
                 self.currentTime = player.currentTime

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-flight-router/client";
 import {
   deleteOrphanedFile,
@@ -31,6 +31,7 @@ interface JobRecord {
   status: string;
   progress: number;
   message: string;
+  logs: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -72,6 +73,7 @@ export function AdminDataClient({
   const [orphanedSize, setOrphanedSize] = useState(initialOrphanedSize);
   const [jobs, setJobs] = useState(initialJobs);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [expandedJob, setExpandedJob] = useState<string | null>(null);
 
   const handleCancelJob = async (job: JobRecord) => {
     const action = job.status === "running"
@@ -242,71 +244,85 @@ export function AdminDataClient({
               </thead>
               <tbody>
                 {jobs.map((job) => (
-                  <tr
-                    key={job.id}
-                    className="border-b border-border last:border-0 hover:bg-surface"
-                  >
-                    <td className="p-3 text-foreground font-mono text-xs">
-                      {job.id}
-                    </td>
-                    <td className="p-3 text-foreground-muted capitalize">
-                      {job.type}
-                    </td>
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                          job.status === "completed"
-                            ? "bg-green-500/10 text-green-700 dark:text-green-400"
-                            : job.status === "running"
-                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                              : job.status === "error"
-                                ? "bg-red-500/10 text-red-700 dark:text-red-400"
-                                : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
-                        }`}
-                      >
-                        {job.status === "running" && (
-                          <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
-                        )}
-                        {job.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-foreground-muted">
-                      {job.status === "running" || job.status === "completed" ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary rounded-full transition-all"
-                              style={{ width: `${job.progress}%` }}
-                            />
+                  <React.Fragment key={job.id}>
+                    <tr
+                      className="border-b border-border last:border-0 hover:bg-surface cursor-pointer"
+                      onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                    >
+                      <td className="p-3 text-foreground font-mono text-xs">
+                        <span className="mr-1.5 text-foreground-muted">
+                          {expandedJob === job.id ? "\u25BC" : "\u25B6"}
+                        </span>
+                        {job.id}
+                      </td>
+                      <td className="p-3 text-foreground-muted capitalize">
+                        {job.type}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                            job.status === "completed"
+                              ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                              : job.status === "running"
+                                ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                                : job.status === "error"
+                                  ? "bg-red-500/10 text-red-700 dark:text-red-400"
+                                  : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+                          }`}
+                        >
+                          {job.status === "running" && (
+                            <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
+                          )}
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-foreground-muted">
+                        {job.status === "running" || job.status === "completed" ? (
+                          <div className="flex items-center gap-2">
+                            <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all"
+                                style={{ width: `${job.progress}%` }}
+                              />
+                            </div>
+                            <span className="text-xs">{job.progress}%</span>
                           </div>
-                          <span className="text-xs">{job.progress}%</span>
-                        </div>
-                      ) : (
-                        <span className="text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-foreground-muted text-xs max-w-[200px] truncate">
-                      {job.message || "—"}
-                    </td>
-                    <td className="p-3 text-foreground-muted text-xs text-right whitespace-nowrap" suppressHydrationWarning>
-                      {job.updatedAt
-                        ? new Date(job.updatedAt).toLocaleString()
-                        : "—"}
-                    </td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleCancelJob(job)}
-                        disabled={deleting === job.id}
-                        className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
-                      >
-                        {deleting === job.id
-                          ? "..."
-                          : job.status === "running" || job.status === "pending"
-                            ? "Cancel"
-                            : "Clear"}
-                      </button>
-                    </td>
-                  </tr>
+                        ) : (
+                          <span className="text-xs">—</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-foreground-muted text-xs max-w-[200px] truncate">
+                        {job.message || "—"}
+                      </td>
+                      <td className="p-3 text-foreground-muted text-xs text-right whitespace-nowrap" suppressHydrationWarning>
+                        {job.updatedAt
+                          ? new Date(job.updatedAt).toLocaleString()
+                          : "—"}
+                      </td>
+                      <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleCancelJob(job)}
+                          disabled={deleting === job.id}
+                          className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                        >
+                          {deleting === job.id
+                            ? "..."
+                            : job.status === "running" || job.status === "pending"
+                              ? "Cancel"
+                              : "Clear"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedJob === job.id && (
+                      <tr className="border-b border-border">
+                        <td colSpan={7} className="p-0">
+                          <pre className="p-3 bg-surface text-foreground-muted text-xs font-mono overflow-x-auto max-h-80 overflow-y-auto whitespace-pre-wrap">
+                            {job.logs || "No logs captured yet."}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

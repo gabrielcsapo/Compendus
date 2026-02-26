@@ -289,6 +289,7 @@ export const backgroundJobs = sqliteTable(
     message: text("message"),
     payload: text("payload"), // JSON: job-specific input data
     result: text("result"), // JSON: result or error details
+    logs: text("logs"), // Captured stdout/stderr output
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

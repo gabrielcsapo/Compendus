@@ -10,7 +10,7 @@ services:
       - ./data:/app/data
     environment:
       - NODE_OPTIONS=--max-old-space-size=4096
-      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
     deploy:
       resources:
         reservations:
