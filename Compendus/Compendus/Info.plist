@@ -12,6 +12,7 @@
 	<array>
 		<string>remote-notification</string>
 		<string>fetch</string>
+		<string>audio</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>Launch Screen</string>

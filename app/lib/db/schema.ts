@@ -66,6 +66,9 @@ export const books = sqliteTable(
     convertedEpubPath: text("converted_epub_path"),
     convertedEpubSize: integer("converted_epub_size"),
 
+    // Audiobook transcript (from Whisper transcription)
+    transcriptPath: text("transcript_path"),
+
     // Reading state
     readingProgress: real("reading_progress").default(0),
     lastReadAt: integer("last_read_at", { mode: "timestamp" }),
@@ -275,7 +278,33 @@ export const wantedBooks = sqliteTable(
   ],
 );
 
+// Background jobs queue (persistent job tracking for long-running tasks)
+export const backgroundJobs = sqliteTable(
+  "background_jobs",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(), // "transcribe" | "convert"
+    status: text("status").notNull().default("pending"), // pending | running | completed | error
+    progress: integer("progress").default(0),
+    message: text("message"),
+    payload: text("payload"), // JSON: job-specific input data
+    result: text("result"), // JSON: result or error details
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_background_jobs_status").on(table.status),
+    index("idx_background_jobs_created_at").on(table.createdAt),
+  ],
+);
+
 // Type exports
+export type BackgroundJob = typeof backgroundJobs.$inferSelect;
+export type NewBackgroundJob = typeof backgroundJobs.$inferInsert;
 export type Book = typeof books.$inferSelect;
 export type NewBook = typeof books.$inferInsert;
 export type Collection = typeof collections.$inferSelect;

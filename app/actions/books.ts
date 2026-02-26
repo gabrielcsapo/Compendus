@@ -286,6 +286,17 @@ export async function deleteMissingFileRecord(bookId: string): Promise<{ success
   return { success: true, message: "Database record deleted successfully" };
 }
 
+/**
+ * Cancel or clear a background job.
+ * - Pending jobs: removed from queue
+ * - Running jobs: signalled to abort
+ * - Completed/error jobs: cleared from history
+ */
+export async function cancelBackgroundJob(jobId: string): Promise<{ success: boolean; message: string }> {
+  const { cancelJob } = await import("../lib/queue");
+  return cancelJob(jobId);
+}
+
 export async function getRecentBooks(limit: number = 10): Promise<Book[]> {
   return db
     .select()

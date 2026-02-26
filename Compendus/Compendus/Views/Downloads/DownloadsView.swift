@@ -55,6 +55,9 @@ struct DownloadsView: View {
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
     private var books: [DownloadedBook]
 
+    @Query(sort: \PendingDownload.queuedAt, order: .reverse)
+    private var pendingDownloads: [PendingDownload]
+
     @State private var bookToDelete: DownloadedBook?
     @State private var showingDeleteConfirmation = false
     @State private var searchText = ""
@@ -121,6 +124,15 @@ struct DownloadsView: View {
         return seriesItems.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
+    /// Pending downloads that are still active (not yet completed as DownloadedBook)
+    private var activePendingDownloads: [PendingDownload] {
+        pendingDownloads.filter { $0.status != "completed" }
+    }
+
+    private var hasActiveDownloads: Bool {
+        !activePendingDownloads.isEmpty || !downloadManager.activeDownloads.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             mainContent
@@ -179,11 +191,11 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if books.isEmpty {
+        if books.isEmpty && !hasActiveDownloads {
             DownloadsEmptyStateView()
         } else if viewMode == .series && selectedSeriesName == nil {
             seriesGridContent
-        } else if filteredBooks.isEmpty {
+        } else if filteredBooks.isEmpty && !hasActiveDownloads {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -256,6 +268,11 @@ struct DownloadsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Active downloads section
+            if hasActiveDownloads && selectedSeriesName == nil {
+                activeDownloadsSection
             }
 
             // Storage summary (only show when not searching, filtering, or in series view)
@@ -340,6 +357,56 @@ struct DownloadsView: View {
         }
     }
 
+    // MARK: - Active Downloads Section
+
+    private var activeDownloadsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Section header
+            HStack {
+                Label("Downloading (\(activePendingDownloads.count))", systemImage: "arrow.down.circle")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if activePendingDownloads.count > 1 {
+                    Button("Cancel All", role: .destructive) {
+                        downloadManager.cancelAllDownloads(modelContext: modelContext)
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            // Download rows
+            VStack(spacing: 0) {
+                ForEach(activePendingDownloads, id: \.id) { pending in
+                    ActiveDownloadRow(
+                        pending: pending,
+                        progress: downloadManager.activeDownloads[pending.id],
+                        onCancel: {
+                            downloadManager.cancelDownload(bookId: pending.id, modelContext: modelContext)
+                        },
+                        onRetry: {
+                            downloadManager.retryDownload(pending, modelContext: modelContext)
+                        }
+                    )
+
+                    if pending.id != activePendingDownloads.last?.id {
+                        Divider()
+                            .padding(.leading, 78)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 20)
+        }
+    }
+
     // MARK: - Delete Helpers
 
     private var deleteDialogTitle: String {
@@ -382,5 +449,5 @@ struct DownloadsView: View {
         .environment(api)
         .environment(DownloadManager(config: config, apiService: api))
         .environment(StorageManager())
-        .modelContainer(for: DownloadedBook.self, inMemory: true)
+        .modelContainer(for: [DownloadedBook.self, PendingDownload.self], inMemory: true)
 }

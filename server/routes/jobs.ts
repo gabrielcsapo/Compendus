@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getJob, subscribeToJob } from "../../app/lib/jobs";
+import { getJob, subscribeToJob } from "../../app/lib/queue";
 
 const app = new Hono();
 

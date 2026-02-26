@@ -12,6 +12,7 @@ struct ContentView: View {
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(AppNavigation.self) private var appNavigation
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(\.modelContext) private var modelContext
     @Environment(\.deepLinkBookId) private var deepLinkBookId
     @State private var deepLinkedBook: DownloadedBook?
@@ -20,30 +21,42 @@ struct ContentView: View {
         Group {
             if serverConfig.isConfigured {
                 @Bindable var nav = appNavigation
-                TabView(selection: $nav.selectedTab) {
-                    LibraryView()
-                        .tabItem {
-                            Label("Library", systemImage: "books.vertical")
-                        }
-                        .tag(0)
+                @Bindable var player = audiobookPlayer
+                ZStack(alignment: .bottom) {
+                    TabView(selection: $nav.selectedTab) {
+                        LibraryView()
+                            .tabItem {
+                                Label("Library", systemImage: "books.vertical")
+                            }
+                            .tag(0)
 
-                    DownloadsView()
-                        .tabItem {
-                            Label("Downloads", systemImage: "arrow.down.circle")
-                        }
-                        .tag(1)
+                        DownloadsView()
+                            .tabItem {
+                                Label("Downloads", systemImage: "arrow.down.circle")
+                            }
+                            .tag(1)
 
-                    HighlightsView()
-                        .tabItem {
-                            Label("Highlights", systemImage: "highlighter")
-                        }
-                        .tag(2)
+                        HighlightsView()
+                            .tabItem {
+                                Label("Highlights", systemImage: "highlighter")
+                            }
+                            .tag(2)
 
-                    SettingsView()
-                        .tabItem {
-                            Label("Settings", systemImage: "gear")
-                        }
-                        .tag(3)
+                        SettingsView()
+                            .tabItem {
+                                Label("Settings", systemImage: "gear")
+                            }
+                            .tag(3)
+                    }
+
+                    MiniPlayerView()
+                        .padding(.bottom, 49)
+                }
+                .sheet(isPresented: $player.isFullPlayerPresented) {
+                    if let book = audiobookPlayer.currentBook {
+                        AudiobookPlayerView(book: book)
+                            .environment(readerSettings)
+                    }
                 }
                 .onChange(of: deepLinkBookId.wrappedValue) { _, newBookId in
                     if let bookId = newBookId {
@@ -71,7 +84,15 @@ struct ContentView: View {
         )
 
         if let book = try? modelContext.fetch(descriptor).first {
-            deepLinkedBook = book
+            if book.isAudiobook {
+                Task {
+                    await audiobookPlayer.loadBook(book)
+                    audiobookPlayer.play()
+                    audiobookPlayer.isFullPlayerPresented = true
+                }
+            } else {
+                deepLinkedBook = book
+            }
             // Switch to downloads tab
             appNavigation.selectedTab = 1
         }
@@ -183,6 +204,7 @@ struct ServerSetupView: View {
     ContentView()
         .environment(ServerConfig())
         .environment(AppNavigation())
+        .environment(AudiobookPlayer())
         .environment(StorageManager())
         .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

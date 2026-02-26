@@ -32,6 +32,7 @@ final class DownloadedBook {
     var chaptersData: Data?         // JSON encoded chapters for audiobooks
     var pageCount: Int?             // Comics page count (cached)
     var epubLocalPath: String?       // Local path for converted EPUB version
+    var transcriptData: Data?        // JSON encoded transcript for audiobooks
 
     init(
         id: String,
@@ -115,6 +116,15 @@ final class DownloadedBook {
     var chapters: [Chapter]? {
         guard let data = chaptersData else { return nil }
         return try? JSONDecoder().decode([Chapter].self, from: data)
+    }
+
+    var transcript: Transcript? {
+        guard let data = transcriptData else { return nil }
+        return try? JSONDecoder().decode(Transcript.self, from: data)
+    }
+
+    var hasTranscript: Bool {
+        transcriptData != nil
     }
 
     /// Get the full file URL in the app's documents directory

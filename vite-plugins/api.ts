@@ -9,6 +9,11 @@ export function apiPlugin(): Plugin {
   return {
     name: "compendus-api",
     configureServer(server: ViteDevServer) {
+      // Start the background job processor in dev mode
+      server.ssrLoadModule("/app/lib/queue.ts").then(({ startJobProcessor }) => {
+        startJobProcessor();
+      });
+
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
         const url = req.url || "";
 

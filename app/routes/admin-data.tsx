@@ -1,7 +1,8 @@
 import { readdirSync, statSync } from "fs";
 import { resolve } from "path";
+import { desc } from "drizzle-orm";
 import { db } from "../lib/db";
-import { books } from "../lib/db/schema";
+import { books, backgroundJobs } from "../lib/db/schema";
 import { BOOKS_DIR } from "../lib/storage";
 import { AdminDataClient } from "../components/AdminDataClient";
 
@@ -102,6 +103,23 @@ export default async function AdminData() {
   const orphanedSize = orphanedFiles.reduce((sum, f) => sum + f.size, 0);
   const matchedSize = matchedFiles.reduce((sum, f) => sum + f.size, 0);
 
+  // Get background jobs (most recent first, limit 100)
+  const jobs = db
+    .select()
+    .from(backgroundJobs)
+    .orderBy(desc(backgroundJobs.updatedAt))
+    .limit(100)
+    .all()
+    .map((job) => ({
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      progress: job.progress ?? 0,
+      message: job.message ?? "",
+      createdAt: job.createdAt ? job.createdAt.getTime() : 0,
+      updatedAt: job.updatedAt ? job.updatedAt.getTime() : 0,
+    }));
+
   return (
     <AdminDataClient
       orphanedFiles={orphanedFiles}
@@ -112,6 +130,7 @@ export default async function AdminData() {
       orphanedSize={orphanedSize}
       matchedSize={matchedSize}
       booksDir={BOOKS_DIR}
+      jobs={jobs}
     />
   );
 }

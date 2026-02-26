@@ -35,6 +35,7 @@ struct CompendusApp: App {
     @State private var imageCache = ImageCache()
     @State private var readerSettings = ReaderSettings()
     @State private var appNavigation = AppNavigation()
+    @State private var audiobookPlayer = AudiobookPlayer()
 
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
@@ -61,6 +62,7 @@ struct CompendusApp: App {
                 .environment(imageCache)
                 .environment(readerSettings)
                 .environment(appNavigation)
+                .environment(audiobookPlayer)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .onOpenURL { url in
                     handleDeepLink(url)
@@ -69,6 +71,7 @@ struct CompendusApp: App {
                     downloadManager.appDelegate = appDelegate
                     downloadManager.modelContainer = sharedModelContainer
                     downloadManager.reconnectBackgroundSession()
+                    audiobookPlayer.modelContainer = sharedModelContainer
                 }
         }
         .modelContainer(sharedModelContainer)

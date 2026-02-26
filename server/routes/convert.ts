@@ -1,12 +1,9 @@
 import { Hono } from "hono";
-import { readFile } from "fs/promises";
-import { existsSync, statSync, writeFileSync } from "fs";
+import { existsSync } from "fs";
 import { resolve, extname } from "path";
 import { eq } from "drizzle-orm";
 import { db, books } from "../../app/lib/db";
-import { createJob, updateJobProgress, getJob } from "../../app/lib/jobs";
-import { convertPdfToEpub } from "../../app/lib/processing/pdf-to-epub";
-import { convertMobiToEpub } from "../../app/lib/processing/mobi-to-epub";
+import { enqueueJob, getJob } from "../../app/lib/queue";
 
 const app = new Hono();
 
@@ -14,7 +11,7 @@ const CONVERTIBLE_FORMATS = ["pdf", "mobi", "azw3"];
 
 /**
  * POST /api/books/:id/convert-to-epub
- * Triggers EPUB conversion as a background job.
+ * Enqueues EPUB conversion as a background job.
  * Supports PDF, MOBI, and AZW3 formats.
  * Returns immediately with a jobId for progress tracking.
  */
@@ -50,7 +47,7 @@ app.post("/api/books/:id/convert-to-epub", async (c) => {
     });
   }
 
-  // Check if a conversion job is already running
+  // Check if a conversion job is already running or queued
   const jobId = `convert-${bookId}`;
   const existingJob = getJob(jobId);
   if (existingJob && (existingJob.status === "pending" || existingJob.status === "running")) {
@@ -64,73 +61,15 @@ app.post("/api/books/:id/convert-to-epub", async (c) => {
     return c.json({ success: false, error: "Source file not found on disk" }, 404);
   }
 
-  // Create job and return immediately
-  createJob(jobId);
-
-  // Run conversion in background
-  (async () => {
-    try {
-      updateJobProgress(jobId, {
-        status: "running",
-        progress: 1,
-        message: `Reading ${book.format.toUpperCase()} file...`,
-      });
-
-      const fileBuffer = await readFile(bookPath);
-
-      // Parse metadata from DB
-      const authors = book.authors ? JSON.parse(book.authors) : [];
-      const metadata = {
-        title: book.title,
-        authors: Array.isArray(authors) ? authors : [],
-        language: book.language ?? undefined,
-      };
-
-      const onProgress = (percent: number, message: string) => {
-        updateJobProgress(jobId, { status: "running", progress: percent, message });
-      };
-
-      let epubBuffer: Buffer;
-      if (book.format === "pdf") {
-        epubBuffer = await convertPdfToEpub(fileBuffer, metadata, { onProgress });
-      } else {
-        epubBuffer = await convertMobiToEpub(fileBuffer, metadata, { onProgress });
-      }
-
-      // Store the converted EPUB
-      const epubPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
-      writeFileSync(epubPath, epubBuffer);
-      const epubSize = statSync(epubPath).size;
-
-      // Update DB
-      await db
-        .update(books)
-        .set({
-          convertedEpubPath: `data/books/${bookId}.epub`,
-          convertedEpubSize: epubSize,
-        })
-        .where(eq(books.id, bookId));
-
-      updateJobProgress(jobId, {
-        status: "completed",
-        progress: 100,
-        message: "Conversion complete",
-        result: { bookId },
-      });
-
-      console.log(`[Convert] ${book.format.toUpperCase()} → EPUB conversion complete for ${bookId} (${(epubSize / 1024).toFixed(1)} KB)`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[Convert] ${book.format.toUpperCase()} → EPUB conversion failed for ${bookId}:`, errorMessage);
-
-      updateJobProgress(jobId, {
-        status: "error",
-        progress: 0,
-        message: `Conversion failed: ${errorMessage}`,
-        result: { error: errorMessage },
-      });
-    }
-  })();
+  // Enqueue job for background processing
+  enqueueJob(jobId, "convert", {
+    bookId,
+    bookPath,
+    format: book.format,
+    title: book.title,
+    authors: book.authors ?? "[]",
+    language: book.language,
+  });
 
   return c.json({ success: true, jobId, pending: true });
 });

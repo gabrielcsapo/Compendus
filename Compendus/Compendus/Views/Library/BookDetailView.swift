@@ -15,6 +15,7 @@ struct BookDetailView: View {
     var onBookTap: ((Book) -> Void)?
 
     @Environment(APIService.self) private var apiService
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
     @Environment(ReaderSettings.self) private var readerSettings
@@ -243,9 +244,17 @@ struct BookDetailView: View {
     private var actionButton: some View {
         AnimatedDownloadButton(
             state: downloadButtonState,
+            isAudiobook: book.isAudiobook,
             onTap: {
                 if isDownloaded, let downloaded = downloadedBook {
-                    if let onRead {
+                    if downloaded.isAudiobook {
+                        dismiss()
+                        Task {
+                            await audiobookPlayer.loadBook(downloaded)
+                            audiobookPlayer.play()
+                            audiobookPlayer.isFullPlayerPresented = true
+                        }
+                    } else if let onRead {
                         // Dismiss sheet and let parent present the reader full-screen
                         dismiss()
                         onRead(downloaded)
@@ -714,6 +723,7 @@ struct DetailRow: View {
         .environment(config)
         .environment(api)
         .environment(DownloadManager(config: config, apiService: api))
+        .environment(AudiobookPlayer())
         .environment(StorageManager())
         .environment(ImageCache())
         .modelContainer(for: DownloadedBook.self, inMemory: true)

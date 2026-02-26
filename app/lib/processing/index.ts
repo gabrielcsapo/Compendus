@@ -20,7 +20,7 @@ import {
 import { extractCover } from "./cover";
 import { convertCbrToCbz } from "./comic";
 import { suppressConsole, yieldToEventLoop, scheduleBackground, runInWorker } from "./utils";
-import { createJob, updateJobProgress } from "../jobs";
+import { createJob, updateJobProgress } from "../queue";
 import type {
   BookFormat,
   BookMetadata,

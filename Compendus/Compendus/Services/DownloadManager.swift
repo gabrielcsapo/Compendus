@@ -202,6 +202,52 @@ class DownloadManager: NSObject {
         activeDownloads.removeValue(forKey: progressId)
     }
 
+    /// Retry a failed download using the persisted PendingDownload metadata
+    @MainActor
+    func retryDownload(_ pending: PendingDownload, modelContext: ModelContext) {
+        guard let downloadURL = URL(string: pending.downloadURL) else { return }
+
+        // Reset status
+        pending.status = "downloading"
+        pending.errorMessage = nil
+        try? modelContext.save()
+
+        // Initialize progress tracking
+        let progress = DownloadProgress(
+            id: pending.id,
+            progress: 0,
+            bytesReceived: 0,
+            totalBytes: Int64(pending.fileSize),
+            state: .downloading
+        )
+        activeDownloads[pending.id] = progress
+
+        // Start background download task
+        let task = session.downloadTask(with: downloadURL)
+        task.taskDescription = pending.id
+        task.resume()
+    }
+
+    /// Cancel all active and pending downloads
+    @MainActor
+    func cancelAllDownloads(modelContext: ModelContext) {
+        // Cancel all tracked active downloads
+        let bookIds = Array(activeDownloads.keys)
+        for bookId in bookIds {
+            cancelDownload(bookId: bookId, modelContext: modelContext)
+        }
+
+        // Also clean up any pending downloads not in activeDownloads
+        let descriptor = FetchDescriptor<PendingDownload>(
+            predicate: #Predicate { $0.status == "pending" || $0.status == "downloading" || $0.status == "failed" }
+        )
+        if let remaining = try? modelContext.fetch(descriptor) {
+            for pending in remaining {
+                cancelDownload(bookId: pending.id, modelContext: modelContext)
+            }
+        }
+    }
+
     /// Cancel a download in progress
     @MainActor
     func cancelDownload(bookId: String, modelContext: ModelContext? = nil) {

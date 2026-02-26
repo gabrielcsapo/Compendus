@@ -15,6 +15,7 @@ struct DownloadedBookDetailView: View {
     @Environment(APIService.self) private var apiService
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(AppNavigation.self) private var appNavigation
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
     @Environment(ReaderSettings.self) private var readerSettings
@@ -41,6 +42,12 @@ struct DownloadedBookDetailView: View {
                 actionSection
                     .padding(.top, 20)
                     .padding(.horizontal, 20)
+
+                if book.isAudiobook {
+                    TranscribeButton(book: book)
+                        .padding(.top, 12)
+                        .padding(.horizontal, 20)
+                }
 
                 if let description = book.bookDescription, !description.isEmpty {
                     descriptionSection(description)
@@ -229,7 +236,15 @@ struct DownloadedBookDetailView: View {
     private var actionSection: some View {
         VStack(spacing: 10) {
             Button {
-                bookToRead = book
+                if book.isAudiobook {
+                    Task {
+                        await audiobookPlayer.loadBook(book)
+                        audiobookPlayer.play()
+                        audiobookPlayer.isFullPlayerPresented = true
+                    }
+                } else {
+                    bookToRead = book
+                }
             } label: {
                 Label(readButtonTitle, systemImage: readButtonIcon)
                     .frame(maxWidth: .infinity)
@@ -276,12 +291,22 @@ struct DownloadedBookDetailView: View {
     }
 
     private var readButtonTitle: String {
-        if book.readingProgress >= 1.0 {
-            return "Read Again"
-        } else if book.readingProgress > 0 {
-            return "Continue Reading"
+        if book.isAudiobook {
+            if book.readingProgress >= 1.0 {
+                return "Play Again"
+            } else if book.readingProgress > 0 {
+                return "Continue Playing"
+            } else {
+                return "Play"
+            }
         } else {
-            return "Read"
+            if book.readingProgress >= 1.0 {
+                return "Read Again"
+            } else if book.readingProgress > 0 {
+                return "Continue Reading"
+            } else {
+                return "Read"
+            }
         }
     }
 
@@ -289,7 +314,7 @@ struct DownloadedBookDetailView: View {
         if book.readingProgress >= 1.0 {
             return "arrow.counterclockwise"
         } else {
-            return "book.fill"
+            return book.isAudiobook ? "headphones" : "book.fill"
         }
     }
 
@@ -469,6 +494,7 @@ struct DownloadedBookDetailView: View {
     }
     .environment(ServerConfig())
     .environment(AppNavigation())
+    .environment(AudiobookPlayer())
     .environment(APIService(config: ServerConfig()))
     .environment(DownloadManager(config: ServerConfig(), apiService: APIService(config: ServerConfig())))
     .environment(StorageManager())

@@ -82,6 +82,7 @@ struct LibraryView: View {
     @Environment(APIService.self) private var apiService
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(AppNavigation.self) private var appNavigation
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(\.modelContext) private var modelContext
@@ -134,7 +135,15 @@ struct LibraryView: View {
                 BookDetailView(
                     book: book,
                     onRead: { downloaded in
-                        bookToRead = downloaded
+                        if downloaded.isAudiobook {
+                            Task {
+                                await audiobookPlayer.loadBook(downloaded)
+                                audiobookPlayer.play()
+                                audiobookPlayer.isFullPlayerPresented = true
+                            }
+                        } else {
+                            bookToRead = downloaded
+                        }
                     },
                     onSeriesTap: { seriesName in
                         selectedSeriesName = seriesName
@@ -259,7 +268,15 @@ struct LibraryView: View {
 
             if !recentlyReadBooks.isEmpty && searchText.isEmpty && selectedFilter == .all && selectedSeriesName == nil {
                 ContinueReadingSection(books: recentlyReadBooks) { book in
-                    bookToRead = book
+                    if book.isAudiobook {
+                        Task {
+                            await audiobookPlayer.loadBook(book)
+                            audiobookPlayer.play()
+                            audiobookPlayer.isFullPlayerPresented = true
+                        }
+                    } else {
+                        bookToRead = book
+                    }
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 8)
@@ -297,9 +314,17 @@ struct LibraryView: View {
             .contextMenu {
                 if let downloaded = downloadedBook(for: book.id) {
                     Button {
-                        bookToRead = downloaded
+                        if downloaded.isAudiobook {
+                            Task {
+                                await audiobookPlayer.loadBook(downloaded)
+                                audiobookPlayer.play()
+                                audiobookPlayer.isFullPlayerPresented = true
+                            }
+                        } else {
+                            bookToRead = downloaded
+                        }
                     } label: {
-                        Label("Read", systemImage: "book.fill")
+                        Label(book.isAudiobook ? "Play" : "Read", systemImage: book.isAudiobook ? "headphones" : "book.fill")
                     }
                 } else if downloadingBooks.contains(book.id) {
                     Button(role: .destructive) {
@@ -568,6 +593,7 @@ struct LibraryView: View {
     LibraryView()
         .environment(ServerConfig())
         .environment(AppNavigation())
+        .environment(AudiobookPlayer())
         .environment(APIService(config: ServerConfig()))
         .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

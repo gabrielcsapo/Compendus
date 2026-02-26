@@ -6,6 +6,7 @@ import {
   deleteOrphanedFile,
   deleteMissingFileRecord,
   deleteBook,
+  cancelBackgroundJob,
 } from "../actions/books";
 
 interface FileInfo {
@@ -24,6 +25,16 @@ interface BookRecord {
   format: string;
 }
 
+interface JobRecord {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  message: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface AdminDataClientProps {
   orphanedFiles: FileInfo[];
   matchedFiles: (FileInfo & { book: BookRecord })[];
@@ -33,6 +44,7 @@ interface AdminDataClientProps {
   orphanedSize: number;
   matchedSize: number;
   booksDir: string;
+  jobs: JobRecord[];
 }
 
 function formatBytes(bytes: number): string {
@@ -52,12 +64,41 @@ export function AdminDataClient({
   orphanedSize: initialOrphanedSize,
   matchedSize,
   booksDir,
+  jobs: initialJobs,
 }: AdminDataClientProps) {
   const [orphanedFiles, setOrphanedFiles] = useState(initialOrphanedFiles);
   const [matchedFiles, setMatchedFiles] = useState(initialMatchedFiles);
   const [missingFiles, setMissingFiles] = useState(initialMissingFiles);
   const [orphanedSize, setOrphanedSize] = useState(initialOrphanedSize);
+  const [jobs, setJobs] = useState(initialJobs);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  const handleCancelJob = async (job: JobRecord) => {
+    const action = job.status === "running"
+      ? "Cancel"
+      : job.status === "pending"
+        ? "Cancel"
+        : "Clear";
+    if (!confirm(`${action} job "${job.id}"?`)) return;
+
+    setDeleting(job.id);
+    const result = await cancelBackgroundJob(job.id);
+    setDeleting(null);
+
+    if (result.success) {
+      if (job.status === "completed" || job.status === "error") {
+        setJobs((prev) => prev.filter((j) => j.id !== job.id));
+      } else {
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id ? { ...j, status: "error", message: "Cancelled", progress: 0 } : j,
+          ),
+        );
+      }
+    } else {
+      alert(result.message);
+    }
+  };
 
   const handleDeleteOrphanedFile = async (file: FileInfo) => {
     if (!confirm(`Delete orphaned file "${file.name}"? This cannot be undone.`))
@@ -157,6 +198,121 @@ export function AdminDataClient({
           <div className="text-sm text-foreground-muted">Missing Files</div>
         </div>
       </div>
+
+      {/* Background Jobs Section */}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
+          <span className="w-3 h-3 bg-primary rounded-full"></span>
+          Background Jobs ({jobs.length})
+        </h2>
+        <p className="text-sm text-foreground-muted mb-4">
+          Persistent job queue for transcription, conversion, and other long-running tasks.
+        </p>
+        {jobs.length === 0 ? (
+          <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
+            No background jobs found.
+          </div>
+        ) : (
+          <div className="bg-surface-elevated rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left p-3 text-foreground-muted font-medium">
+                    Job ID
+                  </th>
+                  <th className="text-left p-3 text-foreground-muted font-medium">
+                    Type
+                  </th>
+                  <th className="text-left p-3 text-foreground-muted font-medium">
+                    Status
+                  </th>
+                  <th className="text-left p-3 text-foreground-muted font-medium">
+                    Progress
+                  </th>
+                  <th className="text-left p-3 text-foreground-muted font-medium">
+                    Message
+                  </th>
+                  <th className="text-right p-3 text-foreground-muted font-medium">
+                    Updated
+                  </th>
+                  <th className="text-right p-3 text-foreground-muted font-medium">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((job) => (
+                  <tr
+                    key={job.id}
+                    className="border-b border-border last:border-0 hover:bg-surface"
+                  >
+                    <td className="p-3 text-foreground font-mono text-xs">
+                      {job.id}
+                    </td>
+                    <td className="p-3 text-foreground-muted capitalize">
+                      {job.type}
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                          job.status === "completed"
+                            ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                            : job.status === "running"
+                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                              : job.status === "error"
+                                ? "bg-red-500/10 text-red-700 dark:text-red-400"
+                                : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+                        }`}
+                      >
+                        {job.status === "running" && (
+                          <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
+                        )}
+                        {job.status}
+                      </span>
+                    </td>
+                    <td className="p-3 text-foreground-muted">
+                      {job.status === "running" || job.status === "completed" ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary rounded-full transition-all"
+                              style={{ width: `${job.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs">{job.progress}%</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-foreground-muted text-xs max-w-[200px] truncate">
+                      {job.message || "—"}
+                    </td>
+                    <td className="p-3 text-foreground-muted text-xs text-right whitespace-nowrap" suppressHydrationWarning>
+                      {job.updatedAt
+                        ? new Date(job.updatedAt).toLocaleString()
+                        : "—"}
+                    </td>
+                    <td className="p-3 text-right">
+                      <button
+                        onClick={() => handleCancelJob(job)}
+                        disabled={deleting === job.id}
+                        className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                      >
+                        {deleting === job.id
+                          ? "..."
+                          : job.status === "running" || job.status === "pending"
+                            ? "Cancel"
+                            : "Clear"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* Orphaned Files Section */}
       <section className="mb-8">

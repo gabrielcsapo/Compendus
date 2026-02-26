@@ -1,16 +1,32 @@
 services:
   compendus:
-    build: .
+    build:
+      context: .
+      args:
+        GPU_BACKEND: ${GPU_BACKEND:-cpu}
     ports:
       - "3000:3000"
     volumes:
       - ./data:/app/data
     environment:
       - NODE_OPTIONS=--max-old-space-size=4096
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
     deploy:
       resources:
-        limits:
-          memory: 4G
         reservations:
           memory: 1G
     restart: unless-stopped
+    # ---------- GPU access ----------
+    # NVIDIA: uncomment below (requires nvidia-container-toolkit on host)
+    #   deploy.resources.reservations.devices:
+    #     - driver: nvidia
+    #       count: 1
+    #       capabilities: [gpu]
+    #
+    # AMD ROCm: uncomment below (build with GPU_BACKEND=rocm)
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+    # group_add:
+    #   - video
+    #   - render

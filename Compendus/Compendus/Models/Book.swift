@@ -35,6 +35,7 @@ struct Book: Codable, Identifiable, Hashable {
     var chapters: [Chapter]?     // Audiobooks
     var convertedEpubPath: String?  // Path to converted EPUB (for PDF books)
     var convertedEpubSize: Int?     // Size of converted EPUB
+    var hasTranscript: Bool?        // Whether audiobook has a transcript
 
     var hasEpubVersion: Bool {
         convertedEpubPath != nil
@@ -100,7 +101,7 @@ struct Book: Codable, Identifiable, Hashable {
         case description, isbn, isbn10, isbn13, language, pageCount
         case format, series, seriesNumber, coverUrl, addedAt
         case fileSize, duration, narrator, chapters
-        case convertedEpubPath, convertedEpubSize
+        case convertedEpubPath, convertedEpubSize, hasTranscript
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +129,7 @@ struct Book: Codable, Identifiable, Hashable {
         chapters = try container.decodeIfPresent([Chapter].self, forKey: .chapters)
         convertedEpubPath = try container.decodeIfPresent(String.self, forKey: .convertedEpubPath)
         convertedEpubSize = try container.decodeIfPresent(Int.self, forKey: .convertedEpubSize)
+        hasTranscript = try container.decodeIfPresent(Bool.self, forKey: .hasTranscript)
     }
 
     init(

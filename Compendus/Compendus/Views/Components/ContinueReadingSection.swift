@@ -117,7 +117,7 @@ struct ContinueReadingCard: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title), \(Int(book.readingProgress * 100))% complete")
-        .accessibilityHint("Double tap to continue reading")
+        .accessibilityHint(book.isAudiobook ? "Double tap to continue listening" : "Double tap to continue reading")
     }
 
     private var bookIcon: String {

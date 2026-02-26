@@ -190,6 +190,50 @@ class APIService {
         return try await fetch(url)
     }
 
+    // MARK: - Transcription
+
+    /// Trigger audiobook transcription on the server
+    func transcribe(bookId: String) async throws -> TranscribeResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/transcribe") else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let message = String(data: data, encoding: .utf8)
+                throw APIError.serverError(httpResponse.statusCode, message)
+            }
+            return try JSONDecoder().decode(TranscribeResponse.self, from: data)
+        } catch let error as APIError {
+            throw error
+        } catch let error as DecodingError {
+            throw APIError.decodingError(error)
+        } catch {
+            throw APIError.networkError(error)
+        }
+    }
+
+    /// Fetch the transcript JSON for an audiobook
+    func fetchTranscript(bookId: String) async throws -> TranscriptDataResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/transcript") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Check if a transcript is available for a book
+    func getTranscriptStatus(bookId: String) async throws -> TranscriptStatusResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/transcript-status") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
     // MARK: - Downloads
 
     /// Get URL for downloading a book file

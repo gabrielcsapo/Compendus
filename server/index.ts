@@ -12,6 +12,7 @@ import { wishlistRoutes } from "./routes/wishlist";
 import { jobsRoutes } from "./routes/jobs";
 import { readerRoutes } from "./routes/reader";
 import { convertRoutes } from "./routes/convert";
+import { transcribeRoutes } from "./routes/transcribe";
 import { editorRoutes } from "./routes/editor";
 import { assetsRoutes } from "./routes/assets";
 import { libraryRoutes } from "./routes/library";
@@ -44,6 +45,7 @@ app.route("/", jobsRoutes);
 app.route("/", wishlistRoutes);
 app.route("/", readerRoutes);
 app.route("/", convertRoutes);
+app.route("/", transcribeRoutes);
 app.route("/", editorRoutes);
 app.route("/", libraryRoutes);
 
@@ -70,6 +72,9 @@ app.all("/api/*", (c) => {
         readerResource: "GET /api/reader/:bookId/resource/* (returns EPUB embedded resources)",
         convertToEpub: "POST /api/books/:id/convert-to-epub (converts PDF to EPUB)",
         epubStatus: "GET /api/books/:id/epub-status (check conversion status)",
+        transcribe: "POST /api/books/:id/transcribe (transcribe audiobook with Whisper)",
+        transcript: "GET /api/books/:id/transcript (get transcript JSON)",
+        transcriptStatus: "GET /api/books/:id/transcript-status (check transcript status)",
         library: "GET /api/library?offset=0&sort=recent&type=ebook&format=epub",
       },
     },

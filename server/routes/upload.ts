@@ -230,7 +230,7 @@ app.post("/api/upload-multifile", async (c) => {
     }
 
     // Create job ID immediately so we can return it to the client
-    const { createJob } = await import("../../app/lib/jobs");
+    const { createJob } = await import("../../app/lib/queue");
     const jobId = `merge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     createJob(jobId);
 

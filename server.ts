@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createServer } from "react-flight-router/server";
 import { app as apiApp } from "./server/index.js";
+import { startJobProcessor } from "./app/lib/queue.js";
 
 async function main() {
   const flightApp = await createServer({ buildDir: "./dist" });
@@ -23,6 +24,9 @@ async function main() {
   server.setTimeout(0);
   (server as any).requestTimeout = 0;
   (server as any).headersTimeout = 0;
+
+  // Start background job processor (transcription, conversion queue)
+  startJobProcessor();
 }
 
 main().catch((err) => {

@@ -275,6 +275,7 @@ export async function getReaderInfo(
   if (content.type === "audio") {
     response.duration = content.duration;
     response.chapters = content.chapters;
+    response.hasTranscript = !!book.transcriptPath;
   }
 
   return response;

@@ -13,6 +13,7 @@ import { EditBookButton } from "../components/EditBookButton";
 import { DeleteBookButton } from "../components/DeleteBookButton";
 import { AuthorLinks } from "../components/AuthorLink";
 import { ConvertToEpubButton } from "../components/ConvertToEpubButton";
+import { TranscribeButton } from "../components/TranscribeButton";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
@@ -113,6 +114,11 @@ export default async function BookDetail({ params }: { params?: Record<string, s
           {/* Convert to EPUB (PDF, MOBI, AZW3) */}
           {["pdf", "mobi", "azw3"].includes(book.format) && (
             <ConvertToEpubButton bookId={book.id} hasEpub={!!book.convertedEpubPath} />
+          )}
+
+          {/* Transcribe audiobook */}
+          {["m4b", "mp3", "m4a"].includes(book.format) && (
+            <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
           )}
 
           {/* Linked formats (same ISBN, different format) */}

@@ -11,6 +11,7 @@ import {
   applyHighlightsToDOM,
   calculateToolbarPosition,
 } from "./utils/highlightUtils";
+import { AudioLyrics } from "./AudioLyrics";
 
 interface ReaderContentProps {
   content: PageContent | null;
@@ -19,6 +20,9 @@ interface ReaderContentProps {
   isSpreadMode?: boolean;
   onPrevPage?: () => void;
   onNextPage?: () => void;
+  // Book identification
+  bookId?: string;
+  hasTranscript?: boolean;
   // Audio-specific props
   audioChapters?: AudioChapter[];
   audioDuration?: number;
@@ -46,6 +50,8 @@ export function ReaderContent({
   isSpreadMode,
   onPrevPage,
   onNextPage,
+  bookId,
+  hasTranscript,
   audioChapters,
   audioDuration,
   highlights,
@@ -98,6 +104,8 @@ export function ReaderContent({
           settings={settings}
           chapters={audioChapters}
           totalDuration={audioDuration}
+          bookId={bookId}
+          hasTranscript={hasTranscript}
         />
       );
     default:
@@ -595,15 +603,20 @@ function AudioContent({
   settings,
   chapters: _chapters,
   totalDuration,
+  bookId,
+  hasTranscript,
 }: {
   content: PageContent;
   settings: ReaderSettings;
   chapters?: AudioChapter[];
   totalDuration?: number;
+  bookId?: string;
+  hasTranscript?: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(content.startTime || 0);
+  const [showLyrics, setShowLyrics] = useState(false);
   const [volume, setVolume] = useState(settings.audioVolume);
 
   const theme = THEMES[settings.theme];
@@ -666,6 +679,13 @@ function AudioContent({
     }
   };
 
+  const seekTo = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
+  };
+
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -692,7 +712,7 @@ function AudioContent({
       />
 
       {/* Chapter info */}
-      <div className="text-center mb-8">
+      <div className="text-center mb-4">
         <h2 className="text-2xl font-semibold mb-2">{content.chapterTitle || "Now Playing"}</h2>
         {content.chapter && (
           <p className="text-sm" style={{ color: theme.muted }}>
@@ -700,6 +720,18 @@ function AudioContent({
           </p>
         )}
       </div>
+
+      {/* Lyrics display */}
+      {showLyrics && bookId && (
+        <div className="w-full max-w-lg mb-4">
+          <AudioLyrics
+            bookId={bookId}
+            currentTime={currentTime}
+            onSeek={seekTo}
+            theme={theme}
+          />
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="w-full max-w-lg mb-4">
@@ -781,9 +813,30 @@ function AudioContent({
         </svg>
       </div>
 
-      {/* Playback speed */}
-      <div className="mt-4 text-sm" style={{ color: theme.muted }}>
-        Speed: {settings.audioPlaybackSpeed}x
+      {/* Playback speed & lyrics toggle */}
+      <div className="mt-4 flex items-center gap-4 text-sm" style={{ color: theme.muted }}>
+        <span>Speed: {settings.audioPlaybackSpeed}x</span>
+        {hasTranscript && bookId && (
+          <button
+            onClick={() => setShowLyrics(!showLyrics)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors"
+            style={{
+              backgroundColor: showLyrics ? `${theme.accent}20` : "transparent",
+              color: showLyrics ? theme.accent : theme.muted,
+            }}
+            title={showLyrics ? "Hide lyrics" : "Show lyrics"}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            Lyrics
+          </button>
+        )}
       </div>
     </div>
   );

@@ -106,6 +106,7 @@ export interface ReaderInfoResponse {
   // Audio-specific
   duration?: number;
   chapters?: AudioChapter[];
+  hasTranscript?: boolean;
   // Cover
   coverPath?: string;
   // Error message (when book loads but content parsing failed)

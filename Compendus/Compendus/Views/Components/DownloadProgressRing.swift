@@ -51,6 +51,7 @@ struct AnimatedDownloadButton: View {
     }
 
     let state: State
+    var isAudiobook: Bool = false
     var onTap: (() -> Void)?
     var onCancel: (() -> Void)?
 
@@ -113,7 +114,7 @@ struct AnimatedDownloadButton: View {
             Text("\(Int(progress * 100))%")
                 .monospacedDigit()
         case .completed:
-            Text("Read")
+            Text(isAudiobook ? "Play" : "Read")
         case .failed:
             Text("Retry")
         }

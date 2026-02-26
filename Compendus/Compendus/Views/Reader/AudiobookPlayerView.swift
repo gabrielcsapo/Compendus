@@ -2,23 +2,23 @@
 //  AudiobookPlayerView.swift
 //  Compendus
 //
-//  Audiobook player using AVFoundation
+//  Audiobook player UI using shared AudiobookPlayer service
 //
 
 import SwiftUI
 import SwiftData
-import AVFoundation
-import MediaPlayer
 
 struct AudiobookPlayerView: View {
     let book: DownloadedBook
 
-    @Environment(\.modelContext) private var modelContext
-    @State private var player = AudiobookPlayer()
+    @Environment(AudiobookPlayer.self) private var player
 
     @State private var showingChapters = false
     @State private var sleepTimerMinutes: Int?
     @State private var showingSleepTimer = false
+    @State private var showLyrics = false
+    @State private var loadedTranscript: Transcript?
+    @State private var showBookDetail = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -35,30 +35,54 @@ struct AudiobookPlayerView: View {
                 }
 
                 VStack(spacing: 0) {
-                    // Cover and info (scrollable, takes available space)
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            // Cover image
+                    if showLyrics, let transcript = loadedTranscript {
+                        // Lyrics view (replaces cover when active)
+                        VStack(spacing: 8) {
+                            Text(book.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .padding(.top, 12)
+
+                            if let chapter = player.currentChapter {
+                                Text(chapter.title)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            AudioLyricsView(
+                                transcript: transcript,
+                                currentTime: player.currentTime,
+                                onSeek: { time in player.seek(to: time) }
+                            )
+                        }
+                    } else {
+                        // Cover and info (centered in available space)
+                        VStack(spacing: 20) {
+                            Spacer()
+
+                            // Cover image — tap to show details
                             if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
                                 Image(uiImage: uiImage)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: geometry.size.width - 80, maxHeight: 250)
+                                    .frame(maxWidth: geometry.size.width - 48)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                                     .shadow(color: .black.opacity(0.3), radius: 16, x: 0, y: 8)
+                                    .onTapGesture { showBookDetail = true }
                             } else {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(Color.gray.opacity(0.2))
-                                    .frame(width: 200, height: 200)
+                                    .frame(width: 280, height: 280)
                                     .overlay {
                                         Image(systemName: "headphones")
                                             .font(.system(size: 50))
                                             .foregroundStyle(.secondary)
                                     }
+                                    .onTapGesture { showBookDetail = true }
                             }
 
                             // Title and author
-                            VStack(spacing: 4) {
+                            VStack(spacing: 6) {
                                 Text(book.title)
                                     .font(.title3)
                                     .fontWeight(.bold)
@@ -84,123 +108,31 @@ struct AudiobookPlayerView: View {
                                     .foregroundStyle(.secondary)
                                     .padding(.horizontal, 20)
                             }
+
+                            Spacer()
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 16)
-                        .padding(.bottom, 8)
                     }
 
                     // Player controls (fixed at bottom)
-                    VStack(spacing: 16) {
-                        // Progress slider
-                        VStack(spacing: 4) {
-                            Slider(
-                                value: Binding(
-                                    get: { player.currentTime },
-                                    set: { player.seek(to: $0) }
-                                ),
-                                in: 0...max(1, player.duration)
-                            )
-                            .tint(.primary)
-
-                            HStack {
-                                Text(formatTime(player.currentTime))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-
-                                Spacer()
-
-                                Text("-\(formatTime(player.duration - player.currentTime))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
-
-                        // Playback controls
-                        HStack(spacing: 40) {
-                            Button {
-                                player.skipBackward()
-                            } label: {
-                                Image(systemName: "gobackward.15")
-                                    .font(.title2)
-                            }
-
-                            Button {
-                                if player.isPlaying {
-                                    player.pause()
-                                } else {
-                                    player.play()
-                                }
-                            } label: {
-                                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 56))
-                            }
-
-                            Button {
-                                player.skipForward()
-                            } label: {
-                                Image(systemName: "goforward.30")
-                                    .font(.title2)
-                            }
-                        }
-
-                        // Speed and utilities
-                        HStack {
-                            Menu {
-                                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-                                    Button {
-                                        player.setPlaybackRate(Float(speed))
-                                    } label: {
-                                        HStack {
-                                            Text("\(speed, specifier: "%.2g")x")
-                                            if player.playbackRate == Float(speed) {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                Text("\(player.playbackRate, specifier: "%.2g")x")
-                                    .font(.subheadline)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(Color.gray.opacity(0.2))
-                                    .clipShape(Capsule())
-                            }
-
-                            Spacer()
-
-                            if let chapters = book.chapters, !chapters.isEmpty {
-                                Button {
-                                    showingChapters = true
-                                } label: {
-                                    Image(systemName: "list.bullet")
-                                        .font(.title3)
-                                }
-                            }
-
-                            Button {
-                                showingSleepTimer = true
-                            } label: {
-                                Image(systemName: sleepTimerMinutes != nil ? "moon.fill" : "moon")
-                                    .font(.title3)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom)
+                    playerControls
                 }
                 .frame(maxWidth: .infinity)
             }
         }
         .ignoresSafeArea(edges: .bottom)
         .task {
-            await loadAudiobook()
-        }
-        .onDisappear {
-            saveProgress()
+            // Only load if this isn't already the active book
+            if player.currentBook?.id != book.id {
+                await player.loadBook(book)
+            }
+            if !player.isPlaying {
+                player.play()
+            }
+            // Load transcript if available
+            if loadedTranscript == nil, let transcript = book.transcript {
+                loadedTranscript = transcript
+            }
         }
         .sheet(isPresented: $showingChapters) {
             ChaptersListView(
@@ -210,6 +142,11 @@ struct AudiobookPlayerView: View {
             ) { chapter in
                 player.seek(to: chapter.startTime)
                 showingChapters = false
+            }
+        }
+        .sheet(isPresented: $showBookDetail) {
+            NavigationStack {
+                DownloadedBookDetailView(book: book)
             }
         }
         .confirmationDialog("Sleep Timer", isPresented: $showingSleepTimer) {
@@ -227,28 +164,118 @@ struct AudiobookPlayerView: View {
         }
     }
 
-    private func loadAudiobook() async {
-        guard let fileURL = book.fileURL else { return }
+    // MARK: - Player Controls
 
-        await player.load(url: fileURL, chapters: book.chapters)
+    private var playerControls: some View {
+        VStack(spacing: 16) {
+            // Progress slider
+            VStack(spacing: 4) {
+                Slider(
+                    value: Binding(
+                        get: { player.currentTime },
+                        set: { player.seek(to: $0) }
+                    ),
+                    in: 0...max(1, player.duration)
+                )
+                .tint(.primary)
 
-        // Restore last position
-        if let lastPosition = book.lastPosition, let time = Double(lastPosition) {
-            player.seek(to: time)
+                HStack {
+                    Text(formatTime(player.currentTime))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    Spacer()
+
+                    Text("-\(formatTime(player.duration - player.currentTime))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            // Playback controls
+            HStack(spacing: 40) {
+                Button {
+                    player.skipBackward()
+                } label: {
+                    Image(systemName: "gobackward.15")
+                        .font(.title2)
+                }
+
+                Button {
+                    if player.isPlaying {
+                        player.pause()
+                    } else {
+                        player.play()
+                    }
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 56))
+                }
+
+                Button {
+                    player.skipForward()
+                } label: {
+                    Image(systemName: "goforward.30")
+                        .font(.title2)
+                }
+            }
+
+            // Speed and utilities
+            HStack {
+                Menu {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
+                        Button {
+                            player.setPlaybackRate(Float(speed))
+                        } label: {
+                            HStack {
+                                Text("\(speed, specifier: "%.2g")x")
+                                if player.playbackRate == Float(speed) {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Text("\(player.playbackRate, specifier: "%.2g")x")
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.gray.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
+
+                if loadedTranscript != nil {
+                    Button {
+                        showLyrics.toggle()
+                    } label: {
+                        Image(systemName: showLyrics ? "text.quote.fill" : "text.quote")
+                            .font(.title3)
+                    }
+                }
+
+                if let chapters = book.chapters, !chapters.isEmpty {
+                    Button {
+                        showingChapters = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.title3)
+                    }
+                }
+
+                Button {
+                    showingSleepTimer = true
+                } label: {
+                    Image(systemName: sleepTimerMinutes != nil ? "moon.fill" : "moon")
+                        .font(.title3)
+                }
+            }
         }
-
-        // Setup Now Playing info
-        player.setupNowPlayingInfo(
-            title: book.title,
-            artist: book.authorsDisplay,
-            artwork: book.coverData.flatMap { UIImage(data: $0) }
-        )
-    }
-
-    private func saveProgress() {
-        book.lastPosition = String(player.currentTime)
-        book.readingProgress = player.duration > 0 ? player.currentTime / player.duration : 0
-        try? modelContext.save()
+        .padding(.horizontal, 20)
+        .padding(.bottom)
     }
 
     private func setSleepTimer(minutes: Int) {
@@ -351,210 +378,6 @@ struct ChaptersListView: View {
     }
 }
 
-// MARK: - Audio Player
-
-@MainActor
-@Observable
-class AudiobookPlayer: NSObject {
-    var isPlaying = false
-    var currentTime: Double = 0
-    var duration: Double = 0
-    var playbackRate: Float = 1.0
-    var currentChapter: Chapter?
-
-    @ObservationIgnored private var player: AVAudioPlayer?
-    @ObservationIgnored private var chapters: [Chapter] = []
-    @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var sleepTimer: Timer?
-
-    override init() {
-        super.init()
-        setupAudioSession()
-        setupRemoteCommands()
-    }
-
-    func load(url: URL, chapters: [Chapter]?) async {
-        self.chapters = chapters ?? []
-
-        do {
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.delegate = self
-            player?.prepareToPlay()
-            duration = player?.duration ?? 0
-            updateCurrentChapter()
-        } catch {
-            print("Error loading audio: \(error)")
-        }
-    }
-
-    func play() {
-        player?.play()
-        isPlaying = true
-        startTimer()
-    }
-
-    func pause() {
-        player?.pause()
-        isPlaying = false
-        stopTimer()
-    }
-
-    func seek(to time: Double) {
-        player?.currentTime = time
-        currentTime = time
-        updateCurrentChapter()
-        updateNowPlayingTime()
-    }
-
-    func skipForward() {
-        let newTime = min(currentTime + 30, duration)
-        seek(to: newTime)
-    }
-
-    func skipBackward() {
-        let newTime = max(currentTime - 15, 0)
-        seek(to: newTime)
-    }
-
-    func setPlaybackRate(_ rate: Float) {
-        playbackRate = rate
-        player?.rate = rate
-        if isPlaying {
-            player?.play()
-        }
-    }
-
-    func setSleepTimer(minutes: Int) {
-        sleepTimer?.invalidate()
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes * 60), repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.pause()
-            }
-        }
-    }
-
-    func cancelSleepTimer() {
-        sleepTimer?.invalidate()
-        sleepTimer = nil
-    }
-
-    func setupNowPlayingInfo(title: String, artist: String, artwork: UIImage?) {
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyArtist: artist,
-            MPNowPlayingInfoPropertyPlaybackRate: playbackRate,
-            MPMediaItemPropertyPlaybackDuration: duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime
-        ]
-
-        if let image = artwork {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-        }
-
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
-    private func setupAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Audio session setup failed: \(error)")
-        }
-    }
-
-    private func setupRemoteCommands() {
-        let commandCenter = MPRemoteCommandCenter.shared()
-
-        commandCenter.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                self?.play()
-            }
-            return .success
-        }
-
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                self?.pause()
-            }
-            return .success
-        }
-
-        commandCenter.skipForwardCommand.preferredIntervals = [30]
-        commandCenter.skipForwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                self?.skipForward()
-            }
-            return .success
-        }
-
-        commandCenter.skipBackwardCommand.preferredIntervals = [15]
-        commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                self?.skipBackward()
-            }
-            return .success
-        }
-
-        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            Task { @MainActor in
-                self?.seek(to: event.positionTime)
-            }
-            return .success
-        }
-    }
-
-    private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, let player = self.player else { return }
-                self.currentTime = player.currentTime
-                self.updateCurrentChapter()
-                self.updateNowPlayingTime()
-            }
-        }
-    }
-
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-
-    private func updateCurrentChapter() {
-        guard !chapters.isEmpty else {
-            currentChapter = nil
-            return
-        }
-
-        for (index, chapter) in chapters.enumerated() {
-            let nextStart = index + 1 < chapters.count ? chapters[index + 1].startTime : Double.infinity
-            if currentTime >= chapter.startTime && currentTime < nextStart {
-                if currentChapter?.id != chapter.id {
-                    currentChapter = chapter
-                }
-                return
-            }
-        }
-    }
-
-    private func updateNowPlayingTime() {
-        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? playbackRate : 0
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-}
-
-extension AudiobookPlayer: AVAudioPlayerDelegate {
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in
-            self.isPlaying = false
-            self.stopTimer()
-        }
-    }
-}
-
 #Preview {
     let book = DownloadedBook(
         id: "1",
@@ -570,5 +393,6 @@ extension AudiobookPlayer: AVAudioPlayerDelegate {
     NavigationStack {
         AudiobookPlayerView(book: book)
     }
+    .environment(AudiobookPlayer())
     .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

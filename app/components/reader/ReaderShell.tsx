@@ -213,6 +213,8 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
             isSpreadMode={reader.isSpreadMode}
             onPrevPage={reader.prevPage}
             onNextPage={reader.nextPage}
+            bookId={reader.bookInfo?.id}
+            hasTranscript={reader.bookInfo?.hasTranscript}
             audioChapters={reader.bookInfo?.chapters}
             audioDuration={reader.bookInfo?.duration}
             highlights={reader.highlights}

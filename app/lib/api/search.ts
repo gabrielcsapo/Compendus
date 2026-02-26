@@ -31,6 +31,7 @@ interface ApiBook {
   duration: number | null;
   narrator: string | null;
   chapters: ApiChapter[] | null;
+  hasTranscript: boolean;
 }
 
 interface ApiChapter {
@@ -109,6 +110,7 @@ function toApiBook(book: Book, baseUrl: string): ApiBook {
     duration: book.duration,
     narrator: book.narrator,
     chapters,
+    hasTranscript: !!book.transcriptPath,
   };
 }
 
