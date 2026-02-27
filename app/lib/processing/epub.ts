@@ -1,42 +1,8 @@
-import { initEpubFile } from "@lingo-reader/epub-parser";
+import { initEpubFile } from "../epub-parser.js";
 import type { BookMetadata, ExtractedContent, Chapter } from "../types";
 import { yieldToEventLoop } from "./utils";
 
-/**
- * Validate that a buffer looks like a valid ZIP file by checking:
- * 1. PK signature at the start
- * 2. End of Central Directory signature somewhere in the file
- */
-function isValidZipBuffer(buffer: Buffer): boolean {
-  // Check minimum size (ZIP needs at least 22 bytes for EOCD)
-  if (buffer.length < 22) return false;
-
-  // Check PK signature at start
-  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) return false;
-
-  // Check for End of Central Directory signature (PK\x05\x06)
-  // Search in the last 65KB + 22 bytes (max comment size + EOCD size)
-  const searchStart = Math.max(0, buffer.length - 65557);
-  for (let i = buffer.length - 22; i >= searchStart; i--) {
-    if (
-      buffer[i] === 0x50 &&
-      buffer[i + 1] === 0x4b &&
-      buffer[i + 2] === 0x05 &&
-      buffer[i + 3] === 0x06
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export async function extractEpubMetadata(buffer: Buffer): Promise<BookMetadata> {
-  // Validate ZIP structure before parsing to prevent JSZip crash
-  if (!isValidZipBuffer(buffer)) {
-    return { title: null, authors: [] };
-  }
-
   let epub;
   try {
     epub = await initEpubFile(buffer);
@@ -95,11 +61,6 @@ export async function extractEpubMetadata(buffer: Buffer): Promise<BookMetadata>
 }
 
 export async function extractEpubContent(buffer: Buffer): Promise<ExtractedContent> {
-  // Validate ZIP structure before parsing to prevent JSZip crash
-  if (!isValidZipBuffer(buffer)) {
-    return { fullText: "", chapters: [], toc: [] };
-  }
-
   let epub;
   try {
     epub = await initEpubFile(buffer);
@@ -161,20 +122,31 @@ export async function extractEpubContent(buffer: Buffer): Promise<ExtractedConte
 }
 
 export async function extractEpubCover(buffer: Buffer): Promise<Buffer | null> {
-  // Validate ZIP structure before parsing to prevent JSZip crash
-  if (!isValidZipBuffer(buffer)) {
-    return null;
-  }
-
   try {
-    const epub = await initEpubFile(buffer);
-    const coverPath = epub.getCoverImage();
+    const { mkdirSync, existsSync, readFileSync, rmSync } = await import("fs");
+    const { resolve } = await import("path");
+    const { tmpdir } = await import("os");
+    const { randomUUID } = await import("crypto");
 
-    if (coverPath) {
-      // Extract the cover image from the EPUB zip using existing helper
-      const resource = await extractEpubResource(buffer, coverPath);
-      if (resource && resource.mimeType.startsWith("image/")) {
-        return resource.data;
+    // Use a temporary directory for resource extraction
+    const tmpResourceDir = resolve(tmpdir(), `epub-cover-${randomUUID()}`);
+    mkdirSync(tmpResourceDir, { recursive: true });
+
+    try {
+      const epub = await initEpubFile(buffer, tmpResourceDir);
+      const coverPath = epub.getCoverImage();
+
+      if (coverPath && existsSync(coverPath)) {
+        const data = readFileSync(coverPath);
+        epub.destroy();
+        return data;
+      }
+
+      epub.destroy();
+    } finally {
+      // Clean up temp directory
+      if (existsSync(tmpResourceDir)) {
+        rmSync(tmpResourceDir, { recursive: true, force: true });
       }
     }
 
@@ -183,7 +155,6 @@ export async function extractEpubCover(buffer: Buffer): Promise<Buffer | null> {
     const zip = await JSZip.loadAsync(buffer);
     const files = Object.keys(zip.files);
 
-    // Common cover file patterns (sorted by priority)
     const coverPatterns = [
       /cover\.(jpe?g|png|gif|webp)$/i,
       /cover[-_]?image\.(jpe?g|png|gif|webp)$/i,
@@ -224,11 +195,6 @@ export async function extractEpubResource(
   buffer: Buffer,
   resourcePath: string,
 ): Promise<{ data: Buffer; mimeType: string } | null> {
-  // Validate ZIP structure before parsing
-  if (!isValidZipBuffer(buffer)) {
-    return null;
-  }
-
   try {
     // Use JSZip directly to extract the resource
     const JSZip = (await import("jszip")).default;

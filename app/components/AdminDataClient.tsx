@@ -339,26 +339,18 @@ export function AdminDataClient({
   };
 
   return (
-    <main className="container my-8 px-6 mx-auto max-w-6xl">
+    <div>
       <input
         type="file"
         ref={fileInputRef}
         onChange={handleFileSelected}
         className="hidden"
       />
-      <div className="mb-8">
-        <Link to="/" className="text-primary hover:underline text-sm">
-          &larr; Back to Library
-        </Link>
-        <h1 className="text-2xl font-bold text-foreground mt-2">
-          Data Administration
-        </h1>
-        <p className="text-foreground-muted text-sm mt-1">
-          Comparing files in{" "}
-          <code className="bg-surface-elevated px-1 rounded">{booksDir}</code>{" "}
-          with database records
-        </p>
-      </div>
+      <p className="text-foreground-muted text-sm mb-8">
+        Comparing files in{" "}
+        <code className="bg-surface-elevated px-1 rounded">{booksDir}</code>{" "}
+        with database records
+      </p>
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -899,6 +891,6 @@ export function AdminDataClient({
           </>
         )}
       </section>
-    </main>
+    </div>
   );
 }

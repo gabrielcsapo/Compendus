@@ -3,7 +3,7 @@
 //  Compendus
 //
 //  Floating context menu that appears near selected text.
-//  Styled to resemble the native Apple Books highlight menu.
+//  Single-row layout: color dots | note | copy.
 //
 
 import SwiftUI
@@ -15,14 +15,13 @@ struct FloatingHighlightToolbar: View {
     let selectionRect: CGRect
     let containerSize: CGSize
     let onSelectColor: (String) -> Void
-    let onCustomColor: () -> Void
     let onAddNote: () -> Void
     let onCopy: () -> Void
     let onDismiss: () -> Void
 
     // Show above selection when there's enough room; otherwise below.
     private var showAbove: Bool {
-        selectionRect.minY > 220
+        selectionRect.minY > 80
     }
 
     private var toolbarY: CGFloat {
@@ -33,18 +32,10 @@ struct FloatingHighlightToolbar: View {
         }
     }
 
-    private var toolbarWidth: CGFloat {
-        let count = CGFloat(highlightColorManager.colors.count + 1)
-        let dotSize: CGFloat = 28
-        let spacing: CGFloat = highlightColorManager.colors.count > 3 ? 8 : 12
-        let padding: CGFloat = 32
-        return max(220, count * dotSize + (count - 1) * spacing + padding)
-    }
-
     private var toolbarX: CGFloat {
-        let half = toolbarWidth / 2
         let x = selectionRect.midX
-        return max(half + 8, min(x, containerSize.width - half - 8))
+        // Clamp so toolbar doesn't overflow screen edges (estimated half-width ~160)
+        return max(160, min(x, containerSize.width - 160))
     }
 
     var body: some View {
@@ -54,70 +45,48 @@ struct FloatingHighlightToolbar: View {
                 .contentShape(Rectangle())
                 .onTapGesture { onDismiss() }
 
-            // Context menu
-            VStack(spacing: 0) {
-                // Color dots row with labels
-                HStack(spacing: highlightColorManager.colors.count > 3 ? 8 : 12) {
-                    ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
-                        Button {
-                            onSelectColor(item.preset.hex)
-                        } label: {
-                            VStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
-                                    .frame(width: 28, height: 28)
-
-                                Text(item.label)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-
-                    // Custom color picker
+            // Single-row toolbar
+            HStack(spacing: 10) {
+                // Color dots
+                ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
                     Button {
-                        onCustomColor()
+                        onSelectColor(item.preset.hex)
                     } label: {
-                        VStack(spacing: 4) {
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        AngularGradient(
-                                            colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
-                                            center: .center
-                                        )
-                                    )
-                                    .frame(width: 28, height: 28)
-                                Circle()
-                                    .fill(.white)
-                                    .frame(width: 12, height: 12)
-                            }
-
-                            Text("Custom")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Circle()
+                            .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                            .frame(width: 28, height: 28)
                     }
                 }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 16)
 
-                Divider()
+                // Vertical divider between colors and actions
+                Capsule()
+                    .fill(.separator)
+                    .frame(width: 1, height: 22)
 
-                // Menu items
-                menuItem(icon: "note.text", label: "Add Note") {
+                // Add Note
+                Button {
                     onAddNote()
+                } label: {
+                    Image(systemName: "note.text")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.primary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
 
-                Divider()
-
-                menuItem(icon: "doc.on.doc", label: "Copy") {
+                // Copy
+                Button {
                     onCopy()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.primary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
             }
-            .frame(width: toolbarWidth)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
             .background {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.regularMaterial)
@@ -129,25 +98,8 @@ struct FloatingHighlightToolbar: View {
                     .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .fixedSize()
             .position(x: toolbarX, y: toolbarY)
-        }
-    }
-
-    private func menuItem(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.primary)
-                    .frame(width: 22)
-                Text(label)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
         }
     }
 }

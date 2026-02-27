@@ -10,6 +10,7 @@ import {
   type ThemeName,
   type FontFamily,
   type ComicFitMode,
+  type PdfPageLayout,
 } from "@/lib/reader/settings";
 
 interface ReaderSettingsProps {
@@ -202,6 +203,37 @@ export function ReaderSettings({
               >
                 Justify
               </button>
+            </div>
+          </SettingSection>
+
+          {/* Page Layout */}
+          <SettingSection title="Page Layout">
+            <div className="space-y-2">
+              {(["single", "spread", "auto"] as PdfPageLayout[]).map((mode) => {
+                const labels: Record<PdfPageLayout, { name: string; desc: string }> = {
+                  single: { name: "Single Page", desc: "Show one page at a time" },
+                  spread: { name: "Two-Page Spread", desc: "Show two pages side by side" },
+                  auto: { name: "Auto", desc: "Single on mobile, spread on desktop" },
+                };
+                return (
+                  <button
+                    key={mode}
+                    onClick={() => onUpdateSetting("pdfPageLayout", mode)}
+                    className="w-full text-left px-3 py-2 rounded-md border transition-colors"
+                    style={{
+                      borderColor:
+                        settings.pdfPageLayout === mode ? theme.accent : `${theme.foreground}20`,
+                      backgroundColor:
+                        settings.pdfPageLayout === mode ? `${theme.accent}10` : "transparent",
+                    }}
+                  >
+                    <div className="font-medium">{labels[mode].name}</div>
+                    <div className="text-xs" style={{ color: theme.muted }}>
+                      {labels[mode].desc}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </SettingSection>
 

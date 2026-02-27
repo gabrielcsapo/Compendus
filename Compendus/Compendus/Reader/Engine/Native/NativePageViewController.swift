@@ -42,6 +42,10 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
     // Highlight tracking: (highlight ID, range in full attributed string, color)
     private var highlightRanges: [(id: String, range: NSRange, color: UIColor)] = []
 
+    // Read-along highlight: range in full attributed string, rendered with accent color
+    private var readAlongHighlightRange: NSRange?
+    private let readAlongHighlightColor: UIColor = .tintColor
+
     // Track whether we're suppressing selection callbacks during page transitions
     private var suppressSelectionCallbacks = false
 
@@ -52,6 +56,7 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
     var onHighlightTapped: ((String) -> Void)?
     var onTapZone: ((String) -> Void)?
     var onLinkTapped: ((URL) -> Void)?
+    var onFootnoteTapped: ((URL) -> Void)?
 
     // Media attachments in the current chapter
     private var mediaAttachments: [MediaAttachment] = []
@@ -74,6 +79,98 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
     var onViewResized: ((CGSize) -> Void)?
     private var lastReportedSize: CGSize = .zero
     private var resizeDebounceTask: Task<Void, Never>?
+
+    /// When true, blank pages show as empty instead of "This page is blank" placeholder.
+    var suppressBlankPagePlaceholder: Bool = false
+
+    // MARK: - Page Indicator
+
+    private var pageIndicatorView: UIView?
+    private var pageIndicatorLabel: UILabel?
+    private var pageIndicatorHideTask: Task<Void, Never>?
+
+    /// Show a floating page indicator in the center of the screen that fades out.
+    func showPageIndicator(text: String) {
+        pageIndicatorHideTask?.cancel()
+
+        if let label = pageIndicatorLabel, let container = pageIndicatorView {
+            container.layer.removeAllAnimations()
+            label.text = text
+            container.alpha = 1
+            view.bringSubviewToFront(container)
+        } else {
+            let label = UILabel()
+            label.text = text
+            let baseFont = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .medium)
+            if let descriptor = baseFont.fontDescriptor.withDesign(.rounded) {
+                label.font = UIFont(descriptor: descriptor, size: 15)
+            } else {
+                label.font = baseFont
+            }
+            label.textColor = .secondaryLabel
+            label.textAlignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            let container = UIView()
+            container.backgroundColor = UIColor.systemFill
+            container.layer.cornerRadius = 10
+            container.layer.masksToBounds = true
+            container.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(label)
+            view.addSubview(container)
+
+            NSLayoutConstraint.activate([
+                container.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                container.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+                label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+                label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            ])
+
+            pageIndicatorLabel = label
+            pageIndicatorView = container
+        }
+
+        pageIndicatorHideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            UIView.animate(withDuration: 0.3) {
+                self?.pageIndicatorView?.alpha = 0
+            }
+        }
+    }
+
+    // MARK: - Loading Overlay
+
+    private var loadingOverlay: UIView?
+
+    /// Show or hide a centered activity indicator overlay while a chapter loads.
+    func showLoadingIndicator(_ show: Bool) {
+        if show {
+            guard loadingOverlay == nil else { return }
+            let overlay = UIView()
+            overlay.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.6)
+            overlay.translatesAutoresizingMaskIntoConstraints = false
+            let spinner = UIActivityIndicatorView(style: .large)
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            spinner.startAnimating()
+            overlay.addSubview(spinner)
+            view.addSubview(overlay)
+            NSLayoutConstraint.activate([
+                overlay.topAnchor.constraint(equalTo: view.topAnchor),
+                overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                spinner.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                spinner.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            ])
+            loadingOverlay = overlay
+        } else {
+            loadingOverlay?.removeFromSuperview()
+            loadingOverlay = nil
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -178,10 +275,12 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         // Swipe gestures for page turning
         let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeLeft(_:)))
         swipeLeft.direction = .left
+        swipeLeft.delegate = self
         view.addGestureRecognizer(swipeLeft)
 
         let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeRight(_:)))
         swipeRight.direction = .right
+        swipeRight.delegate = self
         view.addGestureRecognizer(swipeRight)
     }
 
@@ -360,18 +459,31 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         if isTwoPageMode, let stv = secondTextView, currentPageIndex + 1 < pages.count {
             overlayInlinePlayers(for: currentPageIndex + 1, in: stv)
         }
+
+        // Prefetch images for nearby pages in background for smooth paging
+        prefetchImagesForAdjacentPages()
     }
 
     /// Render a single page into the given text view.
     private func renderPage(at pageIndex: Int, into targetTextView: UITextView, fullString: NSAttributedString) {
         let page = pages[pageIndex]
         let safeRange = NSIntersectionRange(page.range, NSRange(location: 0, length: fullString.length))
+
+        // Load actual pixel data for LazyImageAttachments on this page.
+        // During pagination, only dimensions were read (no pixel decode).
+        // The attachments are shared objects, so loading here also populates the substring.
+        loadImagesForRange(safeRange, in: fullString)
+
         let pageString = fullString.attributedSubstring(from: safeRange)
 
         // Detect blank pages (empty or whitespace-only content)
         let trimmed = pageString.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            targetTextView.attributedText = blankPagePlaceholder()
+            if suppressBlankPagePlaceholder {
+                targetTextView.attributedText = NSAttributedString(string: "")
+            } else {
+                targetTextView.attributedText = blankPagePlaceholder()
+            }
             centerTextVertically(in: targetTextView)
         } else {
             // Apply highlights that overlap with this page
@@ -402,33 +514,80 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         targetTextView.contentInset.top = offset
     }
 
+    // MARK: - Lazy Image Loading
+
+    /// Load actual UIImage pixel data for all LazyImageAttachments in the given range.
+    /// Called at render time — during pagination only dimensions are read.
+    private func loadImagesForRange(_ range: NSRange, in attrString: NSAttributedString) {
+        let safeRange = NSIntersectionRange(range, NSRange(location: 0, length: attrString.length))
+        guard safeRange.length > 0 else { return }
+        attrString.enumerateAttribute(.attachment, in: safeRange, options: []) { value, _, _ in
+            if let lazy = value as? LazyImageAttachment {
+                lazy.loadImageIfNeeded()
+            }
+        }
+    }
+
+    /// Prefetch images for pages adjacent to the current page in a background task.
+    /// Ensures smooth page transitions without visible image pop-in.
+    private func prefetchImagesForAdjacentPages() {
+        guard let fullString = fullAttributedString, !pages.isEmpty else { return }
+        let current = currentPageIndex
+        let pageCount = pages.count
+
+        // Prefetch current ± 2 pages (current page is already loaded)
+        let prefetchIndices = [current - 1, current + 2, current + 3, current - 2]
+            .filter { $0 >= 0 && $0 < pageCount }
+
+        guard !prefetchIndices.isEmpty else { return }
+
+        // Capture page ranges for the background task
+        let pageRanges = prefetchIndices.map { pages[$0].range }
+        let stringLength = fullString.length
+
+        Task.detached(priority: .utility) {
+            for range in pageRanges {
+                let safeRange = NSIntersectionRange(range, NSRange(location: 0, length: stringLength))
+                guard safeRange.length > 0 else { continue }
+                fullString.enumerateAttribute(.attachment, in: safeRange, options: []) { value, _, _ in
+                    if let lazy = value as? LazyImageAttachment {
+                        lazy.loadImageIfNeeded()
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Highlight Application
 
     /// Set the highlights to render. Ranges are relative to the full chapter attributed string.
-    func applyHighlights(_ highlights: [(id: String, range: NSRange, color: UIColor)]) {
+    /// Optionally includes a read-along highlight range for sentence-level sync.
+    func applyHighlights(_ highlights: [(id: String, range: NSRange, color: UIColor)], readAlongRange: NSRange? = nil) {
         self.highlightRanges = highlights
+        self.readAlongHighlightRange = readAlongRange
         showCurrentPage() // Re-render with highlights
     }
 
     /// Apply highlight background colors to a page substring.
     private func applyHighlightsToPage(_ pageString: NSAttributedString,
                                         pageRange: NSRange) -> NSAttributedString {
-        guard !highlightRanges.isEmpty else { return pageString }
+        let hasHighlights = !highlightRanges.isEmpty
+        let hasReadAlong = readAlongHighlightRange != nil
+
+        guard hasHighlights || hasReadAlong else { return pageString }
 
         let mutable = NSMutableAttributedString(attributedString: pageString)
 
+        // Apply user highlights (35% opacity)
         for highlight in highlightRanges {
-            // Calculate overlap between highlight range and page range
             let overlap = NSIntersectionRange(highlight.range, pageRange)
             guard overlap.length > 0 else { continue }
 
-            // Convert to page-local range
             let localRange = NSRange(
                 location: overlap.location - pageRange.location,
                 length: overlap.length
             )
 
-            // Safety check
             guard localRange.location >= 0,
                   localRange.location + localRange.length <= mutable.length else { continue }
 
@@ -436,7 +595,48 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
                                  range: localRange)
         }
 
+        // Apply read-along sentence highlight (underline + subtle background)
+        if let readAlongRange = readAlongHighlightRange {
+            let overlap = NSIntersectionRange(readAlongRange, pageRange)
+            if overlap.length > 0 {
+                let localRange = NSRange(
+                    location: overlap.location - pageRange.location,
+                    length: overlap.length
+                )
+
+                if localRange.location >= 0,
+                   localRange.location + localRange.length <= mutable.length {
+                    // Underline the active sentence
+                    mutable.addAttribute(.underlineStyle,
+                                         value: NSUnderlineStyle.thick.rawValue,
+                                         range: localRange)
+                    mutable.addAttribute(.underlineColor,
+                                         value: readAlongHighlightColor.withAlphaComponent(0.6),
+                                         range: localRange)
+                    // Subtle background tint for visibility
+                    mutable.addAttribute(.backgroundColor,
+                                         value: readAlongHighlightColor.withAlphaComponent(0.08),
+                                         range: localRange)
+                }
+            }
+        }
+
         return mutable
+    }
+
+    /// Check if a given range (in full chapter attributed string coords) is visible on the current page(s).
+    func isRangeVisibleOnCurrentPage(_ range: NSRange) -> Bool {
+        guard currentPageIndex < pages.count else { return false }
+
+        let leftPageRange = pages[currentPageIndex].range
+        if NSIntersectionRange(range, leftPageRange).length > 0 { return true }
+
+        if isTwoPageMode, currentPageIndex + 1 < pages.count {
+            let rightPageRange = pages[currentPageIndex + 1].range
+            if NSIntersectionRange(range, rightPageRange).length > 0 { return true }
+        }
+
+        return false
     }
 
     // MARK: - Theme
@@ -566,34 +766,39 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
             }
         }
 
-        // Check if user has text selected on either text view — if so, clear selection
-        if let selectedRange = textView.selectedTextRange, !selectedRange.isEmpty {
-            clearSelection()
-            return
-        }
-        if let stv = secondTextView, let selectedRange = stv.selectedTextRange, !selectedRange.isEmpty {
-            clearSelection()
-            return
-        }
+        // Note: when text is selected, gestureRecognizerShouldBegin prevents
+        // this tap gesture from firing at all, so UITextView's internal gestures
+        // handle taps (dragging handles or tapping elsewhere to deselect).
 
         // Determine which text view and page was tapped
         let (tappedTV, tappedPageIndex) = targetTextView(for: point)
-
-        // Check if tap is on a highlight
         let textViewPoint = gesture.location(in: tappedTV)
-        if let highlightId = highlightAtPoint(textViewPoint, in: tappedTV, pageIndex: tappedPageIndex) {
-            onHighlightTapped?(highlightId)
-            return
-        }
-
-        // Check if tap is on a link
-        if let linkURL = linkAtPoint(textViewPoint, in: tappedTV) {
-            onLinkTapped?(linkURL)
-            return
-        }
 
         // Tap zone detection: left 25%, center 50%, right 25%
         let width = view.bounds.width
+        let isNavigationZone = point.x < width * 0.25 || point.x > width * 0.75
+
+        // Only check highlights in the center content zone — tapping in
+        // the navigation edges should always navigate, not trigger highlights.
+        if !isNavigationZone {
+            if let highlightId = highlightAtPoint(textViewPoint, in: tappedTV, pageIndex: tappedPageIndex) {
+                onHighlightTapped?(highlightId)
+                return
+            }
+        }
+
+        // Check if tap is on a link (footnote or regular) — links are checked
+        // everywhere since they're part of content interaction.
+        if let (linkURL, isFootnote) = footnoteLinkAtPoint(textViewPoint, in: tappedTV) {
+            if isFootnote, let callback = onFootnoteTapped {
+                callback(linkURL)
+            } else {
+                onLinkTapped?(linkURL)
+            }
+            return
+        }
+
+        // Navigate or toggle overlay based on tap zone
         if point.x < width * 0.25 {
             onTapZone?("left")
         } else if point.x > width * 0.75 {
@@ -613,20 +818,37 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
 
     // MARK: - Link Hit Testing
 
-    private func linkAtPoint(_ point: CGPoint, in targetTextView: UITextView) -> URL? {
+    private func footnoteLinkAtPoint(_ point: CGPoint, in targetTextView: UITextView) -> (URL, isFootnote: Bool)? {
         let layoutManager = targetTextView.layoutManager
         let textContainer = targetTextView.textContainer
+
+        // Convert from text view coordinates to text container coordinates
+        let insets = targetTextView.textContainerInset
+        let containerPoint = CGPoint(x: point.x - insets.left, y: point.y - insets.top)
+
+        var fraction: CGFloat = 0
         let characterIndex = layoutManager.characterIndex(
-            for: point,
+            for: containerPoint,
             in: textContainer,
-            fractionOfDistanceBetweenInsertionPoints: nil
+            fractionOfDistanceBetweenInsertionPoints: &fraction
         )
 
         guard let attrString = targetTextView.attributedText,
               characterIndex < attrString.length else { return nil }
 
+        // Verify the tap is actually within the glyph bounds, not just the nearest character
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.contains(containerPoint) else { return nil }
+
         let attrs = attrString.attributes(at: characterIndex, effectiveRange: nil)
-        return attrs[.link] as? URL
+        guard let url = attrs[.link] as? URL else { return nil }
+
+        let isFootnote = attrs[NSAttributedString.Key("footnoteRef")] as? Bool == true
+        return (url, isFootnote)
     }
 
     // MARK: - Floating Images (CSS float)
@@ -689,8 +911,19 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
 
             exclusionRects.append(exclusionRect)
 
-            // Create UIImageView for the floating image
-            let imageView = UIImageView(image: floatEl.image)
+            // Load the floating image at render time (not during pagination)
+            let floatImage: UIImage?
+            if let cached = EPUBImageCache.shared.image(forPath: floatEl.imageURL.path) {
+                floatImage = cached
+            } else if let loaded = UIImage(contentsOfFile: floatEl.imageURL.path) {
+                EPUBImageCache.shared.setImage(loaded, forPath: floatEl.imageURL.path)
+                floatImage = loaded
+            } else {
+                floatImage = nil
+            }
+            guard let resolvedImage = floatImage else { continue }
+
+            let imageView = UIImageView(image: resolvedImage)
             imageView.contentMode = .scaleAspectFill
             imageView.clipsToBounds = true
 
@@ -833,14 +1066,26 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
     private func highlightAtPoint(_ point: CGPoint, in targetTextView: UITextView, pageIndex: Int) -> String? {
         guard !highlightRanges.isEmpty, pageIndex < pages.count else { return nil }
 
+        // Convert from text view coordinates to text container coordinates
+        let insets = targetTextView.textContainerInset
+        let containerPoint = CGPoint(x: point.x - insets.left, y: point.y - insets.top)
+
         // Find the character index at the tap point
         let layoutManager = targetTextView.layoutManager
         let textContainer = targetTextView.textContainer
         let characterIndex = layoutManager.characterIndex(
-            for: point,
+            for: containerPoint,
             in: textContainer,
             fractionOfDistanceBetweenInsertionPoints: nil
         )
+
+        // Verify the tap is actually within the glyph bounds
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: characterIndex)
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.contains(containerPoint) else { return nil }
 
         // Convert page-local index to full chapter index
         let pageRange = pages[pageIndex].range
@@ -862,14 +1107,33 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
 extension NativePageViewController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Allow tap gesture to work alongside text selection
-        return true
+        // Allow tap gesture alongside text selection, but don't let swipe
+        // gestures fire simultaneously with UITextView's internal selection
+        // handle gestures — that prevents selection handle dragging.
+        if gestureRecognizer is UITapGestureRecognizer {
+            return true
+        }
+        return false
     }
 
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Only begin tap if no text is currently being selected via long press
-        if gestureRecognizer is UITapGestureRecognizer {
-            return true
+        // When text is selected, don't begin any of our custom gestures.
+        // UITextView's internal gestures handle everything:
+        // - Tapping a selection handle → starts dragging to resize
+        // - Tapping elsewhere → deselects (textViewDidChangeSelection fires)
+        // - Swiping → blocked so handle dragging works
+        let hasSelection: Bool = {
+            if let selectedRange = textView.selectedTextRange, !selectedRange.isEmpty {
+                return true
+            }
+            if let stv = secondTextView, let selectedRange = stv.selectedTextRange, !selectedRange.isEmpty {
+                return true
+            }
+            return false
+        }()
+
+        if hasSelection {
+            return false
         }
         return true
     }

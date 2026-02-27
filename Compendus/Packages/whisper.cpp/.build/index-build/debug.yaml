@@ -1,0 +1,22 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "main": []
+  "test": []
+  "whisper-arm64-apple-macosx26.0-debug.module": ["<whisper-arm64-apple-macosx26.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/gabrielcsapo/Documents/coding/Compendus/Compendus/Packages/whisper.cpp/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/gabrielcsapo/Documents/coding/Compendus/Compendus/Packages/whisper.cpp/","/Users/gabrielcsapo/Documents/coding/Compendus/Compendus/Packages/whisper.cpp/Package.swift","/Users/gabrielcsapo/Documents/coding/Compendus/Compendus/Packages/whisper.cpp/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

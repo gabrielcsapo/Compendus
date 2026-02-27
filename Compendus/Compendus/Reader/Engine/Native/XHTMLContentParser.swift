@@ -299,6 +299,13 @@ class XHTMLContentParser {
                 link = URL(string: href, relativeTo: baseURL)
                 styles.insert(.underline)
             }
+
+            // EPUB footnote detection: epub:type="noteref" or role="doc-noteref"
+            let epubType = (try? el.attr("epub:type")) ?? ""
+            let role = (try? el.attr("role")) ?? ""
+            if epubType.contains("noteref") || role == "doc-noteref" {
+                styles.insert(.footnoteRef)
+            }
         }
 
         return (styles, link)
@@ -645,13 +652,35 @@ class XHTMLContentParser {
     // MARK: - SVG
 
     private func processSVG(_ el: Element) -> ContentNode? {
+        // Extract SVG-level dimensions for sizing context
+        let svgWidth = parseSVGDimension(try? el.attr("width"))
+            ?? parseSVGViewBoxDimension(try? el.attr("viewBox"), index: 2)
+        let svgHeight = parseSVGDimension(try? el.attr("height"))
+            ?? parseSVGViewBoxDimension(try? el.attr("viewBox"), index: 3)
+
+        let parentStyle = resolveMediaStyle(for: el)
+
         // Look for <image> children with xlink:href or href
         for child in el.children().array() {
             let tag = child.tagName().lowercased()
             if tag == "image" {
-                return processImage(child)
+                let src: String? = {
+                    if let s = try? child.attr("xlink:href"), !s.isEmpty { return s }
+                    if let s = try? child.attr("href"), !s.isEmpty { return s }
+                    if let s = try? child.attr("src"), !s.isEmpty { return s }
+                    return nil
+                }()
+                guard let src else { continue }
+
+                let imageURL = resolveURL(src)
+                let alt = try? child.attr("alt")
+                // Use image element dimensions, falling back to SVG dimensions
+                let width = parseSVGDimension(try? child.attr("width")) ?? svgWidth
+                let height = parseSVGDimension(try? child.attr("height")) ?? svgHeight
+                return .image(url: imageURL, alt: alt, width: width, height: height, style: parentStyle)
             }
         }
+
         // Fallback: check for nested <svg> or <img>
         for child in el.children().array() {
             let tag = child.tagName().lowercased()
@@ -662,6 +691,24 @@ class XHTMLContentParser {
             }
         }
         return nil
+    }
+
+    /// Parse an SVG dimension attribute (e.g. "800", "800px"). Returns nil for percentages.
+    private func parseSVGDimension(_ value: String?) -> CGFloat? {
+        guard let value, !value.isEmpty else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix("%") { return nil }
+        let numeric = trimmed.replacingOccurrences(of: "px", with: "")
+        return Double(numeric).map { CGFloat($0) }
+    }
+
+    /// Extract a dimension from an SVG viewBox attribute (e.g. "0 0 800 600").
+    /// index 2 = width, index 3 = height.
+    private func parseSVGViewBoxDimension(_ viewBox: String?, index: Int) -> CGFloat? {
+        guard let viewBox, !viewBox.isEmpty else { return nil }
+        let parts = viewBox.split(whereSeparator: { $0.isWhitespace || $0 == "," })
+        guard parts.count >= 4, index < parts.count else { return nil }
+        return Double(parts[index]).map { CGFloat($0) }
     }
 
     // MARK: - CSS Resolution

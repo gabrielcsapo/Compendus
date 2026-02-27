@@ -1,5 +1,5 @@
-import { initMobiFile, initKf8File } from "@lingo-reader/mobi-parser";
-import type { Mobi, Kf8 } from "@lingo-reader/mobi-parser";
+import { initMobiFile, initKf8File } from "../mobi-parser.js";
+import type { MobiParser } from "../mobi-parser.js";
 import JSZip from "jszip";
 import { mkdirSync, readdirSync, readFileSync, rmSync, existsSync } from "fs";
 import { resolve } from "path";
@@ -41,7 +41,7 @@ const MIME_TYPES: Record<string, string> = {
 
 /**
  * Convert a MOBI/AZW/AZW3 buffer to an EPUB buffer.
- * Uses @lingo-reader/mobi-parser to extract HTML chapters, TOC, cover, and images,
+ * Uses the custom MOBI parser to extract HTML chapters, TOC, cover, and images,
  * then assembles a valid EPUB 3 package with JSZip.
  */
 export async function convertMobiToEpub(
@@ -155,9 +155,9 @@ export async function convertMobiToEpub(
 async function initBestParser(
   data: Uint8Array,
   resourceSaveDir: string,
-): Promise<Mobi | Kf8> {
-  let mobiParser: Mobi | null = null;
-  let kf8Parser: Kf8 | null = null;
+): Promise<MobiParser> {
+  let mobiParser: MobiParser | null = null;
+  let kf8Parser: MobiParser | null = null;
 
   try {
     mobiParser = await initMobiFile(data, resourceSaveDir);

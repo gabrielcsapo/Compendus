@@ -3,6 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import type { TocEntry, ReaderBookmark, ReaderHighlight } from "@/lib/reader/types";
 
+interface SearchResult {
+  text: string;
+  context: string;
+  position: number;
+  pageNum: number;
+  chapterTitle?: string;
+}
+
 interface ReaderSidebarProps {
   isOpen: boolean;
   activeTab: "toc" | "bookmarks" | "highlights" | "search";
@@ -18,6 +26,13 @@ interface ReaderSidebarProps {
   onHighlightSelect: (position: number) => void;
   onHighlightDelete: (highlightId: string) => void;
   onHighlightUpdateNote?: (highlightId: string, note: string | null) => void;
+  // Search props
+  searchQuery?: string;
+  searchResults?: SearchResult[];
+  searching?: boolean;
+  onSearch?: (query: string) => void;
+  onSearchResultSelect?: (position: number) => void;
+  isTextContent?: boolean;
   theme: {
     background: string;
     foreground: string;
@@ -41,6 +56,12 @@ export function ReaderSidebar({
   onHighlightSelect,
   onHighlightDelete,
   onHighlightUpdateNote,
+  searchQuery,
+  searchResults,
+  searching,
+  onSearch,
+  onSearchResultSelect,
+  isTextContent,
   theme,
 }: ReaderSidebarProps) {
   if (!isOpen) return null;
@@ -77,6 +98,13 @@ export function ReaderSidebar({
           >
             Highlights ({highlights.length})
           </TabButton>
+          <TabButton
+            active={activeTab === "search"}
+            onClick={() => onTabChange("search")}
+            theme={theme}
+          >
+            Search
+          </TabButton>
         </div>
 
         {/* Content */}
@@ -107,6 +135,20 @@ export function ReaderSidebar({
               onSelect={onHighlightSelect}
               onDelete={onHighlightDelete}
               onUpdateNote={onHighlightUpdateNote}
+              theme={theme}
+            />
+          )}
+
+          {activeTab === "search" && (
+            <SearchPanel
+              query={searchQuery || ""}
+              results={searchResults || []}
+              searching={searching || false}
+              onSearch={onSearch || (() => {})}
+              onResultSelect={(position) => {
+                onSearchResultSelect?.(position);
+              }}
+              isTextContent={isTextContent ?? true}
               theme={theme}
             />
           )}
@@ -438,5 +480,164 @@ function HighlightList({
         );
       })}
     </ul>
+  );
+}
+
+function SearchPanel({
+  query,
+  results,
+  searching,
+  onSearch,
+  onResultSelect,
+  isTextContent,
+  theme,
+}: {
+  query: string;
+  results: SearchResult[];
+  searching: boolean;
+  onSearch: (query: string) => void;
+  onResultSelect: (position: number) => void;
+  isTextContent: boolean;
+  theme: ReaderSidebarProps["theme"];
+}) {
+  const [inputValue, setInputValue] = useState(query);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const handleInputChange = (value: string) => {
+    setInputValue(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => onSearch(value), 300);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  if (!isTextContent) {
+    return (
+      <div className="p-4 text-center text-sm" style={{ color: theme.muted }}>
+        Search is only available for text-based books (EPUB, MOBI)
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Search input */}
+      <div className="p-3 border-b" style={{ borderColor: `${theme.foreground}20` }}>
+        <div className="relative">
+          <svg
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4"
+            fill="none"
+            stroke={theme.muted}
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <input
+            type="text"
+            value={inputValue}
+            onChange={(e) => handleInputChange(e.target.value)}
+            placeholder="Search in book..."
+            className="w-full pl-8 pr-8 py-2 text-sm rounded-md border focus:outline-none focus:ring-1"
+            style={{
+              backgroundColor: `${theme.foreground}08`,
+              borderColor: `${theme.foreground}20`,
+              color: theme.foreground,
+            }}
+            autoFocus
+          />
+          {inputValue && (
+            <button
+              onClick={() => {
+                setInputValue("");
+                onSearch("");
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-black/10"
+              style={{ color: theme.muted }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
+        {results.length > 0 && (
+          <div className="text-xs mt-1.5" style={{ color: theme.muted }}>
+            {results.length} result{results.length !== 1 ? "s" : ""} found
+          </div>
+        )}
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 overflow-auto">
+        {searching ? (
+          <div className="p-4 text-center">
+            <div className="w-5 h-5 border-2 border-current/20 border-t-current rounded-full animate-spin mx-auto" />
+          </div>
+        ) : results.length === 0 && inputValue.trim() ? (
+          <div className="p-4 text-center text-sm" style={{ color: theme.muted }}>
+            No results found
+          </div>
+        ) : (
+          <ul className="py-1">
+            {results.map((result, i) => (
+              <li key={`${result.position}-${i}`}>
+                <button
+                  onClick={() => onResultSelect(result.position)}
+                  className="w-full text-left px-4 py-2.5 hover:bg-black/5 transition-colors"
+                >
+                  {result.chapterTitle && (
+                    <div className="text-xs font-medium mb-0.5" style={{ color: theme.accent }}>
+                      {result.chapterTitle}
+                    </div>
+                  )}
+                  <div className="text-sm leading-relaxed" style={{ color: theme.foreground }}>
+                    <HighlightedContext context={result.context} match={result.text} />
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: theme.muted }}>
+                    Page {result.pageNum}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HighlightedContext({ context, match }: { context: string; match: string }) {
+  const lowerContext = context.toLowerCase();
+  const lowerMatch = match.toLowerCase();
+  const idx = lowerContext.indexOf(lowerMatch);
+
+  if (idx === -1) {
+    return <span>{context}</span>;
+  }
+
+  const before = context.slice(0, idx);
+  const matched = context.slice(idx, idx + match.length);
+  const after = context.slice(idx + match.length);
+
+  return (
+    <span>
+      {before}
+      <strong className="font-semibold">{matched}</strong>
+      {after}
+    </span>
   );
 }

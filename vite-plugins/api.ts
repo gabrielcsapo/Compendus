@@ -12,6 +12,8 @@ export function apiPlugin(): Plugin {
       // Start the background job processor in dev mode
       server.ssrLoadModule("/app/lib/queue.ts").then(({ startJobProcessor }) => {
         startJobProcessor();
+      }).catch((err) => {
+        console.error("[API Plugin] Failed to start job processor:", err);
       });
 
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {

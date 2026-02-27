@@ -45,7 +45,7 @@ struct MediaAttachment {
 /// Describes a CSS-floated image that should be rendered as a subview with
 /// an exclusion path so text wraps around it.
 struct FloatingElement {
-    let image: UIImage
+    let imageURL: URL
     let size: CGSize
     let floatSide: CSSFloat       // .left or .right
     let marginInline: CGFloat     // margin between image and wrapping text
@@ -134,20 +134,34 @@ class AttributedStringBuilder {
     }
 
     /// Build an NSAttributedString from content nodes.
-    /// Returns the string and an offset map for highlight mapping.
-    func build(from nodes: [ContentNode]) -> (NSAttributedString, OffsetMap) {
+    /// Returns the string, an offset map for highlight mapping, and a plain-text-to-attributed-string map for read-along alignment.
+    func build(from nodes: [ContentNode]) -> (NSAttributedString, OffsetMap, PlainTextToAttrStringMap) {
         let result = NSMutableAttributedString()
         var offsetMap = OffsetMap()
+        var plainTextMap = PlainTextToAttrStringMap()
         mediaAttachments = []
         floatingElements = []
 
+        // Build the plain text in parallel to track offsets
+        var plainTextOffset = 0
         for (index, node) in nodes.enumerated() {
-            let startIndex = result.length
+            let attrStart = result.length
+            let ptStart = plainTextOffset
             appendNode(node, to: result, depth: 0)
-            let range = NSRange(location: startIndex, length: result.length - startIndex)
-            if range.length > 0 {
-                offsetMap.entries.append(OffsetMap.Entry(range: range, blockIndex: index))
+            let attrRange = NSRange(location: attrStart, length: result.length - attrStart)
+            if attrRange.length > 0 {
+                offsetMap.entries.append(OffsetMap.Entry(range: attrRange, blockIndex: index))
             }
+
+            // Compute how much plain text this node contributes
+            let ptLength = Self.plainTextLength(of: node)
+            if ptLength > 0 && attrRange.length > 0 {
+                plainTextMap.entries.append(PlainTextToAttrStringMap.Entry(
+                    plainTextRange: NSRange(location: ptStart, length: ptLength),
+                    attrStringRange: attrRange
+                ))
+            }
+            plainTextOffset += ptLength
         }
 
         // Remove trailing newline if present
@@ -155,7 +169,48 @@ class AttributedStringBuilder {
             result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
         }
 
-        return (result, offsetMap)
+        return (result, offsetMap, plainTextMap)
+    }
+
+    /// Compute the plain text character count for a content node (matching extractPlainText logic).
+    private static func plainTextLength(of node: ContentNode) -> Int {
+        var text = ""
+        appendPlainText(from: node, to: &text)
+        return text.count
+    }
+
+    private static func appendPlainText(from node: ContentNode, to text: inout String) {
+        switch node {
+        case .paragraph(let runs, _), .heading(_, let runs, _):
+            for run in runs { text += run.text }
+            text += "\n"
+        case .codeBlock(let code):
+            text += code + "\n"
+        case .list(_, let items, _):
+            for item in items {
+                for child in item.children {
+                    appendPlainText(from: child, to: &text)
+                }
+            }
+        case .blockquote(let children), .container(let children, _):
+            for child in children {
+                appendPlainText(from: child, to: &text)
+            }
+        case .table(let rows):
+            for row in rows {
+                for cell in row.cells {
+                    for run in cell.runs { text += run.text }
+                    text += "\t"
+                }
+                text += "\n"
+            }
+        case .image(_, let alt, _, _, _):
+            if let alt = alt { text += alt + "\n" }
+        case .horizontalRule:
+            text += "\n"
+        case .video, .audio:
+            break
+        }
     }
 
     // MARK: - Node Rendering
@@ -300,9 +355,11 @@ class AttributedStringBuilder {
             return
         }
 
-        guard let image = UIImage(contentsOfFile: url.path) else {
+        // Read dimensions from file header only (no pixel decode).
+        // CGImageSource reads ~100-500 bytes vs full bitmap decode.
+        guard let intrinsicSize = EPUBImageCache.shared.imageDimensions(forPath: url.path) else {
             let exists = FileManager.default.fileExists(atPath: url.path)
-            print("[Image] FAILED to load: \(url.path)")
+            print("[Image] FAILED to read dimensions: \(url.path)")
             print("[Image]   exists=\(exists), alt=\(alt ?? "none")")
             // Image not found — show alt text if available
             if let alt = alt, !alt.isEmpty {
@@ -329,12 +386,12 @@ class AttributedStringBuilder {
             imageWidth = maxWidth
         }
 
-        let scaleFactor = imageWidth / image.size.width
+        let scaleFactor = imageWidth / intrinsicSize.width
         var imageHeight: CGFloat
         if let cssH = style.cssHeight {
             imageHeight = min(cssH.resolve(relativeTo: maxHeight), maxHeight)
         } else {
-            imageHeight = image.size.height * scaleFactor
+            imageHeight = intrinsicSize.height * scaleFactor
         }
 
         // If still too tall, scale down further to fit height
@@ -370,7 +427,7 @@ class AttributedStringBuilder {
             result.append(NSAttributedString(string: "\n"))
 
             floatingElements.append(FloatingElement(
-                image: image,
+                imageURL: url,
                 size: CGSize(width: imageWidth, height: imageHeight),
                 floatSide: style.cssFloat!,
                 marginInline: marginInline,
@@ -382,10 +439,14 @@ class AttributedStringBuilder {
             return
         }
 
-        // Non-floated image: inline attachment
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        attachment.bounds = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
+        // Non-floated image: lazy attachment with correct bounds but no pixel data.
+        // Actual image is loaded at render time via loadImageIfNeeded().
+        let displayBounds = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
+        let attachment = LazyImageAttachment(
+            imageURL: url,
+            intrinsicSize: intrinsicSize,
+            displayBounds: displayBounds
+        )
 
         let paraStyle = NSMutableParagraphStyle()
         paraStyle.paragraphSpacingBefore = fontSize * 0.5
@@ -473,7 +534,12 @@ class AttributedStringBuilder {
 
         // Try poster image first
         if let posterURL = poster, posterURL.isFileURL {
-            baseImage = UIImage(contentsOfFile: posterURL.path)
+            if let cached = EPUBImageCache.shared.image(forPath: posterURL.path) {
+                baseImage = cached
+            } else if let loaded = UIImage(contentsOfFile: posterURL.path) {
+                EPUBImageCache.shared.setImage(loaded, forPath: posterURL.path)
+                baseImage = loaded
+            }
         }
 
         // Try extracting a frame from the video file
@@ -840,6 +906,10 @@ class AttributedStringBuilder {
             }
             if run.styles.contains(.code) {
                 attrs[.backgroundColor] = textColor.withAlphaComponent(0.05)
+            }
+            if run.styles.contains(.footnoteRef) {
+                attrs[NSAttributedString.Key("footnoteRef")] = true
+                attrs[.baselineOffset] = fontSize * 0.3
             }
 
             result.append(NSAttributedString(string: displayText, attributes: attrs))

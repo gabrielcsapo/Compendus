@@ -39,6 +39,7 @@
 		9D79A56D8B51C192714058A6 /* svg-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */; };
 		A6C8714D718D4DD9AC54683D /* childrens-media-query.epub in Resources */ = {isa = PBXBuildFile; fileRef = FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */; };
 		A915BE8CBDF9617FB2542912 /* moby-dick-mo.epub in Resources */ = {isa = PBXBuildFile; fileRef = 78DE80B7B553073962261DC6 /* moby-dick-mo.epub */; };
+		AA00000001000002PTTSMDL0 /* PocketTTSModel in Resources */ = {isa = PBXBuildFile; fileRef = AA00000001000001PTTSMDL0 /* PocketTTSModel */; };
 		C306A46CA6F5DEE383DFD793 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */; };
 		C5646A1FEF05473109666712 /* haruko-jpeg.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */; };
 		C7B52C7FC49FDA601594006C /* NativeEPUBEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */; };
@@ -116,6 +117,7 @@
 		9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-jpeg.epub"; sourceTree = "<group>"; };
 		9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = mahabharata.epub; sourceTree = "<group>"; };
 		A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
+		AA00000001000001PTTSMDL0 /* PocketTTSModel */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PocketTTSModel; sourceTree = "<group>"; };
 		AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cole-voyage-of-life.epub"; sourceTree = "<group>"; };
 		AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EPUBParserTests.swift; sourceTree = "<group>"; };
 		AE842891B44113B4A5FF6E91 /* childrens-literature.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "childrens-literature.epub"; sourceTree = "<group>"; };
@@ -274,6 +276,7 @@
 				F91E18932F37EAAF0029A1F0 /* CompendusWidgetExtension.entitlements */,
 				F91E180C2F366F9C0029A1F0 /* Compendus */,
 				F91E18782F37E6270029A1F0 /* CompendusWidget */,
+				AA00000001000001PTTSMDL0 /* PocketTTSModel */,
 				F91E18542F3678BE0029A1F0 /* Frameworks */,
 				F91E180B2F366F9C0029A1F0 /* Products */,
 				0A957213575147E9065818B7 /* CompendusTests */,
@@ -458,6 +461,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9CF53942F4848380099E42C /* Launch Screen.storyboard in Resources */,
+				AA00000001000002PTTSMDL0 /* PocketTTSModel in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -594,6 +598,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -652,6 +657,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lc++";
 				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

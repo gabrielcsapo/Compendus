@@ -115,7 +115,15 @@ export function Footer({ variant = "full" }: FooterProps) {
             <ul className="space-y-2 text-sm">
               <li>
                 <Link
-                  to="/batch-edit"
+                  to="/admin"
+                  className="text-foreground-muted hover:text-foreground transition-colors"
+                >
+                  Data Administration
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/admin/batch-edit"
                   className="text-foreground-muted hover:text-foreground transition-colors"
                 >
                   Batch Edit
@@ -123,10 +131,10 @@ export function Footer({ variant = "full" }: FooterProps) {
               </li>
               <li>
                 <Link
-                  to="/admin/data"
+                  to="/admin/unmatched"
                   className="text-foreground-muted hover:text-foreground transition-colors"
                 >
-                  Data Administration
+                  Unmatched Books
                 </Link>
               </li>
               <li>

@@ -42,6 +42,8 @@ struct CompendusApp: App {
     @State private var themeManager = ThemeManager()
     @State private var appSettings = AppSettings()
     @State private var highlightColorManager = HighlightColorManager()
+    @State private var readAlongService = ReadAlongService()
+    @State private var pocketTTSModelManager = PocketTTSModelManager()
 
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
@@ -78,6 +80,8 @@ struct CompendusApp: App {
                 .environment(themeManager)
                 .environment(appSettings)
                 .environment(highlightColorManager)
+                .environment(readAlongService)
+                .environment(pocketTTSModelManager)
                 .environment(bookEditSyncService)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .tint(themeManager.accentColor)

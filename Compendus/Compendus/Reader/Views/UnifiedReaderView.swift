@@ -19,6 +19,11 @@ struct UnifiedReaderView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(APIService.self) private var apiService
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
 
     // Engine
     @State private var engine: (any ReaderEngine)?
@@ -42,8 +47,6 @@ struct UnifiedReaderView: View {
     @State private var showingFloatingToolbar = false
     @State private var selectionFrame: CGRect?
     @State private var pendingSelection: ReaderSelection?
-    @State private var showingCustomColorPicker = false
-    @State private var customColor: SwiftUI.Color = .yellow
     @State private var showingNoteInput = false
     @State private var noteInputText = ""
     @State private var noteInputColor = "#ffff00"
@@ -58,6 +61,19 @@ struct UnifiedReaderView: View {
     @State private var brightness: Double = 1.0
     @State private var originalBrightness: Double = 1.0
     #endif
+
+    // Read-along
+    @State private var matchingAudiobook: DownloadedBook?
+    @State private var showReadAlongBanner = false
+    @State private var readAlongBannerDismissed = false
+
+    // TTS read-aloud
+    @State private var showTTSBanner = false
+    @State private var ttsBannerDismissed = false
+
+    // Footnote popover
+    @State private var showingFootnote = false
+    @State private var footnoteContent = ""
 
     enum ReaderState {
         case loading
@@ -110,6 +126,10 @@ struct UnifiedReaderView: View {
         .task { await initializeEngine() }
         .onDisappear {
             saveProgress()
+            readAlongService.deactivate()
+            if let nativeEPUB = engine as? NativeEPUBEngine {
+                nativeEPUB.cleanup()
+            }
             #if !targetEnvironment(macCatalyst)
             if engine?.isPDF == true {
                 UIScreen.main.brightness = CGFloat(originalBrightness)
@@ -154,11 +174,6 @@ struct UnifiedReaderView: View {
                 }
             )
             .readerThemed(readerSettings)
-        }
-        // Custom color picker
-        .sheet(isPresented: $showingCustomColorPicker) {
-            customColorPickerSheet
-                .readerThemed(readerSettings)
         }
         // Note input
         .sheet(isPresented: $showingNoteInput) {
@@ -217,8 +232,8 @@ struct UnifiedReaderView: View {
             .presentationDetents([.medium, .large])
             .readerThemed(readerSettings)
         }
-        // First-time highlight setup
-        .sheet(isPresented: $showingHighlightSetup) {
+        // First-time highlight setup (full-screen so banners don't distract)
+        .fullScreenCover(isPresented: $showingHighlightSetup) {
             HighlightSetupSheet(
                 bookId: book.id,
                 bookTitle: book.title,
@@ -246,16 +261,31 @@ struct UnifiedReaderView: View {
         // Page jump
         .sheet(isPresented: $showingPageJump) {
             if let engine = engine {
-                let currentPage = calculateCurrentAbsolutePage(engine: engine)
-                PageJumpView(
-                    totalPages: engine.totalPositions,
-                    currentPage: currentPage,
-                    onJump: { progression in
-                        Task { await engine.go(toProgression: progression) }
-                    }
-                )
-                .presentationDetents([.medium])
-                .readerThemed(readerSettings)
+                if engine.isPDF {
+                    let currentPage = (engine.currentLocation?.pageIndex ?? 0) + 1
+                    PageJumpView(
+                        totalPages: engine.totalPositions,
+                        currentPage: currentPage,
+                        onJump: { progression in
+                            Task { await engine.go(toProgression: progression) }
+                        }
+                    )
+                    .presentationDetents([.medium])
+                    .readerThemed(readerSettings)
+                } else if let nativeEngine = engine as? NativeEPUBEngine {
+                    PageJumpView(
+                        totalPages: nativeEngine.totalPositions,
+                        currentPage: nativeEngine.globalPageIndex + 1,
+                        chapterTitle: engine.currentLocation?.title,
+                        onJump: { progression in
+                            Task {
+                                await nativeEngine.go(toProgression: progression)
+                            }
+                        }
+                    )
+                    .presentationDetents([.medium])
+                    .readerThemed(readerSettings)
+                }
             }
         }
         // Search
@@ -266,6 +296,25 @@ struct UnifiedReaderView: View {
                 }
                 .readerThemed(readerSettings)
             }
+        }
+        .sheet(isPresented: $showingFootnote) {
+            NavigationStack {
+                ScrollView {
+                    Text(footnoteContent)
+                        .font(.body)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .navigationTitle("Footnote")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showingFootnote = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+            .readerThemed(readerSettings)
         }
         // Settings changes — skip while settings sheet is open (applied on dismiss)
         .onChange(of: readerSettings.theme) { _, _ in
@@ -337,9 +386,6 @@ struct UnifiedReaderView: View {
                             saveHighlight(color: color)
                             showingFloatingToolbar = false
                         },
-                        onCustomColor: {
-                            showingCustomColorPicker = true
-                        },
                         onAddNote: {
                             showingFloatingToolbar = false
                             noteInputText = ""
@@ -358,6 +404,46 @@ struct UnifiedReaderView: View {
                             showingFloatingToolbar = false
                         }
                     )
+                }
+
+                // Read-along / TTS banner (top, below top bar)
+                if !readAlongService.isActive {
+                    VStack {
+                        if showReadAlongBanner && !readAlongBannerDismissed {
+                            ReadAlongBanner(
+                                mode: .audiobook(
+                                    title: matchingAudiobook?.title ?? "",
+                                    hasTranscript: matchingAudiobook?.hasTranscript ?? false
+                                ),
+                                onStart: { activateReadAlong() },
+                                onDismiss: {
+                                    withAnimation { readAlongBannerDismissed = true }
+                                }
+                            )
+                            .padding(.top, topSafeAreaInset + 56)
+                        } else if showTTSBanner && !ttsBannerDismissed {
+                            ReadAlongBanner(
+                                mode: .tts,
+                                onStart: { activateTTSReadAloud() },
+                                onDismiss: {
+                                    withAnimation { ttsBannerDismissed = true }
+                                }
+                            )
+                            .padding(.top, topSafeAreaInset + 56)
+                        }
+                        Spacer()
+                    }
+                }
+
+                // Read-along mini player (bottom)
+                if readAlongService.isActive {
+                    VStack {
+                        Spacer()
+                        ReadAlongMiniPlayer()
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, showingOverlay ? 60 : 16)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
@@ -390,10 +476,32 @@ struct UnifiedReaderView: View {
                 }
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
+                .opacity(visible ? 1 : 0)
 
                 Spacer()
 
                 HStack(spacing: 18) {
+                    // Read aloud / Read along
+                    if !engine.isPDF && (matchingAudiobook != nil || pocketTTSModelManager.isModelAvailable || readAlongService.isActive) {
+                        if readAlongService.state == .loading || readAlongService.state == .buffering {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Button {
+                                if readAlongService.isActive {
+                                    readAlongService.deactivate()
+                                } else if matchingAudiobook != nil {
+                                    activateReadAlong()
+                                } else {
+                                    activateTTSReadAloud()
+                                }
+                            } label: {
+                                Image(systemName: matchingAudiobook != nil ? "headphones" : "speaker.wave.2")
+                                    .foregroundStyle(readAlongService.isActive ? Color.accentColor : .primary)
+                            }
+                        }
+                    }
+
                     Button {
                         showingSearch = true
                     } label: {
@@ -420,11 +528,11 @@ struct UnifiedReaderView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
+                .opacity(visible ? 1 : 0)
             }
             .padding(.horizontal)
             .padding(.bottom, 14)
             .padding(.top, topSafeAreaInset + 12)
-            .opacity(visible ? 1 : 0)
         }
         .background(visible ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color(uiColor: readerSettings.theme.backgroundColor)))
         .environment(\.colorScheme, readerSettings.theme.colorScheme)
@@ -475,22 +583,33 @@ struct UnifiedReaderView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                } else if engine.totalPositions > 0,
-                          let pageIndex = engine.currentLocation?.pageIndex {
-                    let pagesBeforeCurrent = calculatePagesBeforeCurrent(engine: engine)
-                    let absolutePage = pagesBeforeCurrent + pageIndex + 1
+                } else if let nativeEngine = engine as? NativeEPUBEngine,
+                          engine.currentLocation?.pageIndex != nil {
+                    let globalPage = nativeEngine.globalPageIndex + 1
+                    let totalPages = nativeEngine.totalPositions
                     Button {
                         showingPageJump = true
                     } label: {
-                        if let nativeEngine = engine as? NativeEPUBEngine, nativeEngine.isSpreadMode {
-                            let rightPage = min(absolutePage + 1, engine.totalPositions)
-                            Text("Pages \(absolutePage)-\(rightPage) of \(engine.totalPositions)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Page \(absolutePage) of \(engine.totalPositions)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            if let title = engine.currentLocation?.title {
+                                Text(title)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Text("·")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if nativeEngine.isSpreadMode {
+                                let rightPage = min(globalPage + 1, totalPages)
+                                Text("Pages \(globalPage)-\(rightPage) of \(totalPages)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Page \(globalPage) of \(totalPages)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .buttonStyle(.plain)
@@ -520,20 +639,6 @@ struct UnifiedReaderView: View {
         }
         #endif
         .animation(reduceMotion ? .none : .easeInOut(duration: 0.25), value: visible)
-    }
-
-    private func calculatePagesBeforeCurrent(engine: any ReaderEngine) -> Int {
-        guard let location = engine.currentLocation else { return 0 }
-        let estimatedPage = Int(location.totalProgression * Double(engine.totalPositions))
-        return max(0, estimatedPage - (location.pageIndex ?? 0))
-    }
-
-    private func calculateCurrentAbsolutePage(engine: any ReaderEngine) -> Int {
-        if engine.isPDF {
-            return (engine.currentLocation?.pageIndex ?? 0) + 1
-        }
-        let pagesBeforeCurrent = calculatePagesBeforeCurrent(engine: engine)
-        return pagesBeforeCurrent + (engine.currentLocation?.pageIndex ?? 0) + 1
     }
 
     // MARK: - PDF Controls Overlay
@@ -644,48 +749,6 @@ struct UnifiedReaderView: View {
 
     // MARK: - Custom Color Picker
 
-    @ViewBuilder
-    private var customColorPickerSheet: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                ColorPicker("Choose a color", selection: $customColor, supportsOpacity: false)
-                    .labelsHidden()
-                    .scaleEffect(2)
-                    .padding(.top, 40)
-
-                Spacer()
-
-                Button {
-                    let uiColor = UIColor(customColor)
-                    let hex = uiColor.hexString
-                    saveHighlight(color: hex)
-                    showingFloatingToolbar = false
-                    showingCustomColorPicker = false
-                } label: {
-                    Text("Highlight")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(customColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(.horizontal)
-                .padding(.bottom)
-            }
-            .navigationTitle("Custom Color")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        showingCustomColorPicker = false
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-
     // MARK: - Engine Initialization
 
     private func initializeEngine() async {
@@ -735,6 +798,15 @@ struct UnifiedReaderView: View {
 
         readerState = .ready
         showHighlightSetupIfNeeded()
+
+        // Check for matching audiobook for read-along
+        if let audiobook = readAlongService.findMatchingAudiobook(for: book, in: modelContext) {
+            matchingAudiobook = audiobook
+            withAnimation { showReadAlongBanner = true }
+        } else if pocketTTSModelManager.isModelAvailable {
+            // No matching audiobook — offer TTS read-aloud if model is available
+            withAnimation { showTTSBanner = true }
+        }
     }
 
     private func initializePDFEngine(fileURL: URL) {
@@ -811,6 +883,11 @@ struct UnifiedReaderView: View {
                     break
                 }
             }
+
+            nativeEngine.onFootnoteTapped = { [self] text in
+                footnoteContent = text
+                showingFootnote = true
+            }
         }
     }
 
@@ -828,6 +905,106 @@ struct UnifiedReaderView: View {
         }
 
         try? modelContext.save()
+    }
+
+    // MARK: - Read Along
+
+    private func activateReadAlong() {
+        guard let audiobook = matchingAudiobook,
+              let nativeEngine = engine as? NativeEPUBEngine else { return }
+
+        if audiobook.hasTranscript {
+            // Transcript already exists — start immediately
+            withAnimation {
+                showReadAlongBanner = false
+            }
+            readAlongService.activate(
+                ebook: book,
+                audiobook: audiobook,
+                engine: nativeEngine,
+                player: audiobookPlayer,
+                transcriptionService: transcriptionService
+            )
+        } else {
+            // Need to transcribe first — start transcription, then activate when done
+            withAnimation {
+                showReadAlongBanner = false
+            }
+            readAlongService.state = .loading
+            guard let fileURL = audiobook.fileURL else { return }
+            let duration = audiobook.duration.map(Double.init) ?? 0
+
+            transcriptionService.transcribe(
+                fileURL: fileURL,
+                duration: duration > 0 ? duration : 3600,
+                bookId: audiobook.id,
+                title: audiobook.title,
+                coverData: audiobook.coverData
+            )
+
+            // Watch for transcription completion
+            Task {
+                while transcriptionService.isActive {
+                    try? await Task.sleep(for: .seconds(1))
+                }
+
+                // Save transcript to audiobook
+                if case .completed(let transcript) = transcriptionService.state {
+                    if let data = try? JSONEncoder().encode(transcript) {
+                        audiobook.transcriptData = data
+                        try? modelContext.save()
+                    }
+
+                    // Upload to server so other clients can use it
+                    let bookId = audiobook.id
+                    Task {
+                        try? await apiService.uploadTranscript(bookId: bookId, transcript: transcript)
+                    }
+
+                    transcriptionService.state = .idle
+
+                    // Now activate read-along with the saved transcript
+                    readAlongService.activate(
+                        ebook: book,
+                        audiobook: audiobook,
+                        engine: nativeEngine,
+                        player: audiobookPlayer,
+                        transcriptionService: transcriptionService
+                    )
+                } else {
+                    readAlongService.state = .inactive
+                }
+            }
+        }
+    }
+
+    private func activateTTSReadAloud() {
+        guard let nativeEngine = engine as? NativeEPUBEngine else { return }
+
+        withAnimation {
+            showTTSBanner = false
+        }
+
+        // Show loading state immediately — model loading can take a moment
+        readAlongService.state = .loading
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let context = try PocketTTSContext.createFromBundle(voiceIndex: pocketTTSModelManager.selectedVoiceIndex)
+                await MainActor.run {
+                    readAlongService.activateWithTTS(
+                        ebook: book,
+                        engine: nativeEngine,
+                        ttsContext: context,
+                        voiceIndex: pocketTTSModelManager.selectedVoiceIndex
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    readAlongService.state = .error("Failed to load TTS model: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     // MARK: - Highlights

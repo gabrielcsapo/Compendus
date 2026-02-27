@@ -251,7 +251,11 @@ export function cancelJob(id: string): { success: boolean; message: string } {
 // ---------------------------------------------------------------------------
 
 let processorRunning = false;
+let processorStartedAt: number | null = null;
 let currentAbortController: AbortController | null = null;
+
+/** Max time a single job can run before we consider the processor stuck (10 minutes) */
+const MAX_JOB_DURATION_MS = 10 * 60 * 1000;
 
 async function processTranscribeJob(jobId: string, payload: TranscribePayload): Promise<void> {
   const { bookId, bookPath, outputPath } = payload;
@@ -330,7 +334,17 @@ async function processConvertJob(jobId: string, payload: ConvertPayload): Promis
 }
 
 async function processNextJob(): Promise<void> {
-  if (processorRunning) return;
+  if (processorRunning) {
+    // Safety valve: if the processor has been "running" for too long, force-reset it
+    if (processorStartedAt && Date.now() - processorStartedAt > MAX_JOB_DURATION_MS) {
+      console.warn(`[Queue] Processor appears stuck (running for ${Math.round((Date.now() - processorStartedAt) / 1000)}s), force-resetting`);
+      processorRunning = false;
+      processorStartedAt = null;
+      currentAbortController = null;
+    } else {
+      return;
+    }
+  }
 
   // Find oldest pending job
   const row = db
@@ -344,6 +358,7 @@ async function processNextJob(): Promise<void> {
   if (!row) return;
 
   processorRunning = true;
+  processorStartedAt = Date.now();
   currentAbortController = new AbortController();
   const jobId = row.id;
 
@@ -392,6 +407,7 @@ async function processNextJob(): Promise<void> {
   } finally {
     currentAbortController = null;
     processorRunning = false;
+    processorStartedAt = null;
   }
 }
 
@@ -400,7 +416,15 @@ async function processNextJob(): Promise<void> {
  * - Resets any stale "running" jobs back to "pending" (from a previous crash)
  * - Polls for pending jobs every 2 seconds and processes them sequentially
  */
+let processorStarted = false;
+
 export function startJobProcessor(): void {
+  if (processorStarted) {
+    console.log("[Queue] Job processor already started, skipping");
+    return;
+  }
+  processorStarted = true;
+
   // Reset stale running jobs (server crashed while processing)
   const stale = db
     .select()

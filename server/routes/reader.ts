@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { resolve } from "path";
 import { eq } from "drizzle-orm";
 import { extractEpubResource } from "../../app/lib/processing/epub";
-import { getBookFilePath } from "../../app/lib/storage";
+import { getBookFilePath, resolveStoragePath } from "../../app/lib/storage";
 import { renderPdfPage } from "../../app/lib/reader/pdf-renderer";
 import { db, books } from "../../app/lib/db";
 import { getFileStat, serveCachedResource, generateETag } from "../lib/file-serving";
@@ -67,12 +67,12 @@ app.get("/api/reader/:bookId/resource/*", async (c) => {
       return new Response("Not found", { status: 404 });
     }
 
-    // Determine the EPUB file path
+    // Determine the EPUB file path — prefer convertedEpubPath (matches editor logic)
     let filePath: string;
-    if (book.format === "epub") {
+    if (book.convertedEpubPath) {
+      filePath = resolveStoragePath(book.convertedEpubPath);
+    } else if (book.format === "epub") {
       filePath = getBookFilePath(bookId, "epub");
-    } else if (book.convertedEpubPath) {
-      filePath = resolve("data", book.convertedEpubPath);
     } else {
       return new Response("Not found", { status: 404 });
     }

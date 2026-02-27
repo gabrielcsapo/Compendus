@@ -711,7 +711,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
       <div className="fixed inset-0 z-50 flex flex-col bg-background overflow-hidden">
         <header className="bg-surface border-b border-border px-6 py-3 flex items-center gap-4 shrink-0">
           <div className="flex items-center gap-3">
-            <Link to="/" className="text-primary hover:text-primary-hover transition-colors text-sm">&larr; Library</Link>
+            <Link to="/admin" className="text-primary hover:text-primary-hover transition-colors text-sm">&larr; Admin</Link>
             <h1 className="text-xl font-bold text-foreground">Batch Edit</h1>
           </div>
         </header>
@@ -742,7 +742,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
       {/* Header */}
       <header className="bg-surface border-b border-border px-6 py-3 flex items-center gap-4 shrink-0">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-primary hover:text-primary-hover transition-colors text-sm">&larr; Library</Link>
+          <Link to="/admin" className="text-primary hover:text-primary-hover transition-colors text-sm">&larr; Admin</Link>
           <h1 className="text-xl font-bold text-foreground">Batch Edit</h1>
           <span className="text-sm text-foreground-muted">
             {filteredBooks.length === allBooks.length

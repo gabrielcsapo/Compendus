@@ -22,6 +22,7 @@ import {
   updateHighlightNote as updateHighlightNoteAction,
   updateHighlightColor as updateHighlightColorAction,
   saveReadingProgress,
+  searchContent as searchContentAction,
 } from "@/actions/reader";
 
 interface UseReaderOptions {
@@ -74,6 +75,21 @@ interface UseReaderReturn {
   updateHighlightNote: (highlightId: string, note: string | null) => Promise<void>;
   updateHighlightColor: (highlightId: string, color: string) => Promise<void>;
 
+  // Search
+  searchResults: Array<{
+    text: string;
+    context: string;
+    position: number;
+    pageNum: number;
+    chapterTitle?: string;
+  }>;
+  searchQuery: string;
+  searching: boolean;
+  searchBook: (query: string) => Promise<void>;
+
+  // Navigation mode
+  isJumpNavigation: boolean;
+
   // Progress
   saveProgress: () => Promise<void>;
 }
@@ -95,8 +111,24 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
   const [highlights, setHighlights] = useState<ReaderHighlight[]>([]);
 
+  // Search state
+  const [searchResults, setSearchResults] = useState<
+    Array<{
+      text: string;
+      context: string;
+      position: number;
+      pageNum: number;
+      chapterTitle?: string;
+    }>
+  >([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+
+  // Navigation mode tracking
+  const isJumpNavigationRef = useRef(false);
+  const [isJumpNavigation, setIsJumpNavigation] = useState(false);
+
   // Determine if we should show spread mode based on settings and viewport
-  // Spread mode only applies to image content (PDF, comics)
   const isSpreadMode = (() => {
     const layout = settings.pdfPageLayout;
     if (layout === "single") return false;
@@ -192,7 +224,7 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
           setPageContent(data.content);
 
           // In spread mode, also fetch the right page if available
-          if (isSpreadMode && data.content?.type === "image" && currentPage < bookInfo.totalPages) {
+          if (isSpreadMode && currentPage < bookInfo.totalPages) {
             const rightData = await getReaderPage(bookId, currentPage + 1, viewportConfig, formatOverride);
             if (rightData) {
               setRightPageContent(rightData.content);
@@ -292,14 +324,19 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     (page: number) => {
       if (!bookInfo) return;
       const clampedPage = Math.max(1, Math.min(page, bookInfo.totalPages));
+      const isJump = Math.abs(clampedPage - currentPage) > 2;
+      isJumpNavigationRef.current = isJump;
+      setIsJumpNavigation(isJump);
       setCurrentPage(clampedPage);
     },
-    [bookInfo],
+    [bookInfo, currentPage],
   );
 
   const goToPosition = useCallback(
     async (position: number) => {
       try {
+        isJumpNavigationRef.current = true;
+        setIsJumpNavigation(true);
         const data = await getReaderPageForPosition(bookId, position, viewportConfig, formatOverride);
 
         if (data) {
@@ -313,14 +350,18 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     [bookId, viewport.width, viewport.height, settings.fontSize, settings.lineHeight],
   );
 
-  // In spread mode with image content, move by 2 pages
-  const pageStep = isSpreadMode && pageContent?.type === "image" ? 2 : 1;
+  // In spread mode, move by 2 pages
+  const pageStep = isSpreadMode ? 2 : 1;
 
   const nextPage = useCallback(() => {
+    isJumpNavigationRef.current = false;
+    setIsJumpNavigation(false);
     goToPage(currentPage + pageStep);
   }, [currentPage, goToPage, pageStep]);
 
   const prevPage = useCallback(() => {
+    isJumpNavigationRef.current = false;
+    setIsJumpNavigation(false);
     goToPage(currentPage - pageStep);
   }, [currentPage, goToPage, pageStep]);
 
@@ -413,6 +454,33 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     [],
   );
 
+  // Search function
+  const searchBook = useCallback(
+    async (query: string) => {
+      setSearchQuery(query);
+      if (!query.trim()) {
+        setSearchResults([]);
+        return;
+      }
+      setSearching(true);
+      try {
+        const results = await searchContentAction(
+          bookId,
+          query,
+          viewportConfig,
+          formatOverride,
+        );
+        setSearchResults(results);
+      } catch (err) {
+        console.error("Search failed:", err);
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    },
+    [bookId, viewport.width, viewport.height, settings.fontSize, settings.lineHeight, formatOverride],
+  );
+
   // Save progress
   const saveProgress = useCallback(async () => {
     if (!pageContent) return;
@@ -461,6 +529,11 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     removeHighlight,
     updateHighlightNote,
     updateHighlightColor,
+    searchResults,
+    searchQuery,
+    searching,
+    searchBook,
+    isJumpNavigation,
     saveProgress,
   };
 }

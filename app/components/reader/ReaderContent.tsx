@@ -18,8 +18,10 @@ interface ReaderContentProps {
   rightContent?: PageContent | null; // Second page for spread view
   settings: ReaderSettings;
   isSpreadMode?: boolean;
+  isJumpNavigation?: boolean;
   onPrevPage?: () => void;
   onNextPage?: () => void;
+  onCenterTap?: () => void;
   // Book identification
   bookId?: string;
   hasTranscript?: boolean;
@@ -38,6 +40,8 @@ interface ReaderContentProps {
   onRemoveHighlight?: (highlightId: string) => void;
   onUpdateHighlightColor?: (highlightId: string, color: string) => void;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
+  // Ref for TTS access to text DOM
+  textContentRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -48,8 +52,10 @@ export function ReaderContent({
   rightContent,
   settings,
   isSpreadMode,
+  isJumpNavigation,
   onPrevPage,
   onNextPage,
+  onCenterTap,
   bookId,
   hasTranscript,
   audioChapters,
@@ -59,6 +65,7 @@ export function ReaderContent({
   onRemoveHighlight,
   onUpdateHighlightColor,
   onUpdateHighlightNote,
+  textContentRef,
 }: ReaderContentProps) {
   if (!content) {
     return (
@@ -75,15 +82,20 @@ export function ReaderContent({
       return (
         <TextContent
           content={content}
+          rightContent={isSpreadMode ? rightContent : null}
+          isSpreadMode={isSpreadMode}
+          isJumpNavigation={isJumpNavigation}
           settings={settings}
           onPrevPage={onPrevPage}
           onNextPage={onNextPage}
+          onCenterTap={onCenterTap}
           highlights={highlights}
           onAddHighlight={onAddHighlight}
           onRemoveHighlight={onRemoveHighlight}
           onUpdateHighlightColor={onUpdateHighlightColor}
           onUpdateHighlightNote={onUpdateHighlightNote}
           theme={theme}
+          textContentRef={textContentRef}
         />
       );
     case "image":
@@ -93,8 +105,10 @@ export function ReaderContent({
           rightContent={rightContent}
           settings={settings}
           isSpreadMode={isSpreadMode}
+          isJumpNavigation={isJumpNavigation}
           onPrevPage={onPrevPage}
           onNextPage={onNextPage}
+          onCenterTap={onCenterTap}
         />
       );
     case "audio":
@@ -115,24 +129,33 @@ export function ReaderContent({
 
 /**
  * Text content renderer (EPUB, MOBI)
- * Supports tap navigation and text highlighting.
+ * Supports tap navigation, text highlighting, two-page spread, and page transitions.
  */
 function TextContent({
   content,
+  rightContent,
+  isSpreadMode,
+  isJumpNavigation,
   settings,
   onPrevPage,
   onNextPage,
+  onCenterTap,
   highlights,
   onAddHighlight,
   onRemoveHighlight,
   onUpdateHighlightColor,
   onUpdateHighlightNote,
   theme,
+  textContentRef,
 }: {
   content: PageContent;
+  rightContent?: PageContent | null;
+  isSpreadMode?: boolean;
+  isJumpNavigation?: boolean;
   settings: ReaderSettings;
   onPrevPage?: () => void;
   onNextPage?: () => void;
+  onCenterTap?: () => void;
   highlights?: ReaderHighlight[];
   onAddHighlight?: (
     startPosition: number,
@@ -145,9 +168,12 @@ function TextContent({
   onUpdateHighlightColor?: (highlightId: string, color: string) => void;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
   theme: { background: string; foreground: string; muted: string; accent: string; selection: string };
+  textContentRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const font = FONTS[settings.fontFamily];
-  const contentRef = useRef<HTMLDivElement>(null);
+  const internalContentRef = useRef<HTMLDivElement>(null);
+  const contentRef = textContentRef || internalContentRef;
+  const rightContentRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showToolbar, setShowToolbar] = useState(false);
   const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number; above: boolean }>({
@@ -174,6 +200,45 @@ function TextContent({
     note?: string;
     color: string;
   } | null>(null);
+
+  // Tap feedback state
+  const [tapFeedback, setTapFeedback] = useState<"left" | "right" | null>(null);
+
+  // Page transition state
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionDirection, setTransitionDirection] = useState<"left" | "right" | "none">("none");
+  const [displayContent, setDisplayContent] = useState(content);
+  const [displayRightContent, setDisplayRightContent] = useState(rightContent);
+  const prevPositionRef = useRef(content.position);
+
+  // Page transition effect
+  useEffect(() => {
+    const prevPos = prevPositionRef.current;
+    const newPos = content.position;
+    prevPositionRef.current = newPos;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isLargeJump = Math.abs(newPos - prevPos) > 0.05;
+
+    if (isLargeJump || reducedMotion || prevPos === newPos || isJumpNavigation) {
+      setDisplayContent(content);
+      setDisplayRightContent(rightContent);
+      return;
+    }
+
+    const direction = newPos > prevPos ? "left" : "right";
+    setTransitionDirection(direction);
+    setIsTransitioning(true);
+
+    const timer = setTimeout(() => {
+      setDisplayContent(content);
+      setDisplayRightContent(rightContent);
+      setTransitionDirection("none");
+      setIsTransitioning(false);
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [content, rightContent, isJumpNavigation]);
 
   // Handle keyboard navigation
   useEffect(() => {
@@ -278,21 +343,29 @@ function TextContent({
 
   // Apply saved highlights to DOM after content renders
   useEffect(() => {
-    if (!contentRef.current || !highlights?.length) return;
+    if (!highlights?.length) return;
 
     requestAnimationFrame(() => {
       if (contentRef.current) {
         applyHighlightsToDOM(
           contentRef.current,
           highlights,
-          content.position,
-          content.endPosition,
+          displayContent.position,
+          displayContent.endPosition,
+        );
+      }
+      if (rightContentRef.current && displayRightContent) {
+        applyHighlightsToDOM(
+          rightContentRef.current,
+          highlights,
+          displayRightContent.position,
+          displayRightContent.endPosition,
         );
       }
     });
-  }, [content.html, content.position, content.endPosition, highlights]);
+  }, [displayContent.html, displayContent.position, displayContent.endPosition, displayRightContent?.html, displayRightContent?.position, displayRightContent?.endPosition, highlights]);
 
-  // Handle tap navigation (replaces overlay click zones)
+  // Handle tap navigation with 1/3 zones
   const handleContentClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       // If user has an active text selection, don't navigate
@@ -307,18 +380,24 @@ function TextContent({
         return;
       }
 
-      // Determine navigation direction based on click position
+      // Determine navigation direction based on click position (1/3 zones)
       const rect = e.currentTarget.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const relativeX = clickX / rect.width;
 
-      if (relativeX < 0.25) {
+      if (relativeX < 0.33) {
+        setTapFeedback("left");
+        setTimeout(() => setTapFeedback(null), 150);
         onPrevPage?.();
-      } else if (relativeX > 0.75) {
+      } else if (relativeX > 0.67) {
+        setTapFeedback("right");
+        setTimeout(() => setTapFeedback(null), 150);
         onNextPage?.();
+      } else {
+        onCenterTap?.();
       }
     },
-    [onPrevPage, onNextPage],
+    [onPrevPage, onNextPage, onCenterTap],
   );
 
   // Handle highlight save
@@ -340,6 +419,34 @@ function TextContent({
     [currentSelection, onAddHighlight],
   );
 
+  const showSpread = isSpreadMode && displayRightContent?.html;
+
+  const textStyles = {
+    maxWidth: `${settings.maxWidth}px`,
+    fontFamily: font.value,
+    fontSize: `${settings.fontSize}px`,
+    lineHeight: settings.lineHeight,
+    textAlign: settings.textAlign,
+    padding: `0 ${settings.margins}%`,
+    "--tw-prose-body": theme.foreground,
+    "--tw-prose-headings": theme.foreground,
+    "--tw-prose-lead": theme.foreground,
+    "--tw-prose-links": theme.accent,
+    "--tw-prose-bold": theme.foreground,
+    "--tw-prose-counters": theme.muted,
+    "--tw-prose-bullets": theme.muted,
+    "--tw-prose-hr": theme.muted,
+    "--tw-prose-quotes": theme.foreground,
+    "--tw-prose-quote-borders": theme.muted,
+    "--tw-prose-captions": theme.muted,
+    "--tw-prose-code": theme.foreground,
+    "--tw-prose-pre-code": theme.foreground,
+    "--tw-prose-pre-bg": theme.background,
+    "--tw-prose-th-borders": theme.muted,
+    "--tw-prose-td-borders": theme.muted,
+    "--reader-selection-color": theme.selection,
+  } as React.CSSProperties;
+
   return (
     <div
       ref={containerRef}
@@ -350,39 +457,80 @@ function TextContent({
       }}
       onClick={handleContentClick}
     >
+      {/* Page transition wrapper */}
       <div
-        ref={contentRef}
-        className="mx-auto prose max-w-none"
-        style={
-          {
-            maxWidth: `${settings.maxWidth}px`,
-            fontFamily: font.value,
-            fontSize: `${settings.fontSize}px`,
-            lineHeight: settings.lineHeight,
-            textAlign: settings.textAlign,
-            padding: `0 ${settings.margins}%`,
-            "--tw-prose-body": theme.foreground,
-            "--tw-prose-headings": theme.foreground,
-            "--tw-prose-lead": theme.foreground,
-            "--tw-prose-links": theme.accent,
-            "--tw-prose-bold": theme.foreground,
-            "--tw-prose-counters": theme.muted,
-            "--tw-prose-bullets": theme.muted,
-            "--tw-prose-hr": theme.muted,
-            "--tw-prose-quotes": theme.foreground,
-            "--tw-prose-quote-borders": theme.muted,
-            "--tw-prose-captions": theme.muted,
-            "--tw-prose-code": theme.foreground,
-            "--tw-prose-pre-code": theme.foreground,
-            "--tw-prose-pre-bg": theme.background,
-            "--tw-prose-th-borders": theme.muted,
-            "--tw-prose-td-borders": theme.muted,
-            "--reader-selection-color": theme.selection,
-          } as React.CSSProperties
-        }
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
-        dangerouslySetInnerHTML={{ __html: content.html || "" }}
-      />
+        className="transition-all duration-200 ease-in-out"
+        style={{
+          opacity: isTransitioning ? 0 : 1,
+          transform: isTransitioning
+            ? `translateX(${transitionDirection === "left" ? "-20px" : "20px"})`
+            : "translateX(0)",
+        }}
+      >
+        {showSpread ? (
+          // Two-column spread layout
+          <div
+            className="mx-auto flex gap-8"
+            style={{ maxWidth: `${settings.maxWidth * 2 + 64}px` }}
+          >
+            <div
+              ref={contentRef}
+              className="flex-1 prose max-w-none"
+              style={textStyles}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
+              dangerouslySetInnerHTML={{ __html: displayContent.html || "" }}
+            />
+            <div
+              className="w-px self-stretch"
+              style={{ backgroundColor: `${theme.foreground}15` }}
+            />
+            <div
+              ref={rightContentRef}
+              className="flex-1 prose max-w-none"
+              style={textStyles}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
+              dangerouslySetInnerHTML={{ __html: displayRightContent?.html || "" }}
+            />
+          </div>
+        ) : (
+          // Single column layout
+          <div
+            ref={contentRef}
+            className="mx-auto prose max-w-none"
+            style={textStyles}
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
+            dangerouslySetInnerHTML={{ __html: displayContent.html || "" }}
+          />
+        )}
+      </div>
+
+      {/* Tap feedback overlays */}
+      {tapFeedback && (
+        <div
+          className="absolute inset-y-0 pointer-events-none flex items-center justify-center"
+          style={{
+            left: tapFeedback === "left" ? 0 : undefined,
+            right: tapFeedback === "right" ? 0 : undefined,
+            width: "33%",
+            backgroundColor: `${theme.foreground}06`,
+            animation: "tapFlash 150ms ease-out forwards",
+          }}
+        >
+          <svg
+            className="w-8 h-8"
+            fill="none"
+            stroke={`${theme.foreground}30`}
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+          >
+            {tapFeedback === "left" ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            )}
+          </svg>
+        </div>
+      )}
 
       {/* Floating highlight toolbar (new selection) */}
       {showToolbar && currentSelection && (
@@ -424,6 +572,14 @@ function TextContent({
           theme={theme}
         />
       )}
+
+      {/* Tap flash animation */}
+      <style>{`
+        @keyframes tapFlash {
+          0% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -444,22 +600,26 @@ function ImageLoadingPlaceholder() {
 
 /**
  * Image content renderer (PDF pages, Comics)
- * Supports single page and two-page spread modes
+ * Supports single page and two-page spread modes with tap zones and transitions.
  */
 function ImageContent({
   content,
   rightContent,
   settings,
   isSpreadMode,
+  isJumpNavigation,
   onPrevPage,
   onNextPage,
+  onCenterTap,
 }: {
   content: PageContent;
   rightContent?: PageContent | null;
   settings: ReaderSettings;
   isSpreadMode?: boolean;
+  isJumpNavigation?: boolean;
   onPrevPage?: () => void;
   onNextPage?: () => void;
+  onCenterTap?: () => void;
 }) {
   const theme = THEMES[settings.theme];
   const showSpread = isSpreadMode && rightContent?.imageUrl;
@@ -471,6 +631,39 @@ function ImageContent({
   // Track loading state for images
   const [leftLoaded, setLeftLoaded] = useState(false);
   const [rightLoaded, setRightLoaded] = useState(false);
+
+  // Tap feedback
+  const [tapFeedback, setTapFeedback] = useState<"left" | "right" | null>(null);
+
+  // Page transition state
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionDirection, setTransitionDirection] = useState<"left" | "right" | "none">("none");
+  const prevPositionRef = useRef(content.position);
+
+  // Page transition effect
+  useEffect(() => {
+    const prevPos = prevPositionRef.current;
+    const newPos = content.position;
+    prevPositionRef.current = newPos;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isLargeJump = Math.abs(newPos - prevPos) > 0.05;
+
+    if (isLargeJump || reducedMotion || prevPos === newPos || isJumpNavigation) {
+      return;
+    }
+
+    const direction = newPos > prevPos ? "left" : "right";
+    setTransitionDirection(direction);
+    setIsTransitioning(true);
+
+    const timer = setTimeout(() => {
+      setTransitionDirection("none");
+      setIsTransitioning(false);
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [content.position, isJumpNavigation]);
 
   // Reset loading state when content changes, but check for cached images
   useEffect(() => {
@@ -505,18 +698,30 @@ function ImageContent({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onPrevPage, onNextPage]);
 
-  // Handle click navigation (left half = prev, right half = next)
+  // Handle click navigation with 1/3 zones
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
-    const isLeftHalf = clickX < rect.width / 2;
+    const relativeX = clickX / rect.width;
 
-    if (settings.comicRtl) {
-      // Right-to-left (manga mode)
-      isLeftHalf ? onNextPage?.() : onPrevPage?.();
+    if (relativeX < 0.33) {
+      setTapFeedback("left");
+      setTimeout(() => setTapFeedback(null), 150);
+      if (settings.comicRtl) {
+        onNextPage?.();
+      } else {
+        onPrevPage?.();
+      }
+    } else if (relativeX > 0.67) {
+      setTapFeedback("right");
+      setTimeout(() => setTapFeedback(null), 150);
+      if (settings.comicRtl) {
+        onPrevPage?.();
+      } else {
+        onNextPage?.();
+      }
     } else {
-      // Left-to-right (normal)
-      isLeftHalf ? onPrevPage?.() : onNextPage?.();
+      onCenterTap?.();
     }
   };
 
@@ -529,68 +734,114 @@ function ImageContent({
 
   return (
     <div
-      className="h-full flex items-center justify-center overflow-auto cursor-pointer"
+      className="h-full flex items-center justify-center overflow-auto cursor-pointer relative"
       style={{ backgroundColor: theme.background }}
       onClick={handleClick}
     >
-      {showSpread ? (
-        // Two-page spread view
-        <div className="h-full flex items-center justify-center gap-1">
-          {content.imageUrl && (
+      {/* Page transition wrapper */}
+      <div
+        className="h-full w-full flex items-center justify-center transition-all duration-200 ease-in-out"
+        style={{
+          opacity: isTransitioning ? 0 : 1,
+          transform: isTransitioning
+            ? `translateX(${transitionDirection === "left" ? "-20px" : "20px"})`
+            : "translateX(0)",
+        }}
+      >
+        {showSpread ? (
+          // Two-page spread view
+          <div className="h-full flex items-center justify-center gap-1">
+            {content.imageUrl && (
+              <div className="relative h-full flex items-center justify-center">
+                {!leftLoaded && <ImageLoadingPlaceholder />}
+                <img
+                  ref={leftImgRef}
+                  src={content.imageUrl}
+                  alt={content.chapterTitle || "Left Page"}
+                  style={{
+                    ...imageStyle,
+                    opacity: leftLoaded ? 1 : 0,
+                    transition: "opacity 0.2s ease-in-out",
+                  }}
+                  onLoad={() => setLeftLoaded(true)}
+                />
+              </div>
+            )}
+            {rightContent?.imageUrl && (
+              <div className="relative h-full flex items-center justify-center">
+                {!rightLoaded && <ImageLoadingPlaceholder />}
+                <img
+                  ref={rightImgRef}
+                  src={rightContent.imageUrl}
+                  alt={rightContent.chapterTitle || "Right Page"}
+                  style={{
+                    ...imageStyle,
+                    opacity: rightLoaded ? 1 : 0,
+                    transition: "opacity 0.2s ease-in-out",
+                  }}
+                  onLoad={() => setRightLoaded(true)}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          // Single page view
+          content.imageUrl && (
             <div className="relative h-full flex items-center justify-center">
               {!leftLoaded && <ImageLoadingPlaceholder />}
               <img
                 ref={leftImgRef}
                 src={content.imageUrl}
-                alt={content.chapterTitle || "Left Page"}
+                alt={content.chapterTitle || "Page"}
+                className="max-h-full"
                 style={{
-                  ...imageStyle,
+                  objectFit: settings.comicFitMode === "contain" ? "contain" : undefined,
+                  width: settings.comicFitMode === "width" ? "100%" : "auto",
+                  height: settings.comicFitMode === "height" ? "100%" : "auto",
                   opacity: leftLoaded ? 1 : 0,
                   transition: "opacity 0.2s ease-in-out",
                 }}
                 onLoad={() => setLeftLoaded(true)}
               />
             </div>
-          )}
-          {rightContent.imageUrl && (
-            <div className="relative h-full flex items-center justify-center">
-              {!rightLoaded && <ImageLoadingPlaceholder />}
-              <img
-                ref={rightImgRef}
-                src={rightContent.imageUrl}
-                alt={rightContent.chapterTitle || "Right Page"}
-                style={{
-                  ...imageStyle,
-                  opacity: rightLoaded ? 1 : 0,
-                  transition: "opacity 0.2s ease-in-out",
-                }}
-                onLoad={() => setRightLoaded(true)}
-              />
-            </div>
-          )}
+          )
+        )}
+      </div>
+
+      {/* Tap feedback overlays */}
+      {tapFeedback && (
+        <div
+          className="absolute inset-y-0 pointer-events-none flex items-center justify-center"
+          style={{
+            left: tapFeedback === "left" ? 0 : undefined,
+            right: tapFeedback === "right" ? 0 : undefined,
+            width: "33%",
+            backgroundColor: `${theme.foreground}06`,
+            animation: "tapFlash 150ms ease-out forwards",
+          }}
+        >
+          <svg
+            className="w-8 h-8"
+            fill="none"
+            stroke={`${theme.foreground}30`}
+            viewBox="0 0 24 24"
+            strokeWidth={2}
+          >
+            {tapFeedback === "left" ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            )}
+          </svg>
         </div>
-      ) : (
-        // Single page view
-        content.imageUrl && (
-          <div className="relative h-full flex items-center justify-center">
-            {!leftLoaded && <ImageLoadingPlaceholder />}
-            <img
-              ref={leftImgRef}
-              src={content.imageUrl}
-              alt={content.chapterTitle || "Page"}
-              className="max-h-full"
-              style={{
-                objectFit: settings.comicFitMode === "contain" ? "contain" : undefined,
-                width: settings.comicFitMode === "width" ? "100%" : "auto",
-                height: settings.comicFitMode === "height" ? "100%" : "auto",
-                opacity: leftLoaded ? 1 : 0,
-                transition: "opacity 0.2s ease-in-out",
-              }}
-              onLoad={() => setLeftLoaded(true)}
-            />
-          </div>
-        )
       )}
+
+      <style>{`
+        @keyframes tapFlash {
+          0% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }

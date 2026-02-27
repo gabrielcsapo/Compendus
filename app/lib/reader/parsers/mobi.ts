@@ -1,4 +1,4 @@
-import { initMobiFile, initKf8File } from "@lingo-reader/mobi-parser";
+import { initMobiFile, initKf8File } from "../../mobi-parser.js";
 import { resolve } from "path";
 import { mkdirSync } from "fs";
 import type { TextContent, NormalizedChapter, TocEntry } from "../types";

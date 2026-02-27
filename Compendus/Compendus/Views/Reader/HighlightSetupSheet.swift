@@ -107,6 +107,5 @@ struct HighlightSetupSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
     }
 }

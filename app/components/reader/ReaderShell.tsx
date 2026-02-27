@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "react-flight-router/client";
 import { useReader } from "./hooks/useReader";
 import { ReaderContent } from "./ReaderContent";
 import { ReaderToolbar } from "./ReaderToolbar";
 import { ReaderSidebar } from "./ReaderSidebar";
 import { ReaderSettings } from "./ReaderSettings";
+import { ReadAloudBar } from "./ReadAloudBar";
 import { THEMES } from "@/lib/reader/settings";
 
 interface ReaderShellProps {
@@ -28,25 +29,126 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
     navigate(returnUrl);
   }, [navigate, returnUrl]);
 
-  // Close reader on Escape key press
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        handleClose();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleClose]);
-
   const reader = useReader({ bookId, initialPosition, formatOverride });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"toc" | "bookmarks" | "highlights" | "search">("toc");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Immersive mode: auto-hiding overlay
+  const [showOverlay, setShowOverlay] = useState(true);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // TTS state
+  const [readAloudActive, setReadAloudActive] = useState(false);
+  const textContentRef = useRef<HTMLDivElement>(null);
+
   const theme = THEMES[reader.settings.theme];
+
+  // Auto-hide overlay timer
+  const resetOverlayTimer = useCallback(() => {
+    if (overlayTimerRef.current) {
+      clearTimeout(overlayTimerRef.current);
+    }
+    overlayTimerRef.current = setTimeout(() => {
+      if (!sidebarOpen && !settingsOpen) {
+        setShowOverlay(false);
+      }
+    }, 10000);
+  }, [sidebarOpen, settingsOpen]);
+
+  // Start timer when overlay becomes visible
+  useEffect(() => {
+    if (showOverlay && !sidebarOpen && !settingsOpen) {
+      resetOverlayTimer();
+    }
+    return () => {
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
+      }
+    };
+  }, [showOverlay, resetOverlayTimer, sidebarOpen, settingsOpen]);
+
+  // Keep overlay visible while sidebar or settings are open
+  useEffect(() => {
+    if (sidebarOpen || settingsOpen) {
+      setShowOverlay(true);
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
+      }
+    }
+  }, [sidebarOpen, settingsOpen]);
+
+  // Show overlay on mouse movement (desktop)
+  useEffect(() => {
+    let moveTimeout: ReturnType<typeof setTimeout>;
+    const handleMouseMove = () => {
+      if (!showOverlay) {
+        setShowOverlay(true);
+      }
+      clearTimeout(moveTimeout);
+      moveTimeout = setTimeout(() => {
+        resetOverlayTimer();
+      }, 100);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      clearTimeout(moveTimeout);
+    };
+  }, [showOverlay, resetOverlayTimer]);
+
+  // Center tap toggles overlay
+  const handleCenterTap = useCallback(() => {
+    setShowOverlay((prev) => {
+      if (!prev) {
+        // Will become visible, start timer
+        setTimeout(() => resetOverlayTimer(), 0);
+      }
+      return !prev;
+    });
+  }, [resetOverlayTimer]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape closes reader
+      if (e.key === "Escape") {
+        if (sidebarOpen) {
+          setSidebarOpen(false);
+        } else if (settingsOpen) {
+          setSettingsOpen(false);
+        } else {
+          e.preventDefault();
+          handleClose();
+        }
+        return;
+      }
+
+      // Don't handle shortcuts when typing in input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        return;
+      }
+
+      // t = toggle overlay
+      if (e.key === "t" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        setShowOverlay((prev) => !prev);
+      }
+
+      // Cmd/Ctrl+F = open search
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        setSidebarTab("search");
+        setSidebarOpen(true);
+        setShowOverlay(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleClose, sidebarOpen, settingsOpen]);
 
   // Handle TOC navigation
   const handleTocSelect = useCallback(
@@ -75,6 +177,15 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
     [reader],
   );
 
+  // Handle search result navigation
+  const handleSearchResultSelect = useCallback(
+    (position: number) => {
+      reader.goToPosition(position);
+      setSidebarOpen(false);
+    },
+    [reader],
+  );
+
   // Add bookmark at current position
   const handleAddBookmark = useCallback(() => {
     if (reader.pageContent) {
@@ -92,6 +203,8 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
       setSidebarOpen((prev) => !prev);
     }
   }, []);
+
+  const isTextContent = reader.pageContent?.type === "text";
 
   // Loading state
   if (reader.loading) {
@@ -166,24 +279,36 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
 
   return (
     <div
-      className="h-screen flex flex-col"
+      className="h-screen flex flex-col relative"
       style={{ backgroundColor: theme.background, color: theme.foreground }}
     >
-      {/* Toolbar */}
-      <ReaderToolbar
-        title={reader.bookInfo?.title || ""}
-        currentPage={reader.currentPage}
-        totalPages={reader.totalPages}
-        onGoToPage={reader.goToPage}
-        onClose={handleClose}
-        onToggleSidebar={() => toggleSidebar()}
-        onToggleSettings={() => setSettingsOpen((prev) => !prev)}
-        onAddBookmark={handleAddBookmark}
-        hasBookmark={reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)}
-        theme={theme}
-      />
+      {/* Toolbar - slides up when hidden */}
+      <div
+        className="absolute top-0 left-0 right-0 z-30 transition-all duration-300"
+        style={{
+          transform: showOverlay ? "translateY(0)" : "translateY(-100%)",
+          opacity: showOverlay ? 1 : 0,
+        }}
+      >
+        <ReaderToolbar
+          title={reader.bookInfo?.title || ""}
+          currentPage={reader.currentPage}
+          totalPages={reader.totalPages}
+          onGoToPage={reader.goToPage}
+          onClose={handleClose}
+          onToggleSidebar={() => toggleSidebar()}
+          onToggleSettings={() => setSettingsOpen((prev) => !prev)}
+          onToggleSearch={() => toggleSidebar("search")}
+          onToggleReadAloud={() => setReadAloudActive((prev) => !prev)}
+          onAddBookmark={handleAddBookmark}
+          hasBookmark={reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)}
+          isTextContent={isTextContent}
+          readAloudActive={readAloudActive}
+          theme={theme}
+        />
+      </div>
 
-      {/* Main content area */}
+      {/* Main content area - takes full height */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <ReaderSidebar
@@ -201,6 +326,12 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
           onHighlightSelect={handleHighlightSelect}
           onHighlightDelete={reader.removeHighlight}
           onHighlightUpdateNote={reader.updateHighlightNote}
+          searchQuery={reader.searchQuery}
+          searchResults={reader.searchResults}
+          searching={reader.searching}
+          onSearch={reader.searchBook}
+          onSearchResultSelect={handleSearchResultSelect}
+          isTextContent={isTextContent}
           theme={theme}
         />
 
@@ -211,8 +342,10 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
             rightContent={reader.rightPageContent}
             settings={reader.settings}
             isSpreadMode={reader.isSpreadMode}
+            isJumpNavigation={reader.isJumpNavigation}
             onPrevPage={reader.prevPage}
             onNextPage={reader.nextPage}
+            onCenterTap={handleCenterTap}
             bookId={reader.bookInfo?.id}
             hasTranscript={reader.bookInfo?.hasTranscript}
             audioChapters={reader.bookInfo?.chapters}
@@ -222,7 +355,20 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
             onRemoveHighlight={reader.removeHighlight}
             onUpdateHighlightColor={reader.updateHighlightColor}
             onUpdateHighlightNote={reader.updateHighlightNote}
+            textContentRef={textContentRef}
           />
+
+          {/* Read Aloud bar */}
+          {readAloudActive && isTextContent && reader.pageContent?.html && (
+            <ReadAloudBar
+              htmlContent={reader.pageContent.html}
+              contentRef={textContentRef}
+              onPageComplete={() => reader.nextPage()}
+              isActive={readAloudActive}
+              onClose={() => setReadAloudActive(false)}
+              theme={theme}
+            />
+          )}
         </div>
 
         {/* Settings panel */}
@@ -235,8 +381,14 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
         />
       </div>
 
-      {/* Footer with progress */}
-      <div className="h-1 bg-black/10" style={{ backgroundColor: `${theme.foreground}10` }}>
+      {/* Footer progress bar - always visible, thinner when overlay hidden */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-30 transition-all duration-300"
+        style={{
+          height: showOverlay ? "4px" : "2px",
+          backgroundColor: `${theme.foreground}10`,
+        }}
+      >
         <div
           className="h-full transition-all duration-300"
           style={{

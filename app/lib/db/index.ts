@@ -30,7 +30,13 @@ const migrationsPaths = [
 ];
 const migrationsFolder = migrationsPaths.find((p) => existsSync(resolve(p, "meta")));
 if (migrationsFolder) {
-  migrate(db, { migrationsFolder });
+  try {
+    migrate(db, { migrationsFolder });
+  } catch (err) {
+    console.error("[DB] Migration failed:", err);
+  }
+} else {
+  console.warn("[DB] No migrations folder found, tried:", migrationsPaths);
 }
 
 

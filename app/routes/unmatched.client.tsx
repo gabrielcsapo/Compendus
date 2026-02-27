@@ -204,8 +204,8 @@ export default function UnmatchedBooks() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <Link to="/" className="text-primary hover:text-primary-hover transition-colors">
-                &larr; Library
+              <Link to="/admin" className="text-primary hover:text-primary-hover transition-colors">
+                &larr; Admin
               </Link>
             </div>
             <h1 className="text-2xl font-bold text-foreground">Unmatched Books</h1>

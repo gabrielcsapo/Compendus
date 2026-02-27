@@ -167,6 +167,8 @@ private func parseOPF(_ data: Data) throws -> (EPUBMetadata, [String: ManifestIt
         var authors: [String] = []
         var language: String?
         var identifier: String?
+        var renditionLayout: RenditionLayout?
+        var renditionSpread: RenditionSpread?
 
         if let metadataEl = try doc.select("metadata").first() {
             // Title — getElementsByTag handles namespaced tags like dc:title
@@ -201,10 +203,31 @@ private func parseOPF(_ data: Data) throws -> (EPUBMetadata, [String: ManifestIt
                 ?? metadataEl.getElementsByTag("identifier").first() {
                 identifier = try idEl.text().trimmingCharacters(in: .whitespacesAndNewlines)
             }
+
+            // Rendition properties (EPUB 3 <meta property="..."> form)
+            for meta in try metadataEl.getElementsByTag("meta").array() {
+                let property = (try? meta.attr("property")) ?? ""
+                let content = try meta.text().trimmingCharacters(in: .whitespacesAndNewlines)
+                if property == "rendition:layout", let layout = RenditionLayout(rawValue: content) {
+                    renditionLayout = layout
+                } else if property == "rendition:spread", let spread = RenditionSpread(rawValue: content) {
+                    renditionSpread = spread
+                }
+                // EPUB 2 compat: <meta name="..." content="..."> form
+                let name = (try? meta.attr("name")) ?? ""
+                let value = (try? meta.attr("content")) ?? ""
+                if name == "rendition:layout", let layout = RenditionLayout(rawValue: value) {
+                    renditionLayout = layout
+                } else if name == "rendition:spread", let spread = RenditionSpread(rawValue: value) {
+                    renditionSpread = spread
+                }
+            }
         }
 
-        let metadata = EPUBMetadata(title: title, authors: authors,
+        var metadata = EPUBMetadata(title: title, authors: authors,
                                      language: language, identifier: identifier)
+        metadata.renditionLayout = renditionLayout
+        metadata.renditionSpread = renditionSpread
 
         // Parse manifest
         var manifest: [String: ManifestItem] = [:]

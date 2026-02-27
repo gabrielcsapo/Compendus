@@ -59,6 +59,12 @@ class OnDeviceTranscriptionService {
     /// Available for live lyrics display while transcription is in progress.
     var partialTranscript: Transcript?
 
+    /// The end time (in seconds) of the last transcribed segment.
+    /// Used by ReadAlongService to check how far ahead the buffer extends.
+    var lastTranscribedTime: Double? {
+        partialTranscript?.segments.last?.end
+    }
+
     @ObservationIgnored private var currentTask: Task<Void, Never>?
     @ObservationIgnored private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     @ObservationIgnored private var whisperContext: WhisperContext?
@@ -118,12 +124,13 @@ class OnDeviceTranscriptionService {
         let chunkDuration: Double = 30.0
         let totalChunks = max(1, Int(ceil(duration / chunkDuration)))
 
-        // For live transcription, skip to the chunk before the current position
+        // For live transcription, skip to the chunk containing the current position
         var startChunkIndex = -1
         if let startTime = startFromTime, startTime > chunkDuration {
             let targetChunk = Int(startTime / chunkDuration)
-            // Go one chunk back for context
-            startChunkIndex = max(-1, targetChunk - 2)
+            // Start one chunk back for context so first completed chunk
+            // covers the area near the current playback position
+            startChunkIndex = max(-1, targetChunk - 1)
         }
 
         resumableState = ResumableTranscriptionState(

@@ -9,6 +9,20 @@
 import Foundation
 import SwiftData
 
+enum DownloadError: LocalizedError {
+    case conversionNotSupported
+    case conversionFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .conversionNotSupported:
+            return "This book format is not supported. The server could not convert it to EPUB."
+        case .conversionFailed(let message):
+            return "Failed to convert to EPUB: \(message)"
+        }
+    }
+}
+
 struct DownloadProgress: Identifiable {
     let id: String  // Book ID
     var progress: Double  // 0.0 - 1.0
@@ -103,7 +117,7 @@ class DownloadManager: NSObject {
 
         // Determine download URL and final format
         let isCbr = book.format.lowercased() == "cbr"
-        let isMobi = ["mobi", "azw", "azw3"].contains(book.format.lowercased())
+        let isNonEpubEbook = book.isEbook && book.format.lowercased() != "epub"
         let downloadURL: URL?
         let localFormat: String
 
@@ -111,10 +125,15 @@ class DownloadManager: NSObject {
             downloadURL = config.bookAsCbzURL(for: book.id)
             localFormat = "cbz"
             print("[DownloadManager] Converting CBR to CBZ for offline reading: \(book.id)")
-        } else if isMobi {
+        } else if isNonEpubEbook {
+            // All non-EPUB ebooks are converted to EPUB for reading
+            // PDFs need async conversion first; MOBI/AZW3 are converted inline by the server
+            if book.format.lowercased() == "pdf" {
+                try await ensureEpubConversion(bookId: book.id)
+            }
             downloadURL = config.bookAsEpubURL(for: book.id)
             localFormat = "epub"
-            print("[DownloadManager] Converting MOBI to EPUB for download: \(book.id)")
+            print("[DownloadManager] Downloading \(book.format.uppercased()) as EPUB: \(book.id)")
         } else {
             downloadURL = apiService.bookDownloadURL(bookId: book.id, format: book.format)
             localFormat = book.format
@@ -314,6 +333,43 @@ class DownloadManager: NSObject {
             predicate: #Predicate { $0.id == id }
         )
         return try? modelContext.fetch(descriptor).first
+    }
+
+    // MARK: - EPUB Conversion
+
+    /// Ensure EPUB conversion is complete on the server before downloading.
+    /// Used for formats like PDF that require async server-side conversion.
+    /// MOBI/AZW3 are converted inline by the /as-epub endpoint and don't need this.
+    private func ensureEpubConversion(bookId: String) async throws {
+        let response: ConversionResponse
+        do {
+            response = try await apiService.convertToEpub(bookId: bookId)
+        } catch let error as APIError {
+            if case .serverError(400, _) = error {
+                throw DownloadError.conversionNotSupported
+            }
+            throw error
+        }
+
+        if response.alreadyConverted == true {
+            return
+        }
+
+        guard let jobId = response.jobId else {
+            throw DownloadError.conversionNotSupported
+        }
+
+        // Poll for completion
+        while true {
+            try await Task.sleep(for: .seconds(2))
+            let progress = try await apiService.getJobProgress(jobId: jobId)
+
+            if progress.status == "completed" {
+                return
+            } else if progress.status == "error" {
+                throw DownloadError.conversionFailed(progress.message ?? "Conversion failed")
+            }
+        }
     }
 
     // MARK: - Background Session Reconnection

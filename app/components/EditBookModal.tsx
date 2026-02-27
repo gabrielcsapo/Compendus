@@ -1,14 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { updateBook } from "../actions/books";
+import { updateBook, deleteBook } from "../actions/books";
 import {
   getTags,
   addTagToBookByName,
   removeTagFromBook,
 } from "../actions/tags";
 import { getDistinctSeries, getDistinctAuthors } from "../actions/batch";
+import { CoverExtractButton } from "./CoverExtractButton";
+import { CoverUploadButton } from "./CoverUploadButton";
+import { MetadataRefreshButton } from "./MetadataRefreshButton";
+import { ReconvertEpubButton } from "./ConvertToEpubButton";
 import type { Book, Tag } from "../lib/db/schema";
+import type { BookFormat } from "../lib/types";
 
 const LANGUAGES = [
   "", "English", "Spanish", "French", "German", "Italian", "Portuguese",
@@ -27,6 +32,11 @@ interface EditBookModalProps {
   onClose: () => void;
   book: Book;
   currentTags: Tag[];
+  bookFormat: string;
+  hasCover: boolean;
+  coverUrl?: string;
+  bookAuthors: string[];
+  hasConvertedEpub?: boolean;
 }
 
 export function EditBookModal({
@@ -34,6 +44,11 @@ export function EditBookModal({
   onClose,
   book,
   currentTags,
+  bookFormat,
+  hasCover,
+  coverUrl,
+  bookAuthors,
+  hasConvertedEpub,
 }: EditBookModalProps) {
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle || "");
@@ -65,6 +80,9 @@ export function EditBookModal({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Load all tags, series names, and author names for suggestions
   useEffect(() => {
@@ -185,11 +203,30 @@ export function EditBookModal({
   };
 
   const handleClose = () => {
-    if (!isSubmitting) {
+    if (!isSubmitting && !isDeleting) {
       setError(null);
       setNewTagName("");
       setShowTagDropdown(false);
+      setShowDeleteConfirm(false);
+      setDeleteError(null);
       onClose();
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const success = await deleteBook(book.id);
+      if (success) {
+        window.location.href = "/";
+      } else {
+        setDeleteError("Failed to delete book");
+        setIsDeleting(false);
+      }
+    } catch {
+      setDeleteError("Failed to delete book");
+      setIsDeleting(false);
     }
   };
 
@@ -621,6 +658,46 @@ export function EditBookModal({
             </div>
           </div>
 
+          {/* Cover Management */}
+          <div className="md:col-span-2 pt-4 mt-4 border-t border-border">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
+              Cover
+            </h3>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <CoverExtractButton bookId={book.id} bookFormat={bookFormat} />
+              </div>
+              <div className="flex-1">
+                <CoverUploadButton bookId={book.id} hasCover={hasCover} />
+              </div>
+            </div>
+          </div>
+
+          {/* Metadata */}
+          <div className="md:col-span-2 pt-4 mt-4 border-t border-border">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
+              Metadata
+            </h3>
+            <MetadataRefreshButton
+              bookId={book.id}
+              bookTitle={book.title}
+              bookAuthors={bookAuthors}
+              bookFormat={bookFormat as BookFormat}
+              hasCover={hasCover}
+              coverUrl={coverUrl}
+            />
+          </div>
+
+          {/* Reconvert EPUB */}
+          {hasConvertedEpub && (
+            <div className="md:col-span-2 pt-4 mt-4 border-t border-border">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
+                Conversion
+              </h3>
+              <ReconvertEpubButton bookId={book.id} />
+            </div>
+          )}
+
           {/* Error */}
           {error && <p className="text-sm text-error mt-4">{error}</p>}
 
@@ -648,6 +725,69 @@ export function EditBookModal({
                 "Save Changes"
               )}
             </button>
+          </div>
+
+          {/* Delete Book */}
+          <div className="pt-4 mt-4 border-t border-border">
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm border border-error/30 rounded-lg text-error hover:bg-error hover:text-white transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
+                </svg>
+                Delete Book
+              </button>
+            ) : (
+              <div className="p-4 border border-error/30 rounded-lg bg-error/5">
+                <p className="text-sm text-foreground-muted mb-1">
+                  Are you sure you want to delete{" "}
+                  <strong className="text-foreground">{book.title}</strong>?
+                </p>
+                <p className="text-xs text-foreground-muted mb-3">
+                  This will permanently remove the book file, cover image, and all associated data
+                  including bookmarks, highlights, and reading progress.
+                </p>
+                {deleteError && (
+                  <p className="text-xs text-error mb-2">{deleteError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowDeleteConfirm(false);
+                      setDeleteError(null);
+                    }}
+                    disabled={isDeleting}
+                    className="flex-1 px-3 py-1.5 text-sm border border-border rounded-lg text-foreground hover:bg-surface-elevated transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    className="flex-1 px-3 py-1.5 text-sm bg-error text-white rounded-lg hover:bg-error/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isDeleting ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      "Delete Book"
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </form>
       </div>

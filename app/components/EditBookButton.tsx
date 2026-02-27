@@ -8,9 +8,14 @@ import type { Book, Tag } from "../lib/db/schema";
 interface EditBookButtonProps {
   book: Book;
   tags: Tag[];
+  bookFormat: string;
+  hasCover: boolean;
+  coverUrl?: string;
+  bookAuthors: string[];
+  hasConvertedEpub?: boolean;
 }
 
-export function EditBookButton({ book, tags }: EditBookButtonProps) {
+export function EditBookButton({ book, tags, bookFormat, hasCover, coverUrl, bookAuthors, hasConvertedEpub }: EditBookButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -34,6 +39,11 @@ export function EditBookButton({ book, tags }: EditBookButtonProps) {
         onClose={() => setIsOpen(false)}
         book={book}
         currentTags={tags}
+        bookFormat={bookFormat}
+        hasCover={hasCover}
+        coverUrl={coverUrl}
+        bookAuthors={bookAuthors}
+        hasConvertedEpub={hasConvertedEpub}
       />
     </>
   );

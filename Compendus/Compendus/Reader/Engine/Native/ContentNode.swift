@@ -124,6 +124,7 @@ enum TextStyle: Hashable {
     case strikethrough
     case smallCaps
     case uppercase
+    case footnoteRef
 }
 
 // MARK: - Block Substructures

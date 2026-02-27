@@ -1,4 +1,4 @@
-import { initMobiFile } from "@lingo-reader/mobi-parser";
+import { initMobiFile } from "../mobi-parser.js";
 import type { BookMetadata, ExtractedContent, Chapter } from "../types";
 
 export async function extractMobiMetadata(buffer: Buffer): Promise<BookMetadata> {

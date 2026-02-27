@@ -10,14 +10,16 @@ import SwiftUI
 struct PageJumpView: View {
     let totalPages: Int
     let currentPage: Int
+    let chapterTitle: String?
     let onJump: (Double) -> Void
 
     @State private var targetPage: Double
     @Environment(\.dismiss) private var dismiss
 
-    init(totalPages: Int, currentPage: Int, onJump: @escaping (Double) -> Void) {
+    init(totalPages: Int, currentPage: Int, chapterTitle: String? = nil, onJump: @escaping (Double) -> Void) {
         self.totalPages = totalPages
         self.currentPage = currentPage
+        self.chapterTitle = chapterTitle
         self.onJump = onJump
         self._targetPage = State(initialValue: Double(currentPage))
     }
@@ -26,6 +28,12 @@ struct PageJumpView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
+
+                if let chapterTitle {
+                    Text(chapterTitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
 
                 Text("Page \(Int(targetPage)) of \(totalPages)")
                     .font(.title2.monospacedDigit().weight(.medium))

@@ -3,16 +3,11 @@ import { buttonStyles, badgeStyles } from "../lib/styles";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
 import { getTagsForBook } from "../actions/tags";
 import { getCollectionsForBook } from "../actions/collections";
-import { MetadataRefreshButton } from "../components/MetadataRefreshButton";
-import type { BookFormat } from "../lib/types";
-import { CoverUploadButton } from "../components/CoverUploadButton";
-import { CoverExtractButton } from "../components/CoverExtractButton";
 import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
-import { DeleteBookButton } from "../components/DeleteBookButton";
 import { AuthorLinks } from "../components/AuthorLink";
-import { ConvertToEpubButton } from "../components/ConvertToEpubButton";
+import { ConvertToEpubButton, ReconvertEpubButton } from "../components/ConvertToEpubButton";
 import { TranscribeButton } from "../components/TranscribeButton";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
@@ -106,23 +101,27 @@ export default async function BookDetail({ params }: { params?: Record<string, s
 
           {/* Primary Actions */}
           <div className="space-y-2">
-            <Link
-              to={`/book/${book.id}/read`}
-              className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
-            >
-              {["m4b", "m4a", "mp3"].includes(book.format) ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
-              )}
-              {["m4b", "m4a", "mp3"].includes(book.format)
-                ? progressPercent > 0 ? "Continue Listening" : "Start Listening"
-                : progressPercent > 0 ? "Continue Reading" : "Start Reading"}
-            </Link>
+            {["pdf", "mobi", "azw3"].includes(book.format) ? (
+              <ConvertToEpubButton bookId={book.id} hasEpub={!!book.convertedEpubPath} progressPercent={progressPercent} />
+            ) : (
+              <Link
+                to={`/book/${book.id}/read`}
+                className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+              >
+                {["m4b", "m4a", "mp3"].includes(book.format) ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                )}
+                {["m4b", "m4a", "mp3"].includes(book.format)
+                  ? progressPercent > 0 ? "Continue Listening" : "Start Listening"
+                  : progressPercent > 0 ? "Continue Reading" : "Start Reading"}
+              </Link>
+            )}
             <a
               href={`/books/${book.id}.${book.format}`}
               download={book.fileName}
@@ -134,11 +133,6 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               Download {book.format.toUpperCase()}
             </a>
           </div>
-
-          {/* Convert to EPUB (PDF, MOBI, AZW3) */}
-          {["pdf", "mobi", "azw3"].includes(book.format) && (
-            <ConvertToEpubButton bookId={book.id} hasEpub={!!book.convertedEpubPath} />
-          )}
 
           {/* Transcribe audiobook */}
           {["m4b", "mp3", "m4a"].includes(book.format) && (
@@ -174,21 +168,6 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             </div>
           )}
 
-          {/* Secondary Actions - collapsible group */}
-          <details className="group">
-            <summary className="flex items-center justify-between cursor-pointer p-3 bg-surface-elevated rounded-lg border border-border hover:bg-surface transition-colors text-sm font-medium text-foreground-muted">
-              <span>Manage Book</span>
-              <svg className="w-4 h-4 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </summary>
-            <div className="mt-2 space-y-1">
-              {/* Cover actions */}
-              <CoverExtractButton bookId={book.id} bookFormat={book.format} />
-              <CoverUploadButton bookId={book.id} hasCover={!!book.coverPath} />
-              <DeleteBookButton book={book} />
-            </div>
-          </details>
         </aside>
 
         {/* Content */}
@@ -200,7 +179,15 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 {book.title}
               </h1>
               <div className="flex items-center gap-2 shrink-0 pt-1">
-                <EditBookButton book={book} tags={tags} />
+                <EditBookButton
+                  book={book}
+                  tags={tags}
+                  bookFormat={book.format}
+                  hasCover={!!book.coverPath}
+                  coverUrl={book.coverPath ? `/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : undefined}
+                  bookAuthors={authors}
+                  hasConvertedEpub={!!book.convertedEpubPath}
+                />
                 {(book.format === "epub" || book.convertedEpubPath) && (
                   <Link
                     to={`/book/${book.id}/edit`}
@@ -348,10 +335,23 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 <dt className="text-foreground-muted shrink-0">Location</dt>
                 <dd className="text-foreground break-all font-mono text-xs text-right min-w-0">{book.filePath}</dd>
               </div>
+              {book.convertedEpubPath && (
+                <div className="flex justify-between items-center gap-4 py-3">
+                  <dt className="text-foreground-muted shrink-0">Converted EPUB</dt>
+                  <dd className="flex items-center gap-3">
+                    <a
+                      href={`/books/${book.id}/as-epub`}
+                      download={`${book.id}.epub`}
+                      className="text-sm text-primary hover:text-primary-hover transition-colors"
+                    >
+                      Download
+                    </a>
+                    <ReconvertEpubButton bookId={book.id} />
+                  </dd>
+                </div>
+              )}
             </dl>
 
-            {/* Metadata refresh */}
-            <MetadataRefreshButton bookId={book.id} bookTitle={book.title} bookAuthors={authors} bookFormat={book.format as BookFormat} hasCover={!!book.coverPath} coverUrl={book.coverPath ? `/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : undefined} />
           </section>
 
           {/* Related Books */}

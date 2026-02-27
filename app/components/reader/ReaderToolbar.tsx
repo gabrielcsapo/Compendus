@@ -10,8 +10,12 @@ interface ReaderToolbarProps {
   onClose?: () => void;
   onToggleSidebar: () => void;
   onToggleSettings: () => void;
+  onToggleSearch?: () => void;
+  onToggleReadAloud?: () => void;
   onAddBookmark: () => void;
   hasBookmark: boolean;
+  isTextContent?: boolean;
+  readAloudActive?: boolean;
   theme: {
     background: string;
     foreground: string;
@@ -28,8 +32,12 @@ export function ReaderToolbar({
   onClose,
   onToggleSidebar,
   onToggleSettings,
+  onToggleSearch,
+  onToggleReadAloud,
   onAddBookmark,
   hasBookmark,
+  isTextContent,
+  readAloudActive,
   theme,
 }: ReaderToolbarProps) {
   const [pageInput, setPageInput] = useState("");
@@ -120,7 +128,47 @@ export function ReaderToolbar({
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
+        {/* Search */}
+        {onToggleSearch && (
+          <button
+            onClick={onToggleSearch}
+            className="p-2 rounded-md hover:bg-black/10 transition-colors"
+            aria-label="Search"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </button>
+        )}
+
+        {/* Read Aloud (text content only) */}
+        {isTextContent && onToggleReadAloud && (
+          <button
+            onClick={onToggleReadAloud}
+            className="p-2 rounded-md hover:bg-black/10 transition-colors"
+            style={{
+              color: readAloudActive ? theme.accent : undefined,
+            }}
+            aria-label={readAloudActive ? "Stop reading aloud" : "Read aloud"}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+              />
+            </svg>
+          </button>
+        )}
+
+        {/* Bookmark */}
         <button
           onClick={onAddBookmark}
           className="p-2 rounded-md hover:bg-black/10 transition-colors"
@@ -141,6 +189,7 @@ export function ReaderToolbar({
           </svg>
         </button>
 
+        {/* Settings */}
         <button
           onClick={onToggleSettings}
           className="p-2 rounded-md hover:bg-black/10 transition-colors"

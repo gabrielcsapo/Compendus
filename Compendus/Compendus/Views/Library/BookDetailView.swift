@@ -30,20 +30,10 @@ struct BookDetailView: View {
     @State private var bookToRead: DownloadedBook?
     @State private var isDescriptionExpanded = false
 
-    // EPUB conversion state
-    @State private var conversionState: ConversionState = .idle
-    @State private var conversionProgress: Int = 0
-    @State private var conversionMessage: String = ""
-    @State private var conversionJobId: String?
-    @State private var pollingTimer: Timer?
     @State private var readAsEpub = false
     @State private var relatedBooks: [Book] = []
     @State private var showingEditSheet = false
     @State private var editedBook: Book?
-
-    enum ConversionState {
-        case idle, starting, converting, completed, downloading, error(String)
-    }
 
     /// Use edited version of the book if available
     private var displayBook: Book {
@@ -65,13 +55,6 @@ struct BookDetailView: View {
                     actionButton
                         .padding(.top, 20)
                         .padding(.horizontal, 20)
-
-                    // EPUB conversion for PDF, MOBI, AZW, AZW3
-                    if ["pdf", "mobi", "azw", "azw3"].contains(book.format.lowercased()) {
-                        convertToEpubSection
-                            .padding(.top, 12)
-                            .padding(.horizontal, 20)
-                    }
 
                     if let description = displayBook.description, !description.isEmpty {
                         descriptionSection(description)
@@ -464,204 +447,6 @@ struct BookDetailView: View {
             relatedBooks = response.relatedBooks ?? []
         } catch {
             // Silently fail — related books are supplementary
-        }
-    }
-
-    // MARK: - Convert to EPUB
-
-    @ViewBuilder
-    private var convertToEpubSection: some View {
-        switch conversionState {
-        case .idle:
-            if book.hasEpubVersion {
-                epubAvailableView
-            } else {
-                Button {
-                    startConversion()
-                } label: {
-                    Label("Convert to EPUB", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                }
-                .buttonStyle(.bordered)
-                .tint(.accentColor)
-            }
-
-        case .starting:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Starting conversion...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-
-        case .converting:
-            VStack(spacing: 8) {
-                HStack {
-                    Text(conversionMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(conversionProgress)%")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
-                ProgressView(value: Double(conversionProgress), total: 100)
-                    .tint(.accentColor)
-            }
-            .padding(.vertical, 4)
-
-        case .completed:
-            epubAvailableView
-
-        case .downloading:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Downloading EPUB...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-
-        case .error(let message):
-            VStack(spacing: 8) {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                Button("Retry") {
-                    startConversion()
-                }
-                .font(.subheadline)
-                .buttonStyle(.bordered)
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    @ViewBuilder
-    private var epubAvailableView: some View {
-        VStack(spacing: 8) {
-            if isDownloaded {
-                if downloadedBook?.hasEpubVersion == true {
-                    Button {
-                        if let onRead, let downloaded = downloadedBook {
-                            dismiss()
-                            onRead(downloaded)
-                        } else {
-                            readAsEpub = true
-                            bookToRead = downloadedBook
-                        }
-                    } label: {
-                        Label("Read as EPUB", systemImage: "book")
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.accentColor)
-                } else {
-                    Button {
-                        downloadEpubVersion()
-                    } label: {
-                        Label("Download EPUB Version", systemImage: "arrow.down.circle")
-                            .font(.subheadline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.accentColor)
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.caption)
-                    Text("EPUB version available")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func startConversion() {
-        conversionState = .starting
-
-        Task {
-            do {
-                let response = try await apiService.convertToEpub(bookId: book.id)
-
-                await MainActor.run {
-                    if response.alreadyConverted == true {
-                        conversionState = .completed
-                    } else if let jobId = response.jobId {
-                        conversionJobId = jobId
-                        conversionState = .converting
-                        startPolling(jobId: jobId)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    conversionState = .error(error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    private func startPolling(jobId: String) {
-        pollingTimer?.invalidate()
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            Task {
-                do {
-                    let progress = try await apiService.getJobProgress(jobId: jobId)
-
-                    await MainActor.run {
-                        conversionProgress = progress.progress ?? 0
-                        conversionMessage = progress.message ?? "Converting..."
-
-                        if progress.status == "completed" {
-                            pollingTimer?.invalidate()
-                            pollingTimer = nil
-                            conversionState = .completed
-                        } else if progress.status == "error" {
-                            pollingTimer?.invalidate()
-                            pollingTimer = nil
-                            conversionState = .error(progress.message ?? "Conversion failed")
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        pollingTimer?.invalidate()
-                        pollingTimer = nil
-                        conversionState = .error("Lost connection to server")
-                    }
-                }
-            }
-        }
-    }
-
-    private func downloadEpubVersion() {
-        conversionState = .downloading
-
-        Task {
-            do {
-                try await downloadManager.downloadEpubVersion(bookId: book.id, modelContext: modelContext)
-                await MainActor.run {
-                    checkIfDownloaded()
-                    conversionState = .completed
-                }
-            } catch {
-                await MainActor.run {
-                    conversionState = .error("Failed to download EPUB: \(error.localizedDescription)")
-                }
-            }
         }
     }
 

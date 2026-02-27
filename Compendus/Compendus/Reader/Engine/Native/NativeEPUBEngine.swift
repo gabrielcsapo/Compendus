@@ -24,13 +24,23 @@ class NativeEPUBEngine: ReaderEngine {
     /// Whether the reader is currently in two-page spread mode.
     var isSpreadMode: Bool = false
 
+    /// Whether a chapter is currently being loaded/parsed in the background.
+    var isLoadingChapter: Bool = false
+
     var onSelectionChanged: ((ReaderSelection?) -> Void)?
     var onHighlightTapped: ((String) -> Void)?
     var onTapZone: ((String) -> Void)?
+    var onFootnoteTapped: ((String) -> Void)?
 
     private var parser: EPUBParser?
     private var pageViewController: NativePageViewController?
     private let bookURL: URL
+
+    /// Active chapter loading task (cancelled when a new chapter load begins)
+    private var chapterLoadTask: Task<Void, Never>?
+
+    /// Background task that pre-paginates all chapters for accurate global page counts.
+    private var fullPaginationTask: Task<Void, Never>?
 
     // Spine/page tracking (same pattern as EPUBEngine)
     private var currentSpineIndex: Int = 0
@@ -57,6 +67,23 @@ class NativeEPUBEngine: ReaderEngine {
     private var chapterStrings: [Int: NSAttributedString] = [:]
     private var chapterPages: [Int: [PageInfo]] = [:]
     private var chapterOffsetMaps: [Int: OffsetMap] = [:]
+    private var chapterPlainTextMaps: [Int: PlainTextToAttrStringMap] = [:]
+    private var chapterMediaAttachments: [Int: [MediaAttachment]] = [:]
+    private var chapterFloatingElements: [Int: [FloatingElement]] = [:]
+
+    // MARK: - Read-Along Support
+
+    /// Range in the full chapter attributed string to highlight for read-along.
+    /// Set by ReadAlongService; rendered with a distinct visual style.
+    var readAlongHighlightRange: NSRange? {
+        didSet {
+            guard readAlongHighlightRange != oldValue else { return }
+            applyHighlightsToCurrentPage()
+        }
+    }
+
+    /// Callback fired when the spine index changes (for chapter tracking in read-along).
+    var onSpineIndexChanged: ((Int) -> Void)?
 
     // CSS stylesheet loaded once per book
     private var bookStylesheet: CSSStylesheet?
@@ -96,8 +123,95 @@ class NativeEPUBEngine: ReaderEngine {
         return pageIndex
     }
 
+    // MARK: - Read-Along Accessors
+
+    /// The current spine index (chapter) being displayed.
+    var activeSpineIndex: Int { currentSpineIndex }
+
+    /// The plain text of the currently displayed chapter.
+    var currentChapterPlainText: String? {
+        guard let nodes = parsedChapters[currentSpineIndex] else { return nil }
+        return Self.extractPlainText(from: nodes)
+    }
+
+    /// The full attributed string for the currently displayed chapter.
+    var currentChapterAttributedString: NSAttributedString? {
+        chapterStrings[currentSpineIndex]
+    }
+
+    /// Page boundaries for the currently displayed chapter.
+    var currentChapterPageInfos: [PageInfo]? {
+        chapterPages[currentSpineIndex]
+    }
+
+    /// Total number of pages in the currently displayed chapter.
+    var currentChapterPageCount: Int {
+        chapterPages[currentSpineIndex]?.count ?? 1
+    }
+
+    /// Global (book-wide) zero-based page index for the current position.
+    var globalPageIndex: Int {
+        let pagesBeforeCurrent = (0..<currentSpineIndex).reduce(0) { sum, i in
+            sum + (i < spinePageCounts.count ? spinePageCounts[i] : 1)
+        }
+        return pagesBeforeCurrent + currentPageIndex
+    }
+
+    /// Plain-text-to-attributed-string offset map for the current chapter.
+    var currentChapterPlainTextMap: PlainTextToAttrStringMap? {
+        chapterPlainTextMaps[currentSpineIndex]
+    }
+
+    /// The EPUB spine count (total number of chapters).
+    var spineCount: Int {
+        parser?.package.spine.count ?? 0
+    }
+
+    /// The TOC entries from the EPUB package.
+    var tocEntries: [EPUBTOCEntry] {
+        parser?.package.tocItems ?? []
+    }
+
+    /// Search all spine items for a phrase (case-insensitive).
+    /// Returns the spine index where the phrase was found, or nil.
+    func findSpineIndex(containingPhrase phrase: String) -> Int? {
+        guard let parser = parser, !phrase.isEmpty else { return nil }
+
+        for (spineIndex, _) in parser.package.spine.enumerated() {
+            let nodes: [ContentNode]
+            if let cached = parsedChapters[spineIndex] {
+                nodes = cached
+            } else {
+                guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex),
+                      let data = try? Data(contentsOf: chapterURL) else { continue }
+                let baseURL = chapterURL.deletingLastPathComponent()
+                let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: bookStylesheet)
+                let parsed = contentParser.parse()
+                parsedChapters[spineIndex] = parsed
+                nodes = parsed
+            }
+
+            let plainText = Self.extractPlainText(from: nodes)
+            guard plainText.count > 10 else { continue } // skip near-empty chapters
+
+            if plainText.range(of: phrase, options: .caseInsensitive) != nil {
+                return spineIndex
+            }
+        }
+        return nil
+    }
+
     init(bookURL: URL) {
         self.bookURL = bookURL
+    }
+
+    /// Release resources when the reader is dismissed.
+    func cleanup() {
+        chapterLoadTask?.cancel()
+        chapterLoadTask = nil
+        fullPaginationTask?.cancel()
+        fullPaginationTask = nil
+        EPUBImageCache.shared.endSession()
     }
 
     // MARK: - Loading
@@ -107,6 +221,7 @@ class NativeEPUBEngine: ReaderEngine {
         do {
             let parser = try await EPUBParser.parse(epubURL: bookURL)
             self.parser = parser
+            EPUBImageCache.shared.beginSession(id: bookURL.absoluteString)
             logger.info("Parsed EPUB: \(parser.package.spine.count) spine items, \(parser.package.manifest.count) manifest items")
 
             // Load CSS stylesheets once for the entire book
@@ -157,7 +272,12 @@ class NativeEPUBEngine: ReaderEngine {
                 if let pending = self.pendingInitialLoad {
                     self.pendingInitialLoad = nil
                     logger.info("Executing deferred load: spine \(pending.spineIndex), progression \(pending.progression ?? -1)")
-                    self.loadChapter(at: pending.spineIndex, progression: pending.progression)
+                    // Pre-paginate all chapters before displaying the first one
+                    // so global page counts are accurate from the start
+                    Task {
+                        await self.paginateAllChapters()
+                        self.loadChapter(at: pending.spineIndex, progression: pending.progression)
+                    }
                 }
             }
 
@@ -184,6 +304,16 @@ class NativeEPUBEngine: ReaderEngine {
             self.currentPageIndex = page
             self.updateSpinePageCount(totalPages)
             self.updateLocation()
+
+            // Show floating page indicator
+            let globalPage = self.globalPageIndex + 1
+            let total = self.totalPositions
+            if self.isSpreadMode {
+                let rightPage = min(globalPage + 1, total)
+                self.pageViewController?.showPageIndicator(text: "\(globalPage)–\(rightPage) of \(total)")
+            } else {
+                self.pageViewController?.showPageIndicator(text: "\(globalPage) of \(total)")
+            }
         }
 
         pageVC.onSelectionChanged = { [weak self] selection in
@@ -200,6 +330,10 @@ class NativeEPUBEngine: ReaderEngine {
 
         pageVC.onLinkTapped = { [weak self] url in
             self?.handleLinkTap(url)
+        }
+
+        pageVC.onFootnoteTapped = { [weak self] url in
+            self?.handleFootnoteTap(url)
         }
     }
 
@@ -237,6 +371,69 @@ class NativeEPUBEngine: ReaderEngine {
         }
     }
 
+    private func handleFootnoteTap(_ url: URL) {
+        guard let parser = parser else {
+            handleLinkTap(url)
+            return
+        }
+
+        // Extract fragment identifier (e.g. "#fn1" → "fn1")
+        let fragment = url.fragment
+
+        // Resolve the target XHTML file
+        let href = url.lastPathComponent
+        let hrefBase = href.components(separatedBy: "#").first ?? href
+
+        // Find the target file URL — may be same chapter or a different spine item
+        var targetURL: URL?
+        for (_, spineItem) in parser.package.spine.enumerated() {
+            guard let manifest = parser.package.manifest[spineItem.idref] else { continue }
+            let manifestBase = manifest.href.components(separatedBy: "#").first ?? manifest.href
+            if manifestBase == hrefBase || manifest.href.hasSuffix(hrefBase)
+                || hrefBase.hasSuffix(manifest.href.components(separatedBy: "/").last ?? "") {
+                targetURL = parser.resolveURL(for: manifest)
+                break
+            }
+        }
+
+        // If target not found in spine, try resolving directly from manifest
+        if targetURL == nil {
+            for manifest in parser.package.manifest.values {
+                let manifestBase = manifest.href.components(separatedBy: "#").first ?? manifest.href
+                if manifestBase == hrefBase || manifest.href.hasSuffix(hrefBase) {
+                    targetURL = parser.resolveURL(for: manifest)
+                    break
+                }
+            }
+        }
+
+        guard let resolvedURL = targetURL,
+              let data = try? Data(contentsOf: resolvedURL),
+              let fragment, !fragment.isEmpty else {
+            // Fall back to regular link navigation
+            handleLinkTap(url)
+            return
+        }
+
+        // Parse the target document and extract the element by fragment ID
+        do {
+            let html = String(data: data, encoding: .utf8) ?? ""
+            let doc = try SwiftSoup.parse(html)
+            if let element = try doc.getElementById(fragment) {
+                let footnoteText = try element.text()
+                if !footnoteText.isEmpty {
+                    onFootnoteTapped?(footnoteText)
+                    return
+                }
+            }
+        } catch {
+            logger.warning("Failed to parse footnote content: \(error)")
+        }
+
+        // Fall back to regular link navigation
+        handleLinkTap(url)
+    }
+
     // Media players are managed inline by NativePageViewController.
     // No overlay-based presentation needed.
 
@@ -256,13 +453,28 @@ class NativeEPUBEngine: ReaderEngine {
         logger.info("Loaded CSS stylesheets from manifest")
     }
 
+    /// Navigate to a specific spine index. Used by ReadAlongService for cross-chapter search.
+    func goToSpine(_ spineIndex: Int) {
+        loadChapter(at: spineIndex)
+    }
+
     // MARK: - Chapter Loading
 
     private func loadChapter(at spineIndex: Int, startAtEnd: Bool = false, progression: Double? = nil) {
         guard let parser = parser else { return }
         guard spineIndex >= 0, spineIndex < parser.package.spine.count else { return }
 
+        // Route fixed-layout EPUBs to dedicated renderer
+        if parser.package.isFixedLayout {
+            loadFXLChapter(at: spineIndex, startAtEnd: startAtEnd, progression: progression)
+            return
+        }
+
+        // Cancel any in-flight chapter load
+        chapterLoadTask?.cancel()
+
         currentSpineIndex = spineIndex
+        onSpineIndexChanged?(spineIndex)
 
         // Update viewport size from current view
         if let vcView = pageViewController?.view, vcView.bounds.width > 0 {
@@ -277,41 +489,322 @@ class NativeEPUBEngine: ReaderEngine {
 
         logger.info("Loading chapter \(spineIndex) from \(chapterURL.lastPathComponent)")
 
-        // Parse XHTML if not cached
-        if parsedChapters[spineIndex] == nil {
-            guard let data = try? Data(contentsOf: chapterURL) else {
-                logger.error("Failed to read chapter file at \(chapterURL.path)")
-                errorMessage = "Could not read chapter file"
-                return
-            }
-            logger.info("Chapter XHTML data: \(data.count) bytes")
-            let baseURL = chapterURL.deletingLastPathComponent()
-            let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: bookStylesheet)
-            parsedChapters[spineIndex] = contentParser.parse()
+        // Capture values needed for background work
+        let cachedNodes = parsedChapters[spineIndex]
+        let settings = currentSettings ?? ReaderSettings()
+        let viewport = viewportSize
+        let stylesheet = bookStylesheet
+        let gutterWidth = spreadGutterWidth
+        let resolvedLayout = settings.resolvedLayout(for: viewport.width)
+
+        // If the chapter is already fully built (nodes + pages), display immediately
+        if cachedNodes != nil, let cachedPages = chapterPages[spineIndex],
+           let cachedString = chapterStrings[spineIndex] {
+            displayChapter(
+                spineIndex: spineIndex,
+                nodes: cachedNodes!,
+                attrString: cachedString,
+                offsetMap: chapterOffsetMaps[spineIndex]!,
+                plainTextMap: chapterPlainTextMaps[spineIndex]!,
+                pages: cachedPages,
+                mediaAttachments: chapterMediaAttachments[spineIndex] ?? [],
+                floatingElements: chapterFloatingElements[spineIndex] ?? [],
+                settings: settings,
+                startAtEnd: startAtEnd,
+                progression: progression
+            )
+            return
         }
 
-        guard let nodes = parsedChapters[spineIndex] else { return }
-        logger.info("Parsed \(nodes.count) content nodes")
+        // Heavy work needed — show loading indicator and run off-main-thread
+        isLoadingChapter = true
+        pageViewController?.showLoadingIndicator(true)
 
-        // Resolve layout mode and compute per-page dimensions
+        chapterLoadTask = Task { [weak self] in
+            // Background: parse, build attributed string, paginate
+            let result: ChapterBuildResult? = await Task.detached {
+                // Read file
+                guard let data = try? Data(contentsOf: chapterURL) else { return nil }
+
+                // Parse XHTML
+                let nodes: [ContentNode]
+                if let cached = cachedNodes {
+                    nodes = cached
+                } else {
+                    let baseURL = chapterURL.deletingLastPathComponent()
+                    let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                    nodes = contentParser.parse()
+                }
+
+                guard !Task.isCancelled else { return nil }
+
+                // Compute layout (resolvedLayout captured before entering detached task)
+                let isTwoPage = resolvedLayout == .twoPage
+                let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+                let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+                let contentWidth = pageWidth - insets.left - insets.right
+                let contentHeight = viewport.height - insets.top - insets.bottom
+                let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+                // Build attributed string
+                let builder = AttributedStringBuilder(
+                    settings: settings,
+                    contentWidth: max(1, contentWidth),
+                    contentHeight: max(1, contentHeight)
+                )
+                let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+
+                guard !Task.isCancelled else { return nil }
+
+                // Paginate
+                let pages = NativePaginationEngine.paginate(
+                    attributedString: attrString,
+                    viewportSize: pageViewportSize,
+                    contentInsets: insets
+                )
+
+                return ChapterBuildResult(
+                    nodes: nodes,
+                    attrString: attrString,
+                    offsetMap: offsetMap,
+                    plainTextMap: plainTextMap,
+                    pages: pages,
+                    mediaAttachments: builder.mediaAttachments,
+                    floatingElements: builder.floatingElements
+                )
+            }.value
+
+            guard !Task.isCancelled, let self, let result else { return }
+
+            // Back on MainActor — cache and display
+            await MainActor.run {
+                self.parsedChapters[spineIndex] = result.nodes
+                self.chapterStrings[spineIndex] = result.attrString
+                self.chapterOffsetMaps[spineIndex] = result.offsetMap
+                self.chapterPlainTextMaps[spineIndex] = result.plainTextMap
+                self.chapterPages[spineIndex] = result.pages
+                self.chapterMediaAttachments[spineIndex] = result.mediaAttachments
+                self.chapterFloatingElements[spineIndex] = result.floatingElements
+
+                self.isLoadingChapter = false
+                self.pageViewController?.showLoadingIndicator(false)
+
+                self.displayChapter(
+                    spineIndex: spineIndex,
+                    nodes: result.nodes,
+                    attrString: result.attrString,
+                    offsetMap: result.offsetMap,
+                    plainTextMap: result.plainTextMap,
+                    pages: result.pages,
+                    mediaAttachments: result.mediaAttachments,
+                    floatingElements: result.floatingElements,
+                    settings: settings,
+                    startAtEnd: startAtEnd,
+                    progression: progression
+                )
+            }
+        }
+    }
+
+    /// Result of background chapter parsing + building.
+    /// @unchecked because NSAttributedString and UIImage are not formally Sendable,
+    /// but are safe here since we construct in one task and consume in another without sharing.
+    private struct ChapterBuildResult: @unchecked Sendable {
+        let nodes: [ContentNode]
+        let attrString: NSAttributedString
+        let offsetMap: OffsetMap
+        let plainTextMap: PlainTextToAttrStringMap
+        let pages: [PageInfo]
+        let mediaAttachments: [MediaAttachment]
+        let floatingElements: [FloatingElement]
+    }
+
+    // MARK: - Fixed Layout (FXL) Chapter Loading
+
+    /// Load a fixed-layout (pre-paginated) chapter as a single page per spine item.
+    private func loadFXLChapter(at spineIndex: Int, startAtEnd: Bool = false, progression: Double? = nil) {
+        guard let parser = parser else { return }
+        guard spineIndex >= 0, spineIndex < parser.package.spine.count else { return }
+
+        chapterLoadTask?.cancel()
+
+        currentSpineIndex = spineIndex
+        onSpineIndexChanged?(spineIndex)
+
+        if let vcView = pageViewController?.view, vcView.bounds.width > 0 {
+            viewportSize = vcView.bounds.size
+        }
+
+        guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex) else {
+            errorMessage = "Could not resolve chapter at index \(spineIndex)"
+            return
+        }
+
+        let cachedNodes = parsedChapters[spineIndex]
         let settings = currentSettings ?? ReaderSettings()
+        let viewport = viewportSize
+        let stylesheet = bookStylesheet
+
+        // If cached, display immediately
+        if cachedNodes != nil, let cachedPages = chapterPages[spineIndex],
+           let cachedString = chapterStrings[spineIndex] {
+            displayChapter(
+                spineIndex: spineIndex,
+                nodes: cachedNodes!,
+                attrString: cachedString,
+                offsetMap: chapterOffsetMaps[spineIndex]!,
+                plainTextMap: chapterPlainTextMaps[spineIndex]!,
+                pages: cachedPages,
+                mediaAttachments: chapterMediaAttachments[spineIndex] ?? [],
+                floatingElements: chapterFloatingElements[spineIndex] ?? [],
+                settings: settings,
+                startAtEnd: startAtEnd,
+                progression: progression
+            )
+            return
+        }
+
+        isLoadingChapter = true
+        pageViewController?.showLoadingIndicator(true)
+
+        chapterLoadTask = Task { [weak self] in
+            let result: ChapterBuildResult? = await Task.detached {
+                guard let data = try? Data(contentsOf: chapterURL) else { return nil }
+
+                // Parse XHTML
+                let nodes: [ContentNode]
+                if let cached = cachedNodes {
+                    nodes = cached
+                } else {
+                    let baseURL = chapterURL.deletingLastPathComponent()
+                    let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                    nodes = contentParser.parse()
+                }
+
+                guard !Task.isCancelled else { return nil }
+
+                // Parse viewport meta for FXL content dimensions
+                let fxlViewport = NativeEPUBEngine.parseViewport(from: data)
+
+                // Use FXL viewport or fall back to screen viewport
+                let contentSize = fxlViewport ?? viewport
+
+                let builder = AttributedStringBuilder(
+                    settings: settings,
+                    contentWidth: max(1, contentSize.width),
+                    contentHeight: max(1, contentSize.height)
+                )
+                let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+
+                // FXL: one page per spine item covering the entire string
+                let singlePage = PageInfo(
+                    range: NSRange(location: 0, length: attrString.length),
+                    pageIndex: 0
+                )
+
+                return ChapterBuildResult(
+                    nodes: nodes,
+                    attrString: attrString,
+                    offsetMap: offsetMap,
+                    plainTextMap: plainTextMap,
+                    pages: [singlePage],
+                    mediaAttachments: builder.mediaAttachments,
+                    floatingElements: builder.floatingElements
+                )
+            }.value
+
+            guard !Task.isCancelled, let self, let result else { return }
+
+            await MainActor.run {
+                self.parsedChapters[spineIndex] = result.nodes
+                self.chapterStrings[spineIndex] = result.attrString
+                self.chapterOffsetMaps[spineIndex] = result.offsetMap
+                self.chapterPlainTextMaps[spineIndex] = result.plainTextMap
+                self.chapterPages[spineIndex] = result.pages
+                self.chapterMediaAttachments[spineIndex] = result.mediaAttachments
+                self.chapterFloatingElements[spineIndex] = result.floatingElements
+
+                self.isLoadingChapter = false
+                self.pageViewController?.showLoadingIndicator(false)
+
+                self.displayChapter(
+                    spineIndex: spineIndex,
+                    nodes: result.nodes,
+                    attrString: result.attrString,
+                    offsetMap: result.offsetMap,
+                    plainTextMap: result.plainTextMap,
+                    pages: result.pages,
+                    mediaAttachments: result.mediaAttachments,
+                    floatingElements: result.floatingElements,
+                    settings: settings,
+                    startAtEnd: startAtEnd,
+                    progression: progression
+                )
+            }
+        }
+    }
+
+    /// Parse a viewport meta tag from XHTML data (e.g. `<meta name="viewport" content="width=600, height=800">`).
+    nonisolated static func parseViewport(from data: Data) -> CGSize? {
+        guard let html = String(data: data, encoding: .utf8) else { return nil }
+
+        // Quick regex-based extraction — avoids full DOM parse just for meta tag
+        guard let range = html.range(of: #"<meta[^>]*name\s*=\s*["']viewport["'][^>]*>"#,
+                                       options: .regularExpression, range: html.startIndex..<html.endIndex) else {
+            return nil
+        }
+
+        let metaTag = String(html[range])
+        guard let contentRange = metaTag.range(of: #"content\s*=\s*["']([^"']+)["']"#,
+                                                 options: .regularExpression) else {
+            return nil
+        }
+
+        let content = String(metaTag[contentRange])
+            .replacingOccurrences(of: #"content\s*=\s*["']"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"["']"#, with: "", options: .regularExpression)
+
+        var width: CGFloat?
+        var height: CGFloat?
+
+        for part in content.split(separator: ",") {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            let kv = trimmed.split(separator: "=", maxSplits: 1)
+            guard kv.count == 2 else { continue }
+            let key = kv[0].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = kv[1].trimmingCharacters(in: .whitespaces)
+            if key == "width", let v = Double(value) { width = CGFloat(v) }
+            if key == "height", let v = Double(value) { height = CGFloat(v) }
+        }
+
+        if let w = width, let h = height, w > 0, h > 0 {
+            return CGSize(width: w, height: h)
+        }
+        return nil
+    }
+
+    /// Display a fully-built chapter on screen (must be called on MainActor).
+    private func displayChapter(
+        spineIndex: Int,
+        nodes: [ContentNode],
+        attrString: NSAttributedString,
+        offsetMap: OffsetMap,
+        plainTextMap: PlainTextToAttrStringMap,
+        pages: [PageInfo],
+        mediaAttachments: [MediaAttachment],
+        floatingElements: [FloatingElement],
+        settings: ReaderSettings,
+        startAtEnd: Bool,
+        progression: Double?
+    ) {
+        guard let parser = parser else { return }
+
+        // FXL books are always single-page (no spread)
+        let isFXL = parser.package.isFixedLayout
         let resolvedLayout = settings.resolvedLayout(for: viewportSize.width)
-        let isTwoPage = resolvedLayout == .twoPage
+        let isTwoPage = isFXL ? false : resolvedLayout == .twoPage
         isSpreadMode = isTwoPage
 
-        let pageWidth = isTwoPage ? (viewportSize.width - spreadGutterWidth) / 2 : viewportSize.width
-        let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
-        let contentWidth = pageWidth - insets.left - insets.right
-        let contentHeight = viewportSize.height - insets.top - insets.bottom
-        let pageViewportSize = CGSize(width: pageWidth, height: viewportSize.height)
-
-        logger.info("Viewport: \(self.viewportSize.width)x\(self.viewportSize.height), pageWidth: \(pageWidth), contentWidth: \(contentWidth), twoPage: \(isTwoPage)")
-
-        // Build attributed string
-        let builder = AttributedStringBuilder(settings: settings, contentWidth: max(1, contentWidth), contentHeight: max(1, contentHeight))
-        let (attrString, offsetMap) = builder.build(from: nodes)
-        chapterStrings[spineIndex] = attrString
-        chapterOffsetMaps[spineIndex] = offsetMap
         logger.info("Attributed string: \(attrString.length) chars, offsets: \(offsetMap.entries.count)")
 
         if attrString.length > 0 {
@@ -322,16 +815,9 @@ class NativeEPUBEngine: ReaderEngine {
         }
 
         // Store media attachments and floating elements
-        currentMediaAttachments = builder.mediaAttachments
-        currentFloatingElements = builder.floatingElements
+        currentMediaAttachments = mediaAttachments
+        currentFloatingElements = floatingElements
 
-        // Paginate using per-page viewport size
-        let pages = NativePaginationEngine.paginate(
-            attributedString: attrString,
-            viewportSize: pageViewportSize,
-            contentInsets: insets
-        )
-        chapterPages[spineIndex] = pages
         updateSpinePageCount(pages.count)
         logger.info("Paginated into \(pages.count) pages")
 
@@ -349,6 +835,11 @@ class NativeEPUBEngine: ReaderEngine {
 
         // Configure layout mode on the page view controller
         pageViewController?.configureLayout(twoPage: isTwoPage)
+
+        // Suppress "This page is blank" in spread mode or when rendition:spread is set
+        let hasSpread = parser.package.metadata.renditionSpread != nil
+            && parser.package.metadata.renditionSpread != .none
+        pageViewController?.suppressBlankPagePlaceholder = isTwoPage || hasSpread
 
         // Display
         let manifestItem = parser.manifestItem(forSpineIndex: spineIndex)
@@ -383,25 +874,205 @@ class NativeEPUBEngine: ReaderEngine {
         totalPositions = spinePageCounts.reduce(0, +)
     }
 
+    // MARK: - Full Book Pagination
+
+    /// Pre-paginate all chapters so global page counts are accurate.
+    /// Runs heavy work in a background task. Awaitable — blocks until complete.
+    private func paginateAllChapters() async {
+        guard let parser = parser else { return }
+
+        let spineCount = parser.package.spine.count
+        let stylesheet = bookStylesheet
+        let settings = currentSettings ?? ReaderSettings()
+        let viewport = viewportSize
+        let gutterWidth = spreadGutterWidth
+        let resolvedLayout = settings.resolvedLayout(for: viewport.width)
+
+        // Collect chapter URLs on main actor before going to background
+        var chapterURLs: [(index: Int, url: URL)] = []
+        for index in 0..<spineCount {
+            // Skip chapters already paginated
+            if chapterPages[index] != nil { continue }
+            guard let url = parser.resolveSpineItemURL(at: index) else { continue }
+            chapterURLs.append((index, url))
+        }
+
+        guard !chapterURLs.isEmpty else { return }
+
+        // Process all chapters in a single detached task
+        let results: [(index: Int, result: ChapterBuildResult)] = await Task.detached {
+            var output: [(index: Int, result: ChapterBuildResult)] = []
+
+            let isTwoPage = resolvedLayout == .twoPage
+            let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+            let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+            let contentWidth = pageWidth - insets.left - insets.right
+            let contentHeight = viewport.height - insets.top - insets.bottom
+            let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+            for (index, chapterURL) in chapterURLs {
+                guard !Task.isCancelled else { break }
+
+                guard let data = try? Data(contentsOf: chapterURL) else { continue }
+
+                let baseURL = chapterURL.deletingLastPathComponent()
+                let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                let nodes = contentParser.parse()
+
+                guard !Task.isCancelled else { break }
+
+                let builder = AttributedStringBuilder(
+                    settings: settings,
+                    contentWidth: max(1, contentWidth),
+                    contentHeight: max(1, contentHeight)
+                )
+                let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+
+                guard !Task.isCancelled else { break }
+
+                let pages = NativePaginationEngine.paginate(
+                    attributedString: attrString,
+                    viewportSize: pageViewportSize,
+                    contentInsets: insets
+                )
+
+                output.append((index, ChapterBuildResult(
+                    nodes: nodes,
+                    attrString: attrString,
+                    offsetMap: offsetMap,
+                    plainTextMap: plainTextMap,
+                    pages: pages,
+                    mediaAttachments: builder.mediaAttachments,
+                    floatingElements: builder.floatingElements
+                )))
+            }
+
+            return output
+        }.value
+
+        // Apply all results on MainActor
+        for (index, result) in results {
+            parsedChapters[index] = result.nodes
+            chapterStrings[index] = result.attrString
+            chapterOffsetMaps[index] = result.offsetMap
+            chapterPlainTextMaps[index] = result.plainTextMap
+            chapterPages[index] = result.pages
+            chapterMediaAttachments[index] = result.mediaAttachments
+            chapterFloatingElements[index] = result.floatingElements
+            if index < spinePageCounts.count {
+                spinePageCounts[index] = result.pages.count
+            }
+        }
+        totalPositions = spinePageCounts.reduce(0, +)
+        logger.info("Full book pagination complete: \(self.totalPositions) total pages across \(spineCount) chapters")
+    }
+
+    // MARK: - Image Pre-loading
+
+    /// Walk the AST and pre-load all referenced images into the shared cache.
+    /// Called from a background task before building the attributed string so
+    /// that `AttributedStringBuilder.appendImage` hits the cache immediately.
+    nonisolated static func preloadImages(from nodes: [ContentNode]) {
+        var urls: [URL] = []
+        collectImageURLs(from: nodes, into: &urls)
+        for url in urls {
+            guard EPUBImageCache.shared.image(forPath: url.path) == nil else { continue }
+            if let image = UIImage(contentsOfFile: url.path) {
+                EPUBImageCache.shared.setImage(image, forPath: url.path)
+            }
+        }
+    }
+
+    /// Recursively collect image URLs from content nodes.
+    nonisolated private static func collectImageURLs(from nodes: [ContentNode], into urls: inout [URL]) {
+        for node in nodes {
+            switch node {
+            case .image(let url, _, _, _, _):
+                urls.append(url)
+            case .video(_, let poster, _):
+                if let poster { urls.append(poster) }
+            case .container(let children, _):
+                collectImageURLs(from: children, into: &urls)
+            case .blockquote(let children):
+                collectImageURLs(from: children, into: &urls)
+            case .list(_, let items, _):
+                for item in items {
+                    collectImageURLs(from: item.children, into: &urls)
+                }
+            case .paragraph, .heading, .codeBlock, .horizontalRule, .table, .audio:
+                break
+            }
+        }
+    }
+
     private func prefetchAdjacentChapters() {
         guard let parser = parser else { return }
         let indices = [currentSpineIndex - 1, currentSpineIndex + 1]
         let stylesheet = bookStylesheet
+        let settings = currentSettings ?? ReaderSettings()
+        let viewport = viewportSize
+        let gutterWidth = spreadGutterWidth
+        let resolvedLayout = settings.resolvedLayout(for: viewport.width)
+
         for index in indices {
             guard index >= 0, index < parser.package.spine.count,
-                  parsedChapters[index] == nil else { continue }
+                  chapterPages[index] == nil else { continue }
 
             Task.detached { [weak self] in
                 guard let self = self else { return }
                 guard let chapterURL = await parser.resolveSpineItemURL(at: index),
                       let data = try? Data(contentsOf: chapterURL) else { return }
 
-                let baseURL = chapterURL.deletingLastPathComponent()
-                let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
-                let nodes = contentParser.parse()
+                // Parse XHTML
+                let nodes: [ContentNode]
+                if let cached = await self.parsedChapters[index] {
+                    nodes = cached
+                } else {
+                    let baseURL = chapterURL.deletingLastPathComponent()
+                    let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                    nodes = contentParser.parse()
+                }
+
+                guard !Task.isCancelled else { return }
+
+                // Build attributed string and paginate (resolvedLayout captured before detached task)
+                let isTwoPage = resolvedLayout == .twoPage
+                let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+                let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+                let contentWidth = pageWidth - insets.left - insets.right
+                let contentHeight = viewport.height - insets.top - insets.bottom
+                let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+                let builder = AttributedStringBuilder(
+                    settings: settings,
+                    contentWidth: max(1, contentWidth),
+                    contentHeight: max(1, contentHeight)
+                )
+                let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+
+                guard !Task.isCancelled else { return }
+
+                let pages = NativePaginationEngine.paginate(
+                    attributedString: attrString,
+                    viewportSize: pageViewportSize,
+                    contentInsets: insets
+                )
+
+                let mediaAttachments = builder.mediaAttachments
+                let floatingElements = builder.floatingElements
 
                 await MainActor.run {
                     self.parsedChapters[index] = nodes
+                    self.chapterStrings[index] = attrString
+                    self.chapterOffsetMaps[index] = offsetMap
+                    self.chapterPlainTextMaps[index] = plainTextMap
+                    self.chapterPages[index] = pages
+                    self.chapterMediaAttachments[index] = mediaAttachments
+                    self.chapterFloatingElements[index] = floatingElements
+                    if index < self.spinePageCounts.count {
+                        self.spinePageCounts[index] = pages.count
+                    }
+                    self.totalPositions = self.spinePageCounts.reduce(0, +)
                 }
             }
         }
@@ -409,12 +1080,37 @@ class NativeEPUBEngine: ReaderEngine {
 
     /// Invalidate caches and reload the current chapter, preserving position.
     private func invalidateAndReload() {
+        // Cancel any in-flight full pagination
+        fullPaginationTask?.cancel()
+        fullPaginationTask = nil
+
         chapterStrings.removeAll()
         chapterPages.removeAll()
         chapterOffsetMaps.removeAll()
+        chapterPlainTextMaps.removeAll()
+        chapterMediaAttachments.removeAll()
+        chapterFloatingElements.removeAll()
+        // Reset spine page counts to defaults (will be recomputed)
+        if let parser = parser {
+            spinePageCounts = Array(repeating: 1, count: parser.package.spine.count)
+            totalPositions = spinePageCounts.reduce(0, +)
+        }
 
         let savedProgression = currentLocation?.progression ?? 0
-        loadChapter(at: currentSpineIndex, progression: savedProgression)
+        let savedSpine = currentSpineIndex
+
+        // Re-paginate all chapters with new settings, then display current position
+        isLoadingChapter = true
+        pageViewController?.showLoadingIndicator(true)
+
+        fullPaginationTask = Task { [weak self] in
+            guard let self else { return }
+            await self.paginateAllChapters()
+            guard !Task.isCancelled else { return }
+            self.isLoadingChapter = false
+            self.pageViewController?.showLoadingIndicator(false)
+            self.loadChapter(at: savedSpine, progression: savedProgression)
+        }
     }
 
     // MARK: - Location Tracking
@@ -529,6 +1225,13 @@ class NativeEPUBEngine: ReaderEngine {
                 break
             }
         }
+    }
+
+    /// Navigate to a progression within the current chapter (0.0–1.0).
+    func goToChapterProgression(_ progression: Double) {
+        pageViewController?.showProgression(progression)
+        currentPageIndex = pageViewController?.currentPageIndex ?? 0
+        updateLocation()
     }
 
     func go(toProgression progression: Double) async {
@@ -690,7 +1393,31 @@ class NativeEPUBEngine: ReaderEngine {
             return (id: highlight.id, range: nsRange, color: color)
         }
 
-        pageViewController?.applyHighlights(ranges)
+        pageViewController?.applyHighlights(ranges, readAlongRange: readAlongHighlightRange)
+    }
+
+    /// Navigate to the page containing the given character range in the attributed string.
+    /// Returns true if navigation was needed (different page).
+    @discardableResult
+    func showPage(containingRange range: NSRange) -> Bool {
+        guard let pages = chapterPages[currentSpineIndex] else { return false }
+
+        // Find the page that contains the start of this range
+        for (index, page) in pages.enumerated() {
+            if NSLocationInRange(range.location, page.range) ||
+               (range.location >= page.range.location &&
+                range.location < page.range.location + page.range.length) {
+                let alignedIndex = alignToSpread(index)
+                if alignedIndex != currentPageIndex {
+                    currentPageIndex = alignedIndex
+                    pageViewController?.showPage(currentPageIndex)
+                    updateLocation()
+                    return true
+                }
+                return false
+            }
+        }
+        return false
     }
 
     func clearSelection() {
@@ -823,7 +1550,7 @@ class NativeEPUBEngine: ReaderEngine {
 
     // MARK: - Plain Text Extraction
 
-    private static func extractPlainText(from nodes: [ContentNode]) -> String {
+    static func extractPlainText(from nodes: [ContentNode]) -> String {
         var text = ""
         for node in nodes {
             appendPlainText(from: node, to: &text)
@@ -831,7 +1558,7 @@ class NativeEPUBEngine: ReaderEngine {
         return text
     }
 
-    private static func appendPlainText(from node: ContentNode, to text: inout String) {
+    static func appendPlainText(from node: ContentNode, to text: inout String) {
         switch node {
         case .paragraph(let runs, _), .heading(_, let runs, _):
             for run in runs {

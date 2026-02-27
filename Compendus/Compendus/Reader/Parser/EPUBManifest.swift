@@ -9,12 +9,29 @@
 
 import Foundation
 
+/// EPUB rendition layout mode (reflowable vs pre-paginated)
+enum RenditionLayout: String {
+    case reflowable = "reflowable"
+    case prePaginated = "pre-paginated"
+}
+
+/// EPUB rendition spread mode (how pages are displayed in two-page spreads)
+enum RenditionSpread: String {
+    case auto = "auto"
+    case landscape = "landscape"
+    case portrait = "portrait"
+    case both = "both"
+    case none = "none"
+}
+
 /// Metadata extracted from the EPUB's OPF <metadata> element
 struct EPUBMetadata {
     let title: String
     let authors: [String]
     let language: String?
     let identifier: String?
+    var renditionLayout: RenditionLayout?
+    var renditionSpread: RenditionSpread?
 }
 
 /// A single item in the EPUB manifest (file within the EPUB)
@@ -56,4 +73,9 @@ struct EPUBPackage {
     let rootDirectoryPath: String
     /// Parsed table of contents
     let tocItems: [EPUBTOCEntry]
+
+    /// Whether this EPUB uses fixed layout (pre-paginated) rendering.
+    var isFixedLayout: Bool {
+        metadata.renditionLayout == .prePaginated
+    }
 }

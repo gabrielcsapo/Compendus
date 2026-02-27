@@ -304,6 +304,29 @@ export async function getReaderPage(
   };
 }
 
+export async function searchContent(
+  bookId: string,
+  query: string,
+  viewport: ViewportConfig,
+  formatOverride?: string,
+  maxResults = 50,
+): Promise<
+  Array<{
+    text: string;
+    context: string;
+    position: number;
+    pageNum: number;
+    chapterTitle?: string;
+  }>
+> {
+  if (!query.trim()) return [];
+
+  const content = await getContent(bookId, formatOverride);
+  if (!content) return [];
+
+  return paginationEngine.searchContent(content, query, viewport, maxResults);
+}
+
 export async function getReaderPageForPosition(
   bookId: string,
   position: number,
