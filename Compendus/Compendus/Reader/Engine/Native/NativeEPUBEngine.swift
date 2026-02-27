@@ -234,8 +234,8 @@ class NativeEPUBEngine: ReaderEngine {
             EPUBImageCache.shared.beginSession(id: bookURL.absoluteString)
             logger.info("Parsed EPUB: \(parser.package.spine.count) spine items, \(parser.package.manifest.count) manifest items")
 
-            // Load CSS stylesheets once for the entire book
-            loadStylesheets(from: parser)
+            // Load CSS stylesheets once for the entire book (off main thread)
+            await loadStylesheets(from: parser)
 
             // Initialize spine page counts
             spinePageCounts = Array(repeating: 1, count: parser.package.spine.count)
@@ -381,6 +381,12 @@ class NativeEPUBEngine: ReaderEngine {
         }
     }
 
+    /// Whether the spine item at the given index is an EPUB 3 navigation document.
+    private func isNavDocument(at spineIndex: Int) -> Bool {
+        guard let item = parser?.manifestItem(forSpineIndex: spineIndex) else { return false }
+        return item.properties?.contains("nav") == true
+    }
+
     private func handleFootnoteTap(_ url: URL) {
         guard let parser = parser else {
             handleLinkTap(url)
@@ -449,16 +455,25 @@ class NativeEPUBEngine: ReaderEngine {
 
     // MARK: - CSS Stylesheet Loading
 
-    private func loadStylesheets(from parser: EPUBParser) {
-        var combined = CSSStylesheet()
-        for (_, item) in parser.package.manifest {
+    private func loadStylesheets(from parser: EPUBParser) async {
+        let manifest = parser.package.manifest
+        // Pre-resolve CSS file URLs on main actor
+        var cssURLs: [URL] = []
+        for (_, item) in manifest {
             guard item.mediaType == "text/css" else { continue }
-            let cssURL = parser.resolveURL(for: item)
-            guard let cssData = try? Data(contentsOf: cssURL),
-                  let cssText = String(data: cssData, encoding: .utf8) else { continue }
-            let parsed = CSSParser.parse(cssText)
-            combined.merge(with: parsed)
+            cssURLs.append(parser.resolveURL(for: item))
         }
+
+        let combined = await Task.detached {
+            var stylesheet = CSSStylesheet()
+            for cssURL in cssURLs {
+                guard let cssData = try? Data(contentsOf: cssURL),
+                      let cssText = String(data: cssData, encoding: .utf8) else { continue }
+                let parsed = CSSParser.parse(cssText)
+                stylesheet.merge(with: parsed)
+            }
+            return stylesheet
+        }.value
         self.bookStylesheet = combined
         logger.info("Loaded CSS stylesheets from manifest")
     }
@@ -477,6 +492,12 @@ class NativeEPUBEngine: ReaderEngine {
         // Route fixed-layout EPUBs to dedicated renderer
         if parser.package.isFixedLayout {
             loadFXLChapter(at: spineIndex, startAtEnd: startAtEnd, progression: progression)
+            return
+        }
+
+        // Route navigation documents to custom TOC renderer
+        if isNavDocument(at: spineIndex) {
+            loadNavChapter(at: spineIndex, startAtEnd: startAtEnd, progression: progression)
             return
         }
 
@@ -627,6 +648,254 @@ class NativeEPUBEngine: ReaderEngine {
         let pages: [PageInfo]
         let mediaAttachments: [MediaAttachment]
         let floatingElements: [FloatingElement]
+    }
+
+    // MARK: - Native TOC Rendering
+
+    /// Build a styled attributed string for the table of contents using the parsed TOC entries.
+    /// Returns the same tuple type as `AttributedStringBuilder.build(from:)` for pipeline compatibility.
+    private func buildTOCAttributedString(
+        settings: ReaderSettings,
+        contentWidth: CGFloat,
+        contentHeight: CGFloat
+    ) -> (NSAttributedString, OffsetMap, PlainTextToAttrStringMap) {
+        guard let parser = parser else {
+            return (NSAttributedString(), OffsetMap(), PlainTextToAttrStringMap())
+        }
+
+        let tocEntries = parser.package.tocItems
+        let result = NSMutableAttributedString()
+
+        let fontSize = CGFloat(settings.fontSize)
+        let lineHeight = CGFloat(settings.lineHeight)
+        let textColor = settings.theme.textColor
+        let accentColor = UIColor.tintColor
+
+        let bodyFont = settings.nativeFont
+        let boldFont = settings.nativeBoldFont
+
+        // Heading: "Contents"
+        let headingSize = fontSize * 1.6
+        let headingFont: UIFont = {
+            if let d = boldFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                return UIFont(descriptor: d, size: headingSize)
+            }
+            return .boldSystemFont(ofSize: headingSize)
+        }()
+        let headingParaStyle = NSMutableParagraphStyle()
+        headingParaStyle.lineHeightMultiple = lineHeight
+        headingParaStyle.paragraphSpacingBefore = headingSize * 0.6
+        headingParaStyle.paragraphSpacing = headingSize * 0.8
+        headingParaStyle.alignment = .natural
+
+        result.append(NSAttributedString(string: "Contents\n", attributes: [
+            .font: headingFont,
+            .foregroundColor: textColor,
+            .paragraphStyle: headingParaStyle
+        ]))
+
+        // Recursively append TOC entries
+        func appendEntries(_ entries: [EPUBTOCEntry], level: Int) {
+            for entry in entries {
+                let indent = CGFloat(level) * fontSize * 1.5
+                let paraStyle = NSMutableParagraphStyle()
+                paraStyle.lineHeightMultiple = lineHeight
+                paraStyle.paragraphSpacing = fontSize * 0.5
+                paraStyle.headIndent = indent
+                paraStyle.firstLineHeadIndent = indent
+                paraStyle.alignment = .natural
+
+                // Build a file URL from the entry href that handleLinkTap can resolve
+                let rootDir = parser.package.rootDirectoryPath
+                let fullPath = rootDir.isEmpty ? entry.href : rootDir + "/" + entry.href
+                let linkURL = parser.extractedURL.appendingPathComponent(fullPath)
+
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: level == 0 ? boldFont : bodyFont,
+                    .foregroundColor: accentColor,
+                    .paragraphStyle: paraStyle,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .link: linkURL
+                ]
+
+                result.append(NSAttributedString(string: entry.title + "\n", attributes: attrs))
+
+                if !entry.children.isEmpty {
+                    appendEntries(entry.children, level: level + 1)
+                }
+            }
+        }
+
+        appendEntries(tocEntries, level: 0)
+
+        // Build minimal offset map and plain text map
+        let offsetMap = OffsetMap()
+        let plainTextMap = PlainTextToAttrStringMap()
+
+        return (result, offsetMap, plainTextMap)
+    }
+
+    /// Static version for off-main-thread TOC building during paginateAllChapters.
+    nonisolated private static func buildTOCAttributedStringStatic(
+        tocEntries: [EPUBTOCEntry],
+        fontSize: CGFloat,
+        lineHeight: CGFloat,
+        textColor: UIColor,
+        bodyFont: UIFont,
+        boldFont: UIFont,
+        extractedURL: URL,
+        rootDirectoryPath: String
+    ) -> (NSAttributedString, OffsetMap, PlainTextToAttrStringMap) {
+        let result = NSMutableAttributedString()
+
+        let accentColor = UIColor.tintColor
+
+        let headingSize = fontSize * 1.6
+        let headingFont: UIFont = {
+            if let d = boldFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                return UIFont(descriptor: d, size: headingSize)
+            }
+            return .boldSystemFont(ofSize: headingSize)
+        }()
+        let headingParaStyle = NSMutableParagraphStyle()
+        headingParaStyle.lineHeightMultiple = lineHeight
+        headingParaStyle.paragraphSpacingBefore = headingSize * 0.6
+        headingParaStyle.paragraphSpacing = headingSize * 0.8
+        headingParaStyle.alignment = .natural
+
+        result.append(NSAttributedString(string: "Contents\n", attributes: [
+            .font: headingFont,
+            .foregroundColor: textColor,
+            .paragraphStyle: headingParaStyle
+        ]))
+
+        func appendEntries(_ entries: [EPUBTOCEntry], level: Int) {
+            for entry in entries {
+                let indent = CGFloat(level) * fontSize * 1.5
+                let paraStyle = NSMutableParagraphStyle()
+                paraStyle.lineHeightMultiple = lineHeight
+                paraStyle.paragraphSpacing = fontSize * 0.5
+                paraStyle.headIndent = indent
+                paraStyle.firstLineHeadIndent = indent
+                paraStyle.alignment = .natural
+
+                let fullPath = rootDirectoryPath.isEmpty ? entry.href : rootDirectoryPath + "/" + entry.href
+                let linkURL = extractedURL.appendingPathComponent(fullPath)
+
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: level == 0 ? boldFont : bodyFont,
+                    .foregroundColor: accentColor,
+                    .paragraphStyle: paraStyle,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .link: linkURL
+                ]
+
+                result.append(NSAttributedString(string: entry.title + "\n", attributes: attrs))
+
+                if !entry.children.isEmpty {
+                    appendEntries(entry.children, level: level + 1)
+                }
+            }
+        }
+
+        appendEntries(tocEntries, level: 0)
+
+        return (result, OffsetMap(), PlainTextToAttrStringMap())
+    }
+
+    /// Load a navigation document spine item using custom TOC rendering.
+    private func loadNavChapter(at spineIndex: Int, startAtEnd: Bool = false, progression: Double? = nil) {
+        guard let parser = parser else { return }
+
+        chapterLoadTask?.cancel()
+
+        currentSpineIndex = spineIndex
+        onSpineIndexChanged?(spineIndex)
+
+        if let vcView = pageViewController?.view, vcView.bounds.width > 0 {
+            viewportSize = vcView.bounds.size
+        }
+
+        let settings = currentSettings ?? ReaderSettings()
+        let viewport = viewportSize
+        let gutterWidth = spreadGutterWidth
+        let resolvedLayout = settings.resolvedLayout(for: viewport.width)
+
+        // If already cached, display immediately
+        if let cachedPages = chapterPages[spineIndex],
+           let cachedString = chapterStrings[spineIndex] {
+            displayChapter(
+                spineIndex: spineIndex,
+                nodes: [],
+                attrString: cachedString,
+                offsetMap: chapterOffsetMaps[spineIndex] ?? OffsetMap(),
+                plainTextMap: chapterPlainTextMaps[spineIndex] ?? PlainTextToAttrStringMap(),
+                pages: cachedPages,
+                mediaAttachments: [],
+                floatingElements: [],
+                settings: settings,
+                startAtEnd: startAtEnd,
+                progression: progression
+            )
+            return
+        }
+
+        isLoadingChapter = true
+        pageViewController?.showLoadingIndicator(true)
+
+        // Build TOC attributed string (requires main actor for parser access)
+        let isTwoPage = resolvedLayout == .twoPage
+        let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+        let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+        let contentWidth = pageWidth - insets.left - insets.right
+        let contentHeight = viewport.height - insets.top - insets.bottom
+        let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+        let (attrString, offsetMap, plainTextMap) = buildTOCAttributedString(
+            settings: settings,
+            contentWidth: max(1, contentWidth),
+            contentHeight: max(1, contentHeight)
+        )
+
+        // Paginate in background
+        chapterLoadTask = Task { [weak self] in
+            let pages = await Task.detached {
+                NativePaginationEngine.paginate(
+                    attributedString: attrString,
+                    viewportSize: pageViewportSize,
+                    contentInsets: insets
+                )
+            }.value
+
+            guard !Task.isCancelled, let self else { return }
+
+            await MainActor.run {
+                self.parsedChapters[spineIndex] = []
+                self.chapterStrings[spineIndex] = attrString
+                self.chapterOffsetMaps[spineIndex] = offsetMap
+                self.chapterPlainTextMaps[spineIndex] = plainTextMap
+                self.chapterPages[spineIndex] = pages
+                self.chapterMediaAttachments[spineIndex] = []
+                self.chapterFloatingElements[spineIndex] = []
+
+                self.isLoadingChapter = false
+                self.pageViewController?.showLoadingIndicator(false)
+
+                self.displayChapter(
+                    spineIndex: spineIndex,
+                    nodes: [],
+                    attrString: attrString,
+                    offsetMap: offsetMap,
+                    plainTextMap: plainTextMap,
+                    pages: pages,
+                    mediaAttachments: [],
+                    floatingElements: [],
+                    settings: settings,
+                    startAtEnd: startAtEnd,
+                    progression: progression
+                )
+            }
+        }
     }
 
     // MARK: - Fixed Layout (FXL) Chapter Loading
@@ -898,27 +1167,86 @@ class NativeEPUBEngine: ReaderEngine {
         let gutterWidth = spreadGutterWidth
         let resolvedLayout = settings.resolvedLayout(for: viewport.width)
 
-        // Collect chapter URLs on main actor before going to background
+        let isTwoPage = resolvedLayout == .twoPage
+        let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+        let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+        let contentWidth = pageWidth - insets.left - insets.right
+        let contentHeight = viewport.height - insets.top - insets.bottom
+        let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+        // Categorize spine items: nav documents vs regular chapters.
         var chapterURLs: [(index: Int, url: URL)] = []
+        var navDocIndices: [Int] = []
+
         for index in 0..<spineCount {
-            // Skip chapters already paginated
             if chapterPages[index] != nil { continue }
+
+            if isNavDocument(at: index) {
+                navDocIndices.append(index)
+                continue
+            }
+
             guard let url = parser.resolveSpineItemURL(at: index) else { continue }
             chapterURLs.append((index, url))
         }
 
-        guard !chapterURLs.isEmpty else { return }
+        // Build and paginate nav document TOC strings off main thread
+        if !navDocIndices.isEmpty {
+            let tocEntries = parser.package.tocItems
+            let extractedURL = parser.extractedURL
+            let rootDir = parser.package.rootDirectoryPath
 
-        // Process all chapters in a single detached task
+            let tocFontSize = CGFloat(settings.fontSize)
+            let tocLineHeight = CGFloat(settings.lineHeight)
+            let tocTextColor = settings.theme.textColor
+            let tocBodyFont = settings.nativeFont
+            let tocBoldFont = settings.nativeBoldFont
+
+            let navResults: [(index: Int, attrString: NSAttributedString, offsetMap: OffsetMap, plainTextMap: PlainTextToAttrStringMap, pages: [PageInfo])] = await Task.detached {
+                var results: [(index: Int, attrString: NSAttributedString, offsetMap: OffsetMap, plainTextMap: PlainTextToAttrStringMap, pages: [PageInfo])] = []
+                for navIndex in navDocIndices {
+                    let (attrString, offsetMap, plainTextMap) = Self.buildTOCAttributedStringStatic(
+                        tocEntries: tocEntries,
+                        fontSize: tocFontSize,
+                        lineHeight: tocLineHeight,
+                        textColor: tocTextColor,
+                        bodyFont: tocBodyFont,
+                        boldFont: tocBoldFont,
+                        extractedURL: extractedURL,
+                        rootDirectoryPath: rootDir
+                    )
+                    let pages = NativePaginationEngine.paginate(
+                        attributedString: attrString,
+                        viewportSize: pageViewportSize,
+                        contentInsets: insets
+                    )
+                    results.append((navIndex, attrString, offsetMap, plainTextMap, pages))
+                }
+                return results
+            }.value
+
+            for item in navResults {
+                parsedChapters[item.index] = []
+                chapterStrings[item.index] = item.attrString
+                chapterOffsetMaps[item.index] = item.offsetMap
+                chapterPlainTextMaps[item.index] = item.plainTextMap
+                chapterPages[item.index] = item.pages
+                chapterMediaAttachments[item.index] = []
+                chapterFloatingElements[item.index] = []
+                if item.index < spinePageCounts.count {
+                    spinePageCounts[item.index] = item.pages.count
+                }
+            }
+        }
+
+        guard !chapterURLs.isEmpty else {
+            totalPositions = spinePageCounts.reduce(0, +)
+            return
+        }
+
+        // Process regular chapters in a single detached task
         let results: [(index: Int, result: ChapterBuildResult)] = await Task.detached {
             var output: [(index: Int, result: ChapterBuildResult)] = []
-
-            let isTwoPage = resolvedLayout == .twoPage
-            let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
-            let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
-            let contentWidth = pageWidth - insets.left - insets.right
-            let contentHeight = viewport.height - insets.top - insets.bottom
-            let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
 
             for (index, chapterURL) in chapterURLs {
                 guard !Task.isCancelled else { break }
@@ -1027,6 +1355,45 @@ class NativeEPUBEngine: ReaderEngine {
         for index in indices {
             guard index >= 0, index < parser.package.spine.count,
                   chapterPages[index] == nil else { continue }
+
+            // Handle nav documents on the main actor
+            if isNavDocument(at: index) {
+                let isTwoPage = resolvedLayout == .twoPage
+                let pageWidth = isTwoPage ? (viewport.width - gutterWidth) / 2 : viewport.width
+                let insets = NativePaginationEngine.insets(for: pageWidth, isTwoPageMode: isTwoPage)
+                let contentWidth = pageWidth - insets.left - insets.right
+                let contentHeight = viewport.height - insets.top - insets.bottom
+                let pageViewportSize = CGSize(width: pageWidth, height: viewport.height)
+
+                let (attrString, offsetMap, plainTextMap) = buildTOCAttributedString(
+                    settings: settings,
+                    contentWidth: max(1, contentWidth),
+                    contentHeight: max(1, contentHeight)
+                )
+
+                Task.detached { [weak self] in
+                    let pages = NativePaginationEngine.paginate(
+                        attributedString: attrString,
+                        viewportSize: pageViewportSize,
+                        contentInsets: insets
+                    )
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.parsedChapters[index] = []
+                        self.chapterStrings[index] = attrString
+                        self.chapterOffsetMaps[index] = offsetMap
+                        self.chapterPlainTextMaps[index] = plainTextMap
+                        self.chapterPages[index] = pages
+                        self.chapterMediaAttachments[index] = []
+                        self.chapterFloatingElements[index] = []
+                        if index < self.spinePageCounts.count {
+                            self.spinePageCounts[index] = pages.count
+                        }
+                        self.totalPositions = self.spinePageCounts.reduce(0, +)
+                    }
+                }
+                continue
+            }
 
             Task.detached { [weak self] in
                 guard let self = self else { return }
@@ -1299,76 +1666,80 @@ class NativeEPUBEngine: ReaderEngine {
 
     /// Scan spine XHTML files for heading elements (h1–h3) to build a fallback TOC.
     private func buildTOCFromHeadings(parser: EPUBParser) async -> [TOCItem] {
-        var items: [TOCItem] = []
+        let spine = parser.package.spine
+        let manifest = parser.package.manifest
 
-        for (index, spineItem) in parser.package.spine.enumerated() {
-            guard let manifest = parser.package.manifest[spineItem.idref],
-                  let chapterURL = parser.resolveSpineItemURL(at: index),
-                  let data = try? Data(contentsOf: chapterURL),
-                  let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
-                continue
-            }
+        return await Task.detached {
+            var items: [TOCItem] = []
 
-            do {
-                let doc = try SwiftSoup.parse(html)
-                let headings = try doc.select("h1, h2, h3")
+            for (index, spineItem) in spine.enumerated() {
+                guard let manifestItem = manifest[spineItem.idref],
+                      let chapterURL = parser.resolveSpineItemURL(at: index),
+                      let data = try? Data(contentsOf: chapterURL),
+                      let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    continue
+                }
 
-                for heading in headings.array() {
-                    let text = try heading.text().trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
+                do {
+                    let doc = try SwiftSoup.parse(html)
+                    let headings = try doc.select("h1, h2, h3")
 
-                    let tagName = heading.tagName()
-                    let level: Int
-                    switch tagName {
-                    case "h1": level = 0
-                    case "h2": level = 1
-                    case "h3": level = 2
-                    default: level = 0
+                    for heading in headings.array() {
+                        let text = try heading.text().trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { continue }
+
+                        let tagName = heading.tagName()
+                        let level: Int
+                        switch tagName {
+                        case "h1": level = 0
+                        case "h2": level = 1
+                        case "h3": level = 2
+                        default: level = 0
+                        }
+
+                        let href = manifestItem.href
+                        let item = TOCItem(
+                            id: "\(href)#heading-\(items.count)",
+                            title: text,
+                            location: ReaderLocation(
+                                href: href,
+                                pageIndex: nil,
+                                progression: 0,
+                                totalProgression: 0,
+                                title: text
+                            ),
+                            level: level,
+                            children: []
+                        )
+                        items.append(item)
                     }
 
-                    let href = manifest.href
-                    let item = TOCItem(
-                        id: "\(href)#heading-\(items.count)",
-                        title: text,
-                        location: ReaderLocation(
-                            href: href,
-                            pageIndex: nil,
-                            progression: 0,
-                            totalProgression: 0,
-                            title: text
-                        ),
-                        level: level,
-                        children: []
-                    )
-                    items.append(item)
+                    if headings.isEmpty() {
+                        let filename = chapterURL.deletingPathExtension().lastPathComponent
+                            .replacingOccurrences(of: "_", with: " ")
+                            .replacingOccurrences(of: "-", with: " ")
+                        let capitalized = filename.prefix(1).uppercased() + filename.dropFirst()
+                        items.append(TOCItem(
+                            id: manifestItem.href,
+                            title: capitalized,
+                            location: ReaderLocation(
+                                href: manifestItem.href,
+                                pageIndex: nil,
+                                progression: 0,
+                                totalProgression: 0,
+                                title: capitalized
+                            ),
+                            level: 0,
+                            children: []
+                        ))
+                    }
+                } catch {
+                    // Skip chapters with parse errors
                 }
-
-                // If no headings found in this spine item, add a generic entry using filename
-                if headings.isEmpty() {
-                    let filename = chapterURL.deletingPathExtension().lastPathComponent
-                        .replacingOccurrences(of: "_", with: " ")
-                        .replacingOccurrences(of: "-", with: " ")
-                    let capitalized = filename.prefix(1).uppercased() + filename.dropFirst()
-                    items.append(TOCItem(
-                        id: manifest.href,
-                        title: capitalized,
-                        location: ReaderLocation(
-                            href: manifest.href,
-                            pageIndex: nil,
-                            progression: 0,
-                            totalProgression: 0,
-                            title: capitalized
-                        ),
-                        level: 0,
-                        children: []
-                    ))
-                }
-            } catch {
-                logger.warning("Failed to parse headings from \(chapterURL.lastPathComponent): \(error)")
             }
-        }
 
-        return items
+            return items
+        }.value
     }
 
     func applyHighlights(_ highlights: [BookHighlight]) {
@@ -1380,30 +1751,34 @@ class NativeEPUBEngine: ReaderEngine {
         guard let parser = parser else { return }
         let manifestItem = parser.manifestItem(forSpineIndex: currentSpineIndex)
         let currentHref = manifestItem?.href ?? ""
+        let highlights = pendingHighlights
+        let readAlongRange = readAlongHighlightRange
 
-        // Filter highlights for current chapter
-        let chapterHighlights = pendingHighlights.filter { highlight in
-            guard let data = highlight.locatorJSON.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let href = json["href"] as? String else { return false }
-            return href == currentHref || currentHref.hasSuffix(href) || href.hasSuffix(currentHref)
+        Task.detached { [weak self] in
+            // Filter and parse highlights off main thread
+            let ranges: [(id: String, range: NSRange, color: UIColor)] = highlights.compactMap { highlight in
+                guard let data = highlight.locatorJSON.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let href = json["href"] as? String else { return nil }
+
+                guard href == currentHref || currentHref.hasSuffix(href) || href.hasSuffix(currentHref) else {
+                    return nil
+                }
+
+                guard let range = json["range"] as? [String: Any],
+                      let startOffset = range["startOffset"] as? Int,
+                      let endOffset = range["endOffset"] as? Int else { return nil }
+
+                let nsRange = NSRange(location: startOffset, length: endOffset - startOffset)
+                let color = UIColor(hex: highlight.color) ?? .yellow
+
+                return (id: highlight.id, range: nsRange, color: color)
+            }
+
+            await MainActor.run {
+                self?.pageViewController?.applyHighlights(ranges, readAlongRange: readAlongRange)
+            }
         }
-
-        // Convert to native highlight ranges
-        let ranges: [(id: String, range: NSRange, color: UIColor)] = chapterHighlights.compactMap { highlight in
-            guard let data = highlight.locatorJSON.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let range = json["range"] as? [String: Any],
-                  let startOffset = range["startOffset"] as? Int,
-                  let endOffset = range["endOffset"] as? Int else { return nil }
-
-            let nsRange = NSRange(location: startOffset, length: endOffset - startOffset)
-            let color = UIColor(hex: highlight.color) ?? .yellow
-
-            return (id: highlight.id, range: nsRange, color: color)
-        }
-
-        pageViewController?.applyHighlights(ranges, readAlongRange: readAlongHighlightRange)
     }
 
     /// Navigate to the page containing the given character range in the attributed string.

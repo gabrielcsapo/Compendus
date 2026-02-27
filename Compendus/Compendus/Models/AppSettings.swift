@@ -39,6 +39,27 @@ class AppSettings {
         }
     }
 
+    /// Auto-generate TTS read-along for downloaded EPUBs
+    var autoGenerateTTS: Bool {
+        didSet {
+            UserDefaults.standard.set(autoGenerateTTS, forKey: "autoGenerateTTS")
+        }
+    }
+
+    /// Auto-transcribe downloaded audiobooks
+    var autoTranscribeAudiobooks: Bool {
+        didSet {
+            UserDefaults.standard.set(autoTranscribeAudiobooks, forKey: "autoTranscribeAudiobooks")
+        }
+    }
+
+    /// Only run background generation while charging
+    var backgroundProcessingChargingOnly: Bool {
+        didSet {
+            UserDefaults.standard.set(backgroundProcessingChargingOnly, forKey: "bgProcessingChargingOnly")
+        }
+    }
+
     /// Computed color scheme for the app
     var colorScheme: ColorScheme? {
         switch colorSchemePreference {
@@ -57,6 +78,9 @@ class AppSettings {
         self.colorSchemePreference = ColorSchemePreference(rawValue: UserDefaults.standard.string(forKey: "colorScheme") ?? "system") ?? .system
         self.lastSyncTime = UserDefaults.standard.object(forKey: "lastSyncTime") as? Date
         self.hapticsEnabled = UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
+        self.autoGenerateTTS = UserDefaults.standard.object(forKey: "autoGenerateTTS") as? Bool ?? false
+        self.autoTranscribeAudiobooks = UserDefaults.standard.object(forKey: "autoTranscribeAudiobooks") as? Bool ?? false
+        self.backgroundProcessingChargingOnly = UserDefaults.standard.object(forKey: "bgProcessingChargingOnly") as? Bool ?? true
     }
 
     /// Update the last sync time to now

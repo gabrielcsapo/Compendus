@@ -32,6 +32,11 @@ class StorageManager {
         documentsURL.appendingPathComponent("cover-cache", isDirectory: true)
     }
 
+    /// TTS audio cache directory URL
+    var ttsCacheURL: URL {
+        documentsURL.appendingPathComponent("tts-cache", isDirectory: true)
+    }
+
     init() {
         // Create directories if needed
         try? fileManager.createDirectory(at: booksURL, withIntermediateDirectories: true)
@@ -54,9 +59,14 @@ class StorageManager {
         return directorySize(at: coverCacheURL)
     }
 
+    /// Get total storage used by TTS audio cache
+    func ttsCacheSize() -> Int64 {
+        return directorySize(at: ttsCacheURL)
+    }
+
     /// Get total storage used by the app
     func totalStorageUsed() -> Int64 {
-        return totalBooksStorageUsed() + comicCacheSize() + coverCacheSize()
+        return totalBooksStorageUsed() + comicCacheSize() + coverCacheSize() + ttsCacheSize()
     }
 
     /// Get formatted storage string
@@ -83,6 +93,15 @@ class StorageManager {
     /// Clear cover cache
     func clearCoverCache() throws {
         let contents = try fileManager.contentsOfDirectory(at: coverCacheURL, includingPropertiesForKeys: nil)
+        for url in contents {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
+    /// Clear TTS audio cache
+    func clearTTSCache() throws {
+        guard fileManager.fileExists(atPath: ttsCacheURL.path) else { return }
+        let contents = try fileManager.contentsOfDirectory(at: ttsCacheURL, includingPropertiesForKeys: nil)
         for url in contents {
             try fileManager.removeItem(at: url)
         }

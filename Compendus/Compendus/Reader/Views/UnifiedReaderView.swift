@@ -24,6 +24,8 @@ struct UnifiedReaderView: View {
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(APIService.self) private var apiService
     @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
 
     // Engine
     @State private var engine: (any ReaderEngine)?
@@ -62,14 +64,10 @@ struct UnifiedReaderView: View {
     @State private var originalBrightness: Double = 1.0
     #endif
 
-    // Read-along
+    // Read-along / TTS pill
     @State private var matchingAudiobook: DownloadedBook?
-    @State private var showReadAlongBanner = false
-    @State private var readAlongBannerDismissed = false
-
-    // TTS read-aloud
-    @State private var showTTSBanner = false
-    @State private var ttsBannerDismissed = false
+    @State private var showReadAlongPill = false
+    @State private var readAlongPillDismissed = false
 
     // Footnote popover
     @State private var showingFootnote = false
@@ -406,46 +404,44 @@ struct UnifiedReaderView: View {
                     )
                 }
 
-                // Read-along / TTS banner (top, below top bar)
-                if !readAlongService.isActive {
-                    VStack {
-                        if showReadAlongBanner && !readAlongBannerDismissed {
-                            ReadAlongBanner(
-                                mode: .audiobook(
-                                    title: matchingAudiobook?.title ?? "",
-                                    hasTranscript: matchingAudiobook?.hasTranscript ?? false
-                                ),
-                                onStart: { activateReadAlong() },
-                                onDismiss: {
-                                    withAnimation { readAlongBannerDismissed = true }
-                                }
-                            )
-                            .padding(.top, topSafeAreaInset + 56)
-                        } else if showTTSBanner && !ttsBannerDismissed {
-                            ReadAlongBanner(
-                                mode: .tts,
-                                onStart: { activateTTSReadAloud() },
-                                onDismiss: {
-                                    withAnimation { ttsBannerDismissed = true }
-                                }
-                            )
-                            .padding(.top, topSafeAreaInset + 56)
-                        }
-                        Spacer()
-                    }
-                }
-
-                // Read-along mini player (bottom)
-                if readAlongService.isActive {
+                // Read-along / TTS pill (bottom)
+                if (showReadAlongPill && !readAlongPillDismissed) || readAlongService.isActive {
                     VStack {
                         Spacer()
-                        ReadAlongMiniPlayer()
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, showingOverlay ? 60 : 16)
+                        ReadAlongPill(
+                            availableSources: readAlongPillSources,
+                            bookId: book.id,
+                            audiobookHasTranscript: matchingAudiobook?.hasTranscript ?? true,
+                            onStartAudiobook: { activateReadAlong() },
+                            onStartTTS: { activateTTSReadAloud() },
+                            onDismiss: {
+                                withAnimation { readAlongPillDismissed = true }
+                            },
+                            onChangeVoice: { _ in restartTTSWithNewVoice() },
+                            onDownloadForLater: { queueTTSPreGeneration() }
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, showingOverlay ? 60 : 16)
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                // Full-screen loading overlay while engine initializes content
+                if !engine.isReady {
+                    ZStack {
+                        Color(uiColor: readerSettings.theme.backgroundColor)
+                            .ignoresSafeArea()
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                            Text("Loading...")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .transition(.opacity)
+                }
             }
+            .animation(.easeInOut(duration: 0.3), value: engine.isReady)
         }
     }
 
@@ -727,6 +723,13 @@ struct UnifiedReaderView: View {
         }
     }
 
+    /// Pauses read-along playback if currently active (any screen touch should pause).
+    private func pauseReadAlongIfActive() {
+        if readAlongService.state == .active {
+            readAlongService.togglePlayPause()
+        }
+    }
+
     private func hideOverlayIfShowing() {
         guard showingOverlay else { return }
         overlayHideTask?.cancel()
@@ -793,19 +796,25 @@ struct UnifiedReaderView: View {
         nativeEngine.applyHighlights(highlights)
         nativeEngine.applySettings(readerSettings)
 
-        // Load TOC
-        tocItems = await nativeEngine.tableOfContents()
-
         readerState = .ready
+
+        // Load TOC in background — not needed until user opens TOC panel
+        Task {
+            tocItems = await nativeEngine.tableOfContents()
+        }
         showHighlightSetupIfNeeded()
 
-        // Check for matching audiobook for read-along
-        if let audiobook = readAlongService.findMatchingAudiobook(for: book, in: modelContext) {
-            matchingAudiobook = audiobook
-            withAnimation { showReadAlongBanner = true }
-        } else if pocketTTSModelManager.isModelAvailable {
-            // No matching audiobook — offer TTS read-aloud if model is available
-            withAnimation { showTTSBanner = true }
+        // Check for matching audiobook / TTS availability (defer to avoid blocking)
+        Task.detached(priority: .userInitiated) { [book, modelContext, readAlongService, pocketTTSModelManager] in
+            let audiobook = readAlongService.findMatchingAudiobook(for: book, in: modelContext)
+            await MainActor.run {
+                if let audiobook {
+                    self.matchingAudiobook = audiobook
+                }
+                if self.matchingAudiobook != nil || pocketTTSModelManager.isModelAvailable {
+                    withAnimation { self.showReadAlongPill = true }
+                }
+            }
         }
     }
 
@@ -844,6 +853,7 @@ struct UnifiedReaderView: View {
     private func configureEngineCallbacks(_ engine: any ReaderEngine) {
         engine.onSelectionChanged = { [self] selection in
             if let selection = selection {
+                pauseReadAlongIfActive()
                 pendingSelection = selection
                 selectionFrame = selection.frame
                 showingFloatingToolbar = true
@@ -861,6 +871,7 @@ struct UnifiedReaderView: View {
         // PDF: center tap to toggle overlay
         if let pdfEngine = engine as? PDFEngine {
             pdfEngine.onCenterTap = { [self] in
+                pauseReadAlongIfActive()
                 toggleOverlay()
             }
         }
@@ -868,14 +879,17 @@ struct UnifiedReaderView: View {
         // EPUB: tap zones for page navigation + center tap to toggle overlay
         if let nativeEngine = engine as? NativeEPUBEngine {
             nativeEngine.onTapZone = { [self] zone in
+                pauseReadAlongIfActive()
                 switch zone {
                 case "left":
                     hideOverlayIfShowing()
                     showingFloatingToolbar = false
+                    dismissPillIfAvailable()
                     Task { await self.engine?.goBackward() }
                 case "right":
                     hideOverlayIfShowing()
                     showingFloatingToolbar = false
+                    dismissPillIfAvailable()
                     Task { await self.engine?.goForward() }
                 case "center":
                     toggleOverlay()
@@ -916,7 +930,7 @@ struct UnifiedReaderView: View {
         if audiobook.hasTranscript {
             // Transcript already exists — start immediately
             withAnimation {
-                showReadAlongBanner = false
+                showReadAlongPill = false
             }
             readAlongService.activate(
                 ebook: book,
@@ -928,7 +942,7 @@ struct UnifiedReaderView: View {
         } else {
             // Need to transcribe first — start transcription, then activate when done
             withAnimation {
-                showReadAlongBanner = false
+                showReadAlongPill = false
             }
             readAlongService.state = .loading
             guard let fileURL = audiobook.fileURL else { return }
@@ -982,7 +996,7 @@ struct UnifiedReaderView: View {
         guard let nativeEngine = engine as? NativeEPUBEngine else { return }
 
         withAnimation {
-            showTTSBanner = false
+            showReadAlongPill = false
         }
 
         // Show loading state immediately — model loading can take a moment
@@ -996,7 +1010,8 @@ struct UnifiedReaderView: View {
                         ebook: book,
                         engine: nativeEngine,
                         ttsContext: context,
-                        voiceIndex: pocketTTSModelManager.selectedVoiceIndex
+                        voiceIndex: pocketTTSModelManager.selectedVoiceIndex,
+                        audioCache: ttsAudioCache
                     )
                 }
             } catch {
@@ -1005,6 +1020,46 @@ struct UnifiedReaderView: View {
                 }
             }
         }
+    }
+
+    /// Sources available for the pill based on current book state.
+    private var readAlongPillSources: [ReadAlongPill.Source] {
+        var sources: [ReadAlongPill.Source] = []
+        if matchingAudiobook != nil {
+            sources.append(.audiobook)
+        }
+        if pocketTTSModelManager.isModelAvailable {
+            let cached = ttsAudioCache.hasCachedAudio(
+                bookId: book.id,
+                spineIndex: 0,
+                voiceId: Int(pocketTTSModelManager.selectedVoiceIndex)
+            )
+            sources.append(cached ? .ttsCached : .tts)
+        }
+        return sources
+    }
+
+    /// Dismiss the pill if it's in the "available" (not active) state.
+    private func dismissPillIfAvailable() {
+        guard !readAlongService.isActive, showReadAlongPill, !readAlongPillDismissed else { return }
+        withAnimation { readAlongPillDismissed = true }
+    }
+
+    /// Restart TTS with the currently selected voice (after voice change).
+    private func restartTTSWithNewVoice() {
+        guard readAlongService.isTTSMode else { return }
+        readAlongService.deactivate()
+        // Small delay to let deactivation clean up before restarting
+        Task {
+            try? await Task.sleep(for: .milliseconds(200))
+            activateTTSReadAloud()
+        }
+    }
+
+    /// Queue TTS audio pre-generation for all chapters.
+    private func queueTTSPreGeneration() {
+        let voiceId = Int(pocketTTSModelManager.selectedVoiceIndex)
+        backgroundProcessingManager.enqueue(.ttsGeneration(bookId: book.id, voiceId: voiceId))
     }
 
     // MARK: - Highlights

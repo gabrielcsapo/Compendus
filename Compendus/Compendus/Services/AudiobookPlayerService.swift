@@ -37,7 +37,6 @@ class AudiobookPlayer: NSObject {
 
     override init() {
         super.init()
-        setupAudioSession()
         setupRemoteCommands()
         observeAppLifecycle()
         observeAudioInterruptions()
@@ -53,6 +52,7 @@ class AudiobookPlayer: NSObject {
         }
 
         currentBook = book
+        setupAudioSession()
 
         guard let fileURL = book.fileURL else { return }
         await load(url: fileURL, chapters: book.chapters)
@@ -203,8 +203,7 @@ class AudiobookPlayer: NSObject {
 
     private func setupAudioSession() {
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-            try AVAudioSession.sharedInstance().setActive(true)
+            try AudioSessionManager.activate(for: .audiobook)
         } catch {
             print("Audio session setup failed: \(error)")
         }

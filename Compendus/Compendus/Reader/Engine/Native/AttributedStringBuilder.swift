@@ -274,24 +274,24 @@ class AttributedStringBuilder {
         }
 
         if let indent = blockStyle.textIndent {
-            paraStyle.firstLineHeadIndent = indent.resolve(relativeTo: fontSize)
+            paraStyle.firstLineHeadIndent = max(0, indent.resolve(relativeTo: fontSize))
         } else if depth > 0 {
             paraStyle.firstLineHeadIndent = fontSize * 1.2
         }
 
         if let marginTop = blockStyle.marginTop {
-            paraStyle.paragraphSpacingBefore = marginTop.resolve(relativeTo: fontSize)
+            paraStyle.paragraphSpacingBefore = max(0, marginTop.resolve(relativeTo: fontSize))
         }
         if let marginBottom = blockStyle.marginBottom {
-            paraStyle.paragraphSpacing = marginBottom.resolve(relativeTo: fontSize)
+            paraStyle.paragraphSpacing = max(0, marginBottom.resolve(relativeTo: fontSize))
         }
 
         if let marginLeft = blockStyle.marginLeft {
-            let leftIndent = marginLeft.resolve(relativeTo: fontSize)
+            let leftIndent = max(0, marginLeft.resolve(relativeTo: fontSize))
             paraStyle.headIndent = leftIndent
             // Offset firstLineHeadIndent by the left margin if text-indent was also set
             if let indent = blockStyle.textIndent {
-                paraStyle.firstLineHeadIndent = leftIndent + indent.resolve(relativeTo: fontSize)
+                paraStyle.firstLineHeadIndent = max(0, leftIndent + indent.resolve(relativeTo: fontSize))
             } else if depth == 0 {
                 paraStyle.firstLineHeadIndent = leftIndent
             }
@@ -335,10 +335,10 @@ class AttributedStringBuilder {
         }
 
         if let marginTop = blockStyle.marginTop {
-            paraStyle.paragraphSpacingBefore = marginTop.resolve(relativeTo: fontSize)
+            paraStyle.paragraphSpacingBefore = max(0, marginTop.resolve(relativeTo: fontSize))
         }
         if let marginBottom = blockStyle.marginBottom {
-            paraStyle.paragraphSpacing = marginBottom.resolve(relativeTo: fontSize)
+            paraStyle.paragraphSpacing = max(0, marginBottom.resolve(relativeTo: fontSize))
         }
 
         appendRuns(runs, to: result, baseFont: headingFont, paragraphStyle: paraStyle)
@@ -709,8 +709,29 @@ class AttributedStringBuilder {
             // Add list item content
             for (childIndex, child) in item.children.enumerated() {
                 switch child {
-                case .paragraph(let runs, _):
-                    appendRuns(runs, to: result, baseFont: font, paragraphStyle: paraStyle)
+                case .paragraph(let runs, let itemStyle):
+                    // Apply list item's own CSS styles (alignment, margins) with clamping
+                    let itemParaStyle = paraStyle.mutableCopy() as! NSMutableParagraphStyle
+                    if let align = itemStyle.textAlign {
+                        switch align {
+                        case .center: itemParaStyle.alignment = .center
+                        case .right: itemParaStyle.alignment = .right
+                        case .left: itemParaStyle.alignment = .left
+                        case .justify: itemParaStyle.alignment = .justified
+                        }
+                    }
+                    if let marginTop = itemStyle.marginTop {
+                        itemParaStyle.paragraphSpacingBefore = max(0, marginTop.resolve(relativeTo: fontSize))
+                    }
+                    if let marginBottom = itemStyle.marginBottom {
+                        itemParaStyle.paragraphSpacing = max(0, marginBottom.resolve(relativeTo: fontSize))
+                    }
+                    if let marginLeft = itemStyle.marginLeft {
+                        let extra = max(0, marginLeft.resolve(relativeTo: fontSize))
+                        itemParaStyle.headIndent = baseIndent + extra
+                        itemParaStyle.firstLineHeadIndent = itemParaStyle.firstLineHeadIndent + extra
+                    }
+                    appendRuns(runs, to: result, baseFont: font, paragraphStyle: itemParaStyle)
                     result.append(NSAttributedString(string: "\n"))
                 default:
                     if childIndex == 0 && !bullet.isEmpty {

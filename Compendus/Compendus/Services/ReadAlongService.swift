@@ -11,7 +11,7 @@ import Foundation
 import UIKit
 import SwiftData
 import AVFoundation
-import NaturalLanguage
+import MediaPlayer
 
 import os.log
 
@@ -83,6 +83,7 @@ class ReadAlongService {
     // MARK: - TTS References
 
     private var pocketTTSContext: PocketTTSContext?
+    private var ttsAudioCache: TTSAudioCache?
     @ObservationIgnored private var ttsVoiceIndex: UInt32 = 0
 
     // MARK: - Internal State
@@ -104,12 +105,7 @@ class ReadAlongService {
     // MARK: - TTS Internal State
 
     /// Sentence spans for the current chapter being narrated.
-    struct SentenceSpan {
-        let text: String
-        let plainTextRange: NSRange
-        var audioStartTime: Double = 0  // cumulative start within chapter
-        var audioEndTime: Double = 0    // cumulative end within chapter
-    }
+    typealias SentenceSpan = TextProcessingUtils.SentenceSpan
 
     @ObservationIgnored private var ttsAudioEngine: AVAudioEngine?
     @ObservationIgnored private var ttsPlayerNode: AVAudioPlayerNode?
@@ -754,7 +750,8 @@ class ReadAlongService {
         ebook: DownloadedBook,
         engine: NativeEPUBEngine,
         ttsContext: PocketTTSContext,
-        voiceIndex: UInt32
+        voiceIndex: UInt32,
+        audioCache: TTSAudioCache? = nil
     ) {
         logger.info("Activating read-along (TTS mode): '\(ebook.title)' voice=\(voiceIndex)")
 
@@ -763,6 +760,7 @@ class ReadAlongService {
         self.engine = engine
         self.pocketTTSContext = ttsContext
         self.ttsVoiceIndex = voiceIndex
+        self.ttsAudioCache = audioCache
 
         state = .loading
         activeSentenceRange = nil
@@ -813,39 +811,126 @@ class ReadAlongService {
     // MARK: - TTS Audio Engine Setup
 
     private func setupTTSAudioEngine() throws {
-        // Playback category for TTS audio
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default)
-        try session.setActive(true)
+        try AudioSessionManager.activate(for: .tts)
 
         let audioEngine = AVAudioEngine()
         let playerNode = AVAudioPlayerNode()
+        let timePitch = AVAudioUnitTimePitch()
 
         audioEngine.attach(playerNode)
+        audioEngine.attach(timePitch)
 
-        // PocketTTS outputs 24kHz mono — no resampling needed.
-        // The mainMixerNode handles upsampling to hardware rate internally.
+        // PocketTTS outputs 24kHz mono.
         let engineFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
-        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: engineFormat)
+
+        // Chain: playerNode → timePitch → mainMixer
+        // TimePitch enables speed control without pitch distortion.
+        audioEngine.connect(playerNode, to: timePitch, format: engineFormat)
+        audioEngine.connect(timePitch, to: audioEngine.mainMixerNode, format: engineFormat)
+        timePitch.rate = ttsPlaybackRate
 
         try audioEngine.start()
 
         self.ttsAudioEngine = audioEngine
         self.ttsPlayerNode = playerNode
-        self.ttsTimePitchNode = nil
+        self.ttsTimePitchNode = timePitch
         self.ttsEngineFormat = engineFormat
 
-        logger.info("TTS audio engine started (24kHz mono)")
+        setupTTSRemoteCommands()
+        logger.info("TTS audio engine started (24kHz mono, rate: \(self.ttsPlaybackRate)x)")
     }
 
     private func deactivateAudioSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        AudioSessionManager.deactivate()
+        clearTTSRemoteCommands()
+    }
+
+    // MARK: - TTS Remote Commands
+
+    @ObservationIgnored private var ttsRemoteCommandTargets: [Any] = []
+
+    private func setupTTSRemoteCommands() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        let playTarget = commandCenter.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.toggleTTSPlayPause()
+            }
+            return .success
+        }
+
+        let pauseTarget = commandCenter.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.toggleTTSPlayPause()
+            }
+            return .success
+        }
+
+        commandCenter.skipForwardCommand.preferredIntervals = [30]
+        let skipFwdTarget = commandCenter.skipForwardCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.ttsSkipForward()
+            }
+            return .success
+        }
+
+        commandCenter.skipBackwardCommand.preferredIntervals = [15]
+        let skipBwdTarget = commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.ttsSkipBackward()
+            }
+            return .success
+        }
+
+        ttsRemoteCommandTargets = [playTarget, pauseTarget, skipFwdTarget, skipBwdTarget]
+
+        updateTTSNowPlayingInfo()
+    }
+
+    private func clearTTSRemoteCommands() {
+        let commandCenter = MPRemoteCommandCenter.shared()
+        for target in ttsRemoteCommandTargets {
+            commandCenter.playCommand.removeTarget(target)
+            commandCenter.pauseCommand.removeTarget(target)
+            commandCenter.skipForwardCommand.removeTarget(target)
+            commandCenter.skipBackwardCommand.removeTarget(target)
+        }
+        ttsRemoteCommandTargets = []
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
+    private func updateTTSNowPlayingInfo() {
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: ebook?.title ?? "Read Along",
+            MPMediaItemPropertyArtist: ebook?.authorsDisplay ?? "",
+            MPNowPlayingInfoPropertyPlaybackRate: ttsIsPlaying ? ttsPlaybackRate : 0,
+            MPMediaItemPropertyPlaybackDuration: ttsDuration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: ttsCurrentTime,
+        ]
+
+        if let coverData = ebook?.coverData, let image = UIImage(data: coverData) {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+        }
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     // MARK: - TTS Chapter Generation
 
     private func startTTSForCurrentChapter() {
         guard let engine = engine else { return }
+        let spineIndex = engine.activeSpineIndex
+        let bookId = ebook?.id
+
+        // Check cache first
+        if let bookId = bookId,
+           let cache = ttsAudioCache,
+           cache.hasCachedAudio(bookId: bookId, spineIndex: spineIndex, voiceId: Int(ttsVoiceIndex)),
+           let cached = cache.loadCachedAudio(bookId: bookId, spineIndex: spineIndex) {
+            logger.info("Using cached TTS audio for \(bookId)/\(spineIndex)")
+            startTTSFromCachedAudio(cached, spineIndex: spineIndex)
+            return
+        }
 
         // Get chapter plain text — skip empty chapters (title pages, images, etc.)
         let rawText = engine.currentChapterPlainText ?? ""
@@ -853,7 +938,7 @@ class ReadAlongService {
         // correctly map to the PlainTextToAttrStringMap offsets.
         // TTS preprocessing (hyphen removal, etc.) is applied per-sentence
         // in the generation pipeline to avoid offset drift.
-        let sentences = rawText.isEmpty ? [] : sentencize(rawText)
+        let sentences = rawText.isEmpty ? [] : TextProcessingUtils.sentencize(rawText)
 
         if sentences.isEmpty {
             logger.info("Empty chapter at spine \(engine.activeSpineIndex), auto-advancing")
@@ -888,6 +973,99 @@ class ReadAlongService {
         ttsGenerationTask?.cancel()
         ttsGenerationTask = Task { [weak self] in
             await self?.ttsGenerationPipeline(startingFrom: startIndex)
+        }
+    }
+
+    /// Play from cached TTS audio — schedules all sentence buffers from disk.
+    private func startTTSFromCachedAudio(_ cached: TTSAudioCache.CachedChapter, spineIndex: Int) {
+        guard let playerNode = ttsPlayerNode,
+              let engineFormat = ttsEngineFormat,
+              let engine = engine else { return }
+
+        let sentences = cached.sentenceSpans
+        if sentences.isEmpty {
+            handleTTSChapterComplete()
+            return
+        }
+
+        ttsSentences = sentences
+        ttsTotalSamplesScheduled = 0
+        ttsBuffersQueued = 0
+        ttsSentencePlaybackQueue = []
+        ttsCurrentTime = 0
+        ttsCurrentSpineIndex = spineIndex
+
+        let pageOffset = engine.currentPagePlainTextOffset ?? 0
+        let startIndex = sentences.firstIndex {
+            $0.plainTextRange.location + $0.plainTextRange.length > pageOffset
+        } ?? 0
+        ttsCurrentSentenceIndex = startIndex
+        ttsStartSentenceIndex = startIndex
+
+        // Schedule buffers from cached samples using sentence timing metadata
+        ttsGenerationTask?.cancel()
+        ttsGenerationTask = Task { [weak self] in
+            guard let self = self else { return }
+            let allSamples = cached.samples
+            var successCount = 0
+
+            for i in startIndex..<sentences.count {
+                guard !Task.isCancelled else { return }
+
+                // Throttle: wait if too many buffers are queued ahead
+                while self.ttsBuffersQueued >= self.ttsMaxBuffersAhead && !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                guard !Task.isCancelled else { return }
+
+                let timing = cached.metadata.sentenceTimings[i]
+                let endSample = min(timing.sampleOffset + timing.sampleCount, allSamples.count)
+                guard timing.sampleOffset < endSample else { continue }
+
+                let sentenceSamples = Array(allSamples[timing.sampleOffset..<endSample])
+                guard let buffer = self.makeEngineBuffer(from: sentenceSamples, engineFormat: engineFormat) else { continue }
+
+                successCount += 1
+
+                await MainActor.run {
+                    self.ttsBuffersQueued += 1
+                    self.ttsSentencePlaybackQueue.append(i)
+                    let options: AVAudioPlayerNodeBufferOptions = successCount == 1 ? .interrupts : []
+                    playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
+                        Task { @MainActor in
+                            self?.ttsBuffersQueued -= 1
+                            self?.handleSentenceBufferCompleted()
+                        }
+                    }
+                    self.ttsTotalSamplesScheduled += sentenceSamples.count
+
+                    if self.state == .loading {
+                        playerNode.play()
+                        self.ttsIsPlaying = true
+                        self.state = .active
+                        self.startTTSUpdateLoop()
+                        self.highlightFirstSentence()
+                        logger.info("Cached TTS playback started at sentence \(i)")
+                    }
+                }
+            }
+
+            if successCount == 0 && !Task.isCancelled {
+                self.state = .error("Failed to play cached audio")
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+
+            // Schedule silence buffer for chapter completion
+            let silenceBuffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
+            silenceBuffer.frameLength = 1
+            silenceBuffer.floatChannelData![0][0] = 0
+            await playerNode.scheduleBuffer(silenceBuffer)
+
+            await MainActor.run { [weak self] in
+                self?.handleTTSChapterComplete()
+            }
         }
     }
 
@@ -946,6 +1124,7 @@ class ReadAlongService {
         await MainActor.run { self.ttsSentencePlaybackQueue = [] }
         var cumulativeTime: Double = 0
         var successCount = 0
+        var allGeneratedSamples: [Float] = []  // Collect for caching
 
         for i in startIndex..<ttsSentences.count {
             guard !Task.isCancelled else { return }
@@ -961,7 +1140,7 @@ class ReadAlongService {
             guard !rawSentenceText.isEmpty else { continue }
 
             // Preprocess for better TTS pronunciation (doesn't affect highlighting ranges)
-            let sentenceText = preprocessTextForTTS(rawSentenceText)
+            let sentenceText = TextProcessingUtils.preprocessTextForTTS(rawSentenceText)
 
             do {
                 logger.info("Generating chunk[\(i)]: \"\(sentenceText.prefix(80))\"")
@@ -987,6 +1166,7 @@ class ReadAlongService {
                 }
 
                 cumulativeTime += audioDuration
+                allGeneratedSamples.append(contentsOf: generatedSamples)
 
                 guard let buffer = makeEngineBuffer(from: generatedSamples, engineFormat: engineFormat) else { continue }
 
@@ -1039,6 +1219,21 @@ class ReadAlongService {
 
         logger.info("All \(self.ttsSentences.count) sentences queued, total duration=\(String(format: "%.1f", cumulativeTime))s")
 
+        // Cache the generated audio for future sessions
+        if let bookId = ebook?.id, let cache = ttsAudioCache, startIndex == 0, !allGeneratedSamples.isEmpty {
+            let metadata = TTSAudioCache.buildMetadata(
+                voiceId: Int(ttsVoiceIndex),
+                sentences: ttsSentences,
+                chapterSamples: allGeneratedSamples
+            )
+            cache.cacheChapterAudio(
+                bookId: bookId,
+                spineIndex: ttsCurrentSpineIndex,
+                samples: allGeneratedSamples,
+                metadata: metadata
+            )
+        }
+
         // Wait for playback to finish, then advance chapter
         await MainActor.run { [weak self] in
             self?.handleTTSChapterComplete()
@@ -1073,6 +1268,7 @@ class ReadAlongService {
         guard currentTime >= 0 else { return }
 
         ttsCurrentTime = currentTime
+        updateTTSNowPlayingInfo()
     }
 
     /// Called when a buffer finishes playing. Advances to the next sentence
@@ -1204,7 +1400,7 @@ class ReadAlongService {
                 guard !rawSentenceText.isEmpty else { continue }
 
                 // Preprocess for better TTS pronunciation (doesn't affect highlighting ranges)
-                let sentenceText = self.preprocessTextForTTS(rawSentenceText)
+                let sentenceText = TextProcessingUtils.preprocessTextForTTS(rawSentenceText)
 
                 do {
                     let result = try await pocketTTSContext.generateAudio(
@@ -1292,174 +1488,4 @@ class ReadAlongService {
         }
     }
 
-    // MARK: - Sentence Splitting
-
-    /// Maximum characters per TTS chunk. PocketTTS handles longer sequences but
-    /// we still chunk for sentence-level highlighting and streaming playback.
-    private let ttsMaxCharsPerChunk = 500
-
-    /// Split chapter text into sentence spans (one sentence per chunk).
-    /// Chunking enables sentence-level highlighting and streaming playback.
-    private func sentencize(_ text: String) -> [SentenceSpan] {
-        let tokenizer = NLTokenizer(unit: .sentence)
-        tokenizer.string = text
-        let nsText = text as NSString
-
-        var spans: [SentenceSpan] = []
-        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-            let nsRange = NSRange(range, in: text)
-            let sentenceText = nsText.substring(with: nsRange)
-            let trimmed = sentenceText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                if trimmed.count > ttsMaxCharsPerChunk {
-                    spans.append(contentsOf: splitLongSentence(trimmed, baseRange: nsRange))
-                } else {
-                    spans.append(SentenceSpan(text: trimmed, plainTextRange: nsRange))
-                }
-            }
-            return true
-        }
-
-        return spans
-    }
-
-    /// Split a long sentence at clause boundaries to keep each chunk under ttsMaxCharsPerChunk.
-    /// Tries semicolons first, then commas/colons, then conjunctions, then mid-point whitespace.
-    private func splitLongSentence(_ text: String, baseRange: NSRange) -> [SentenceSpan] {
-        guard text.count > ttsMaxCharsPerChunk else {
-            return [SentenceSpan(text: text, plainTextRange: baseRange)]
-        }
-
-        let clausePatterns = [
-            "(?<=;)\\s+",
-            "(?<=,)\\s+",
-            "(?<=:)\\s+",
-            "\\s+(?=\\b(?:and|but|or|yet|so|which|that|because|although|while|when|where|if)\\b)"
-        ]
-
-        for pattern in clausePatterns {
-            let parts = splitByPattern(text, pattern: pattern)
-            if parts.count > 1 {
-                let recombined = recombineParts(parts, maxLength: ttsMaxCharsPerChunk)
-                var spans: [SentenceSpan] = []
-                var offset = 0
-                for chunk in recombined {
-                    let nsRange = NSRange(location: baseRange.location + offset, length: chunk.count)
-                    if chunk.count > ttsMaxCharsPerChunk {
-                        spans.append(contentsOf: splitLongSentence(chunk, baseRange: nsRange))
-                    } else {
-                        spans.append(SentenceSpan(text: chunk, plainTextRange: nsRange))
-                    }
-                    offset += chunk.count
-                }
-                return spans
-            }
-        }
-
-        // Last resort: split at nearest whitespace to midpoint
-        let mid = text.index(text.startIndex, offsetBy: text.count / 2)
-        if let spaceRange = text.rangeOfCharacter(from: .whitespaces, range: mid..<text.endIndex)
-            ?? text.rangeOfCharacter(from: .whitespaces, options: .backwards, range: text.startIndex..<mid) {
-            let first = String(text[text.startIndex..<spaceRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-            let second = String(text[spaceRange.upperBound...]).trimmingCharacters(in: .whitespaces)
-            var result: [SentenceSpan] = []
-            if !first.isEmpty {
-                let r = NSRange(location: baseRange.location, length: first.count)
-                result.append(contentsOf: splitLongSentence(first, baseRange: r))
-            }
-            if !second.isEmpty {
-                let r = NSRange(location: baseRange.location + text.count - second.count, length: second.count)
-                result.append(contentsOf: splitLongSentence(second, baseRange: r))
-            }
-            return result
-        }
-
-        return [SentenceSpan(text: text, plainTextRange: baseRange)]
-    }
-
-    private func splitByPattern(_ text: String, pattern: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [text] }
-        let range = NSRange(text.startIndex..., in: text)
-        var parts: [String] = []
-        var lastEnd = text.startIndex
-        regex.enumerateMatches(in: text, range: range) { match, _, _ in
-            if let match = match, let matchRange = Range(match.range, in: text) {
-                let part = String(text[lastEnd..<matchRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-                if !part.isEmpty { parts.append(part) }
-                lastEnd = matchRange.upperBound
-            }
-        }
-        let remaining = String(text[lastEnd...]).trimmingCharacters(in: .whitespaces)
-        if !remaining.isEmpty { parts.append(remaining) }
-        return parts
-    }
-
-    private func recombineParts(_ parts: [String], maxLength: Int) -> [String] {
-        var chunks: [String] = []
-        var current = ""
-        for part in parts {
-            let combined = current.isEmpty ? part : current + " " + part
-            if combined.count > maxLength && !current.isEmpty {
-                chunks.append(current)
-                current = part
-            } else {
-                current = combined
-            }
-        }
-        if !current.isEmpty { chunks.append(current) }
-        return chunks
-    }
-
-    // MARK: - Text Preprocessing
-
-    /// Preprocess text for better TTS output.
-    private func preprocessTextForTTS(_ text: String) -> String {
-        var result = text
-        result = removeHyphensFromCompoundWords(result)
-        result = convertParentheticalsToDashes(result)
-        result = convertSlashesToDashes(result)
-        return result
-    }
-
-    /// "time-delayed" → "time delayed"
-    private func removeHyphensFromCompoundWords(_ text: String) -> String {
-        let pattern = "(?<=\\p{L})-(?=\\p{L})"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
-    }
-
-    /// "(or not)" → "- or not -"
-    private func convertParentheticalsToDashes(_ text: String) -> String {
-        var result = text
-        let pattern = "\\(([^)]+)\\)([.,;:!?]?)(?=(\\s+\\w|\\s*$))"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let range = NSRange(result.startIndex..., in: result)
-        let matches = regex.matches(in: result, range: range)
-        for match in matches.reversed() {
-            guard let contentRange = Range(match.range(at: 1), in: result),
-                  let fullRange = Range(match.range, in: result) else { continue }
-            let content = String(result[contentRange])
-            let punctuation = match.range(at: 2).length > 0
-                ? String(result[Range(match.range(at: 2), in: result)!]) : ""
-            let followedByMoreText = match.range(at: 3).length > 0 &&
-                Range(match.range(at: 3), in: result).map { !result[$0].trimmingCharacters(in: .whitespaces).isEmpty } ?? false
-            let replacement: String
-            if punctuation.isEmpty && followedByMoreText {
-                replacement = "- \(content) -"
-            } else {
-                replacement = "- \(content)\(punctuation)"
-            }
-            result.replaceSubrange(fullRange, with: replacement)
-        }
-        return result
-    }
-
-    /// "and/or" → "and - or"
-    private func convertSlashesToDashes(_ text: String) -> String {
-        let pattern = "(?<=\\p{L})/(?=\\p{L})"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: " - ")
-    }
 }

@@ -17,11 +17,14 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var appSettings
     @Environment(ThemeManager.self) private var themeManager
     @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
     @State private var editedServerURL = ""
     @State private var isTestingConnection = false
     @State private var connectionStatus: ConnectionStatus = .unknown
     @State private var showingDeleteAllConfirmation = false
     @State private var showingClearCacheConfirmation = false
+    @State private var showingClearTTSCacheConfirmation = false
     @State private var showingDisconnectConfirmation = false
     @State private var showingStorageChart = false
 
@@ -132,6 +135,65 @@ struct SettingsView: View {
                     Toggle("Haptic Feedback", isOn: $appSettings.hapticsEnabled)
                 } header: {
                     Text("Appearance")
+                }
+
+                // Background Processing section
+                Section {
+                    Toggle("Auto-generate read-along for eBooks", isOn: $appSettings.autoGenerateTTS)
+                        .disabled(!pocketTTSModelManager.isModelAvailable)
+
+                    Toggle("Auto-transcribe audiobooks", isOn: $appSettings.autoTranscribeAudiobooks)
+
+                    Toggle("Only while charging", isOn: $appSettings.backgroundProcessingChargingOnly)
+
+                    if case .processing(let task, let progress, let message) = backgroundProcessingManager.state {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(taskLabel(task))
+                                    .font(.subheadline)
+                                Spacer()
+                                Text("\(Int(progress * 100))%")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: progress)
+                            Text(message)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !backgroundProcessingManager.pendingTasks.isEmpty {
+                        HStack {
+                            Text("Queued tasks")
+                            Spacer()
+                            Text("\(backgroundProcessingManager.pendingTasks.count)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("TTS Cache")
+                        Spacer()
+                        Text(ByteCountFormatter.string(fromByteCount: storageManager.ttsCacheSize(), countStyle: .file))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if storageManager.ttsCacheSize() > 0 {
+                        Button(role: .destructive) {
+                            showingClearTTSCacheConfirmation = true
+                        } label: {
+                            Label("Clear TTS Cache", systemImage: "trash")
+                        }
+                    }
+                } header: {
+                    Text("Background Processing")
+                } footer: {
+                    if !pocketTTSModelManager.isModelAvailable {
+                        Text("TTS model not available. Download it to enable read-along generation.")
+                    } else {
+                        Text("Automatically generate read-along audio or transcripts when books are downloaded.")
+                    }
                 }
 
                 // Storage section
@@ -260,6 +322,14 @@ struct SettingsView: View {
             } message: {
                 Text("This will clear cached comic pages. They will be re-downloaded when you open comics.")
             }
+            .confirmationDialog("Clear TTS Cache?", isPresented: $showingClearTTSCacheConfirmation, titleVisibility: .visible) {
+                Button("Clear Cache", role: .destructive) {
+                    try? storageManager.clearTTSCache()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will remove all pre-generated read-along audio. It will be regenerated when needed.")
+            }
             .confirmationDialog("Disconnect from Server?", isPresented: $showingDisconnectConfirmation, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {
                     disconnect()
@@ -281,6 +351,11 @@ struct SettingsView: View {
                                 category: "Comic Cache",
                                 bytes: storageManager.comicCacheSize(),
                                 color: .purple
+                            ),
+                            StorageSegment(
+                                category: "TTS Cache",
+                                bytes: storageManager.ttsCacheSize(),
+                                color: .orange
                             )
                         ],
                         availableBytes: storageManager.availableDiskSpace()
@@ -380,6 +455,15 @@ struct SettingsView: View {
         editedServerURL = ""
         connectionStatus = .unknown
     }
+
+    private func taskLabel(_ task: BackgroundProcessingManager.ProcessingTask) -> String {
+        switch task {
+        case .transcription:
+            return "Transcribing audiobook"
+        case .ttsGeneration:
+            return "Generating read-along"
+        }
+    }
 }
 
 #Preview {
@@ -390,5 +474,7 @@ struct SettingsView: View {
         .environment(AppSettings())
         .environment(ThemeManager())
         .environment(HighlightColorManager())
+        .environment(BackgroundProcessingManager())
+        .environment(PocketTTSModelManager())
         .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

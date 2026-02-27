@@ -44,6 +44,9 @@ struct CompendusApp: App {
     @State private var highlightColorManager = HighlightColorManager()
     @State private var readAlongService = ReadAlongService()
     @State private var pocketTTSModelManager = PocketTTSModelManager()
+    @State private var ttsAudioCache = TTSAudioCache()
+    @State private var ttsPreGenerationService = TTSPreGenerationService()
+    @State private var backgroundProcessingManager = BackgroundProcessingManager()
 
     // These are created lazily based on serverConfig
     @State private var apiService: APIService
@@ -82,6 +85,9 @@ struct CompendusApp: App {
                 .environment(highlightColorManager)
                 .environment(readAlongService)
                 .environment(pocketTTSModelManager)
+                .environment(ttsAudioCache)
+                .environment(ttsPreGenerationService)
+                .environment(backgroundProcessingManager)
                 .environment(bookEditSyncService)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .tint(themeManager.accentColor)
@@ -93,6 +99,9 @@ struct CompendusApp: App {
                     downloadManager.appDelegate = appDelegate
                     downloadManager.modelContainer = sharedModelContainer
                     downloadManager.reconnectBackgroundSession()
+                    downloadManager.backgroundProcessingManager = backgroundProcessingManager
+                    downloadManager.appSettings = appSettings
+                    downloadManager.pocketTTSModelManager = pocketTTSModelManager
                     audiobookPlayer.modelContainer = sharedModelContainer
                     bookEditSyncService.modelContainer = sharedModelContainer
                     OnDeviceTranscriptionService.registerBackgroundTask(
@@ -100,6 +109,17 @@ struct CompendusApp: App {
                     )
                     BookEditSyncService.registerBackgroundTask(
                         service: bookEditSyncService
+                    )
+                    BackgroundProcessingManager.registerBackgroundTasks(
+                        manager: backgroundProcessingManager
+                    )
+                    backgroundProcessingManager.configure(
+                        transcriptionService: onDeviceTranscriptionService,
+                        ttsPreGenerationService: ttsPreGenerationService,
+                        ttsAudioCache: ttsAudioCache,
+                        pocketTTSModelManager: pocketTTSModelManager,
+                        appSettings: appSettings,
+                        modelContainer: sharedModelContainer
                     )
                 }
         }
@@ -109,9 +129,11 @@ struct CompendusApp: App {
             case .background:
                 onDeviceTranscriptionService.handleAppBackgrounded()
                 bookEditSyncService.scheduleBackgroundTaskIfNeeded()
+                backgroundProcessingManager.handleAppBackgrounded()
             case .active:
                 onDeviceTranscriptionService.handleAppForegrounded()
                 bookEditSyncService.handleAppForegrounded()
+                backgroundProcessingManager.handleAppForegrounded()
             default:
                 break
             }

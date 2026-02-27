@@ -33,6 +33,8 @@ final class DownloadedBook {
     var pageCount: Int?             // Comics page count (cached)
     var epubLocalPath: String?       // Local path for converted EPUB version
     var transcriptData: Data?        // JSON encoded transcript for audiobooks
+    var ttsTranscriptData: Data?      // JSON encoded transcript from TTS generation
+    var ttsVoiceId: Int?              // Voice index used for TTS generation (cache invalidation key)
 
     init(
         id: String,
@@ -125,6 +127,15 @@ final class DownloadedBook {
 
     var hasTranscript: Bool {
         transcriptData != nil
+    }
+
+    var ttsTranscript: Transcript? {
+        guard let data = ttsTranscriptData else { return nil }
+        return try? JSONDecoder().decode(Transcript.self, from: data)
+    }
+
+    var hasTTSTranscript: Bool {
+        ttsTranscriptData != nil
     }
 
     /// Get the full file URL in the app's documents directory

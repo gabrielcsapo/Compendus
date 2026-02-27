@@ -63,6 +63,12 @@ class DownloadManager: NSObject {
     weak var appDelegate: AppDelegate?
     /// Set by CompendusApp on appear for creating ModelContexts in delegate callbacks
     var modelContainer: ModelContainer?
+    /// Set by CompendusApp on appear for auto-queueing background generation
+    weak var backgroundProcessingManager: BackgroundProcessingManager?
+    /// Set by CompendusApp on appear for reading auto-generation settings
+    weak var appSettings: AppSettings?
+    /// Set by CompendusApp on appear for reading selected voice
+    weak var pocketTTSModelManager: PocketTTSModelManager?
 
     private static let backgroundSessionIdentifier = "com.compendus.background-download"
 
@@ -456,6 +462,31 @@ class DownloadManager: NSObject {
             print("[DownloadManager] Failed to save synced metadata: \(error.localizedDescription)")
         }
     }
+
+    // MARK: - Auto Background Processing
+
+    private func autoQueueBackgroundProcessing(bookId: String, format: String) {
+        guard let manager = backgroundProcessingManager,
+              let settings = appSettings else { return }
+
+        let isEbook = ["epub"].contains(format)
+        let isAudiobook = ["m4b", "mp3", "m4a"].contains(format)
+
+        if isEbook && settings.autoGenerateTTS {
+            guard let voiceManager = pocketTTSModelManager else {
+                print("[DownloadManager] PocketTTS model manager not available, skipping TTS auto-queue")
+                return
+            }
+            let voiceId = Int(voiceManager.selectedVoiceIndex)
+            manager.enqueue(.ttsGeneration(bookId: bookId, voiceId: voiceId))
+            print("[DownloadManager] Auto-queued TTS generation for \(bookId)")
+        }
+
+        if isAudiobook && settings.autoTranscribeAudiobooks {
+            manager.enqueue(.transcription(bookId: bookId))
+            print("[DownloadManager] Auto-queued transcription for \(bookId)")
+        }
+    }
 }
 
 // MARK: - URLSessionDownloadDelegate
@@ -512,10 +543,14 @@ extension DownloadManager: URLSessionDownloadDelegate {
             context.delete(pending)
             try context.save()
 
+            let format = downloadedBook.format.lowercased()
             DispatchQueue.main.async {
                 self.activeDownloads[bookId]?.state = .completed
                 self.activeDownloads[bookId]?.progress = 1.0
                 HapticFeedback.success()
+
+                // Auto-queue background generation if enabled
+                self.autoQueueBackgroundProcessing(bookId: bookId, format: format)
 
                 // Clean up progress tracking after a short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {

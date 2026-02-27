@@ -633,9 +633,9 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
                     mutable.addAttribute(.underlineColor,
                                          value: readAlongHighlightColor.withAlphaComponent(0.85),
                                          range: localRange)
-                    // Subtle background tint for visibility
+                    // Background tint for visibility
                     mutable.addAttribute(.backgroundColor,
-                                         value: readAlongHighlightColor.withAlphaComponent(0.12),
+                                         value: readAlongHighlightColor.withAlphaComponent(0.25),
                                          range: localRange)
                 }
             }
