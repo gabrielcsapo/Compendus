@@ -44,6 +44,24 @@ struct PlainTextToAttrStringMap {
         guard attrEnd > attrStart else { return nil }
         return NSRange(location: attrStart, length: attrEnd - attrStart)
     }
+
+    /// Find the plain text offset for a given attributed string location.
+    /// Returns the start of the content node containing (or following) the location.
+    /// Accurate to the node/paragraph level — no intra-node delta mapping,
+    /// which is unreliable when attributed string and plain text lengths differ.
+    func plainTextOffset(forAttrStringLocation location: Int) -> Int? {
+        // Try to find the entry containing this location
+        if let entry = entries.first(where: {
+            NSLocationInRange(location, $0.attrStringRange)
+        }) {
+            return entry.plainTextRange.location
+        }
+        // Location is in a gap (e.g., standalone image) — use the next text entry
+        if let next = entries.first(where: { $0.attrStringRange.location > location }) {
+            return next.plainTextRange.location
+        }
+        return nil
+    }
 }
 
 class TextAlignmentEngine {

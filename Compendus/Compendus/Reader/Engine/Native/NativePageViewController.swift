@@ -244,6 +244,7 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         NSLayoutConstraint.activate(layoutConstraints)
 
         suppressNativeEditMenu(in: textView)
+        disableDoubleTapSelection(in: textView)
     }
 
     /// Factory for creating a configured UITextView (used for both left and right pages).
@@ -339,6 +340,7 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         NSLayoutConstraint.activate(layoutConstraints)
 
         suppressNativeEditMenu(in: stv)
+        disableDoubleTapSelection(in: stv)
     }
 
     private func tearDownSpreadLayout() {
@@ -357,6 +359,19 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
             textView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ]
         NSLayoutConstraint.activate(layoutConstraints)
+    }
+
+    // MARK: - Double-Tap Selection Suppression
+
+    /// Disable UITextView's internal double-tap-to-select-word gesture so that
+    /// text selection only happens via long press. This prevents accidental
+    /// highlight toolbar appearances from casual taps.
+    private func disableDoubleTapSelection(in targetTextView: UITextView) {
+        for gesture in targetTextView.gestureRecognizers ?? [] {
+            if let tap = gesture as? UITapGestureRecognizer, tap.numberOfTapsRequired == 2 {
+                tap.isEnabled = false
+            }
+        }
     }
 
     // MARK: - Edit Menu Suppression
@@ -394,6 +409,11 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
         let insets = NativePaginationEngine.insets(for: pageWidth(), isTwoPageMode: isTwoPageMode)
         textView.textContainerInset = insets
         secondTextView?.textContainerInset = insets
+
+        // Re-apply double-tap suppression after content load (UIKit may
+        // recreate internal gesture recognizers when content changes)
+        disableDoubleTapSelection(in: textView)
+        if let stv = secondTextView { disableDoubleTapSelection(in: stv) }
 
         showCurrentPage()
     }
@@ -611,11 +631,11 @@ class NativePageViewController: UIViewController, UITextViewDelegate {
                                          value: NSUnderlineStyle.thick.rawValue,
                                          range: localRange)
                     mutable.addAttribute(.underlineColor,
-                                         value: readAlongHighlightColor.withAlphaComponent(0.6),
+                                         value: readAlongHighlightColor.withAlphaComponent(0.85),
                                          range: localRange)
                     // Subtle background tint for visibility
                     mutable.addAttribute(.backgroundColor,
-                                         value: readAlongHighlightColor.withAlphaComponent(0.08),
+                                         value: readAlongHighlightColor.withAlphaComponent(0.12),
                                          range: localRange)
                 }
             }

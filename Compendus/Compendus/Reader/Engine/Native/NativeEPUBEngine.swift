@@ -157,6 +157,16 @@ class NativeEPUBEngine: ReaderEngine {
         return pagesBeforeCurrent + currentPageIndex
     }
 
+    /// Plain text character offset for the start of the currently displayed page.
+    /// Uses the PlainTextToAttrStringMap to find the content node at the page boundary,
+    /// returning that node's plain text start. Accurate to the paragraph level.
+    var currentPagePlainTextOffset: Int? {
+        guard let pages = chapterPages[currentSpineIndex],
+              currentPageIndex < pages.count,
+              let map = chapterPlainTextMaps[currentSpineIndex] else { return nil }
+        return map.plainTextOffset(forAttrStringLocation: pages[currentPageIndex].range.location)
+    }
+
     /// Plain-text-to-attributed-string offset map for the current chapter.
     var currentChapterPlainTextMap: PlainTextToAttrStringMap? {
         chapterPlainTextMaps[currentSpineIndex]

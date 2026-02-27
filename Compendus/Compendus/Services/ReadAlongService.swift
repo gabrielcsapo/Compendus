@@ -123,6 +123,10 @@ class ReadAlongService {
     @ObservationIgnored private var ttsTotalSamplesScheduled: Int = 0
     @ObservationIgnored private var ttsCurrentSpineIndex: Int = 0
     @ObservationIgnored private var ttsBuffersQueued: Int = 0
+    @ObservationIgnored private var ttsStartSentenceIndex: Int = 0
+    /// Queue of sentence indices in playback order — each scheduled buffer appends its index.
+    /// Buffer completion pops the front, and the new front is the currently playing sentence.
+    @ObservationIgnored private var ttsSentencePlaybackQueue: [Int] = []
     private let ttsMaxBuffersAhead = 3
     @ObservationIgnored private var ttsBackgrounded = false
     @ObservationIgnored private var backgroundObservers: [Any] = []
@@ -858,11 +862,21 @@ class ReadAlongService {
         }
 
         ttsSentences = sentences
-        ttsCurrentSentenceIndex = 0
         ttsTotalSamplesScheduled = 0
         ttsBuffersQueued = 0
+        ttsSentencePlaybackQueue = []
         ttsCurrentTime = 0
         ttsCurrentSpineIndex = engine.activeSpineIndex
+
+        // Find the first sentence on or after the current page so TTS
+        // starts from where the user is reading, not from page 1.
+        let pageOffset = engine.currentPagePlainTextOffset ?? 0
+        let startIndex = sentences.firstIndex {
+            $0.plainTextRange.location + $0.plainTextRange.length > pageOffset
+        } ?? 0
+        ttsCurrentSentenceIndex = startIndex
+        ttsStartSentenceIndex = startIndex
+        logger.info("TTS starting from sentence \(startIndex) (page plain text offset \(pageOffset))")
 
         logger.info("Chapter has \(self.ttsSentences.count) sentences, \(rawText.count) characters at spine \(engine.activeSpineIndex)")
         // Log first few sentences for debugging text extraction
@@ -870,10 +884,10 @@ class ReadAlongService {
             logger.info("  Sentence[\(idx)]: \"\(s.text.prefix(120))\"")
         }
 
-        // Start generation pipeline
+        // Start generation pipeline from the current page's sentence
         ttsGenerationTask?.cancel()
         ttsGenerationTask = Task { [weak self] in
-            await self?.ttsGenerationPipeline()
+            await self?.ttsGenerationPipeline(startingFrom: startIndex)
         }
     }
 
@@ -917,7 +931,7 @@ class ReadAlongService {
     /// Producer pipeline: generates audio sentence by sentence, schedules onto player.
     /// Uses a sliding window to limit memory — only keeps up to ttsMaxBuffersAhead
     /// buffers queued on the player at any time.
-    private func ttsGenerationPipeline() async {
+    private func ttsGenerationPipeline(startingFrom startIndex: Int = 0) async {
         guard let pocketTTSContext = pocketTTSContext,
               let playerNode = ttsPlayerNode,
               let engineFormat = ttsEngineFormat else {
@@ -926,13 +940,14 @@ class ReadAlongService {
             return
         }
 
-        logger.info("TTS generation pipeline started for \(self.ttsSentences.count) sentences")
+        logger.info("TTS generation pipeline started for \(self.ttsSentences.count) sentences (from index \(startIndex))")
 
         ttsBuffersQueued = 0
+        await MainActor.run { self.ttsSentencePlaybackQueue = [] }
         var cumulativeTime: Double = 0
         var successCount = 0
 
-        for i in 0..<ttsSentences.count {
+        for i in startIndex..<ttsSentences.count {
             guard !Task.isCancelled else { return }
 
             // Throttle: wait if too many buffers are queued ahead
@@ -962,15 +977,6 @@ class ReadAlongService {
                 let sampleCount = generatedSamples.count
                 guard sampleCount > 0 else { continue }
 
-                // Log audio sample diagnostics for first few chunks
-                if i < 5 {
-                    let minSample = generatedSamples.min() ?? 0
-                    let maxSample = generatedSamples.max() ?? 0
-                    let peak = max(abs(minSample), abs(maxSample))
-                    let scale = peak > 1.0 ? 0.8 / peak : 1.0
-                    logger.info("  Audio[\(i)]: \(sampleCount) samples, peak=\(String(format: "%.2f", peak)), scale=\(String(format: "%.4f", scale))")
-                }
-
                 let audioDuration = Double(sampleCount) / 24000.0
 
                 // Update sentence timing
@@ -986,13 +992,15 @@ class ReadAlongService {
 
                 successCount += 1
 
-                // Schedule buffer; first chunk interrupts stale audio, rest are queued.
+                // Schedule buffer; completion callback advances sentence tracking.
                 await MainActor.run {
                     self.ttsBuffersQueued += 1
+                    self.ttsSentencePlaybackQueue.append(i)
                     let options: AVAudioPlayerNodeBufferOptions = successCount == 1 ? .interrupts : []
                     playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
                         Task { @MainActor in
                             self?.ttsBuffersQueued -= 1
+                            self?.handleSentenceBufferCompleted()
                         }
                     }
                     self.ttsTotalSamplesScheduled += sampleCount
@@ -1003,6 +1011,7 @@ class ReadAlongService {
                         self.ttsIsPlaying = true
                         self.state = .active
                         self.startTTSUpdateLoop()
+                        self.highlightFirstSentence()
                         logger.info("TTS playback started (first audio ready at chunk \(i))")
                     }
                 }
@@ -1054,10 +1063,9 @@ class ReadAlongService {
 
     private func handleTTSTimeUpdate() {
         guard let playerNode = ttsPlayerNode,
-              let engine = engine,
               state == .active else { return }
 
-        // Calculate current playback time from player node
+        // Track playback time for progress bar / scrubber
         guard let nodeTime = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else { return }
 
@@ -1065,70 +1073,63 @@ class ReadAlongService {
         guard currentTime >= 0 else { return }
 
         ttsCurrentTime = currentTime
+    }
 
-        let shouldLog = ttsUpdateLogThrottle % 20 == 0
-        ttsUpdateLogThrottle += 1
+    /// Called when a buffer finishes playing. Advances to the next sentence
+    /// in the playback queue and updates highlighting + page position.
+    private func handleSentenceBufferCompleted() {
+        guard let engine = engine else { return }
 
-        // Find which sentence is active via binary search
-        guard let sentenceIndex = findActiveSentence(at: currentTime) else {
-            if shouldLog {
-                logger.info("TTS update: time=\(String(format: "%.1f", currentTime))s, no active sentence found")
-            }
-            return
+        // Pop the completed sentence from the queue
+        if !ttsSentencePlaybackQueue.isEmpty {
+            ttsSentencePlaybackQueue.removeFirst()
         }
 
-        if sentenceIndex != ttsCurrentSentenceIndex {
-            ttsCurrentSentenceIndex = sentenceIndex
-            logger.info("TTS sentence \(sentenceIndex): \"\(self.ttsSentences[sentenceIndex].text.prefix(60))\" range=\(self.ttsSentences[sentenceIndex].plainTextRange)")
-        }
+        // The front of the queue is now the actively playing sentence
+        guard let currentIdx = ttsSentencePlaybackQueue.first else { return }
+        guard currentIdx < ttsSentences.count else { return }
 
-        let sentence = ttsSentences[sentenceIndex]
+        ttsCurrentSentenceIndex = currentIdx
+        let sentence = ttsSentences[currentIdx]
 
-        // Map sentence's plain text range to attributed string range via PlainTextToAttrStringMap
+        // Map to attributed string range for highlighting
         guard let plainTextMap = engine.currentChapterPlainTextMap,
               let attrRange = plainTextMap.attrStringRange(for: sentence.plainTextRange) else {
-            if shouldLog {
-                logger.warning("TTS update: failed to map plainTextRange \(sentence.plainTextRange) to attrRange (map=\(engine.currentChapterPlainTextMap != nil))")
-            }
+            logger.warning("TTS chunk done: failed to map sentence[\(currentIdx)] plainTextRange \(sentence.plainTextRange)")
             return
         }
 
-        // Update highlight if changed
-        if attrRange != activeSentenceRange {
-            activeSentenceRange = attrRange
-            activeSpineIndex = engine.activeSpineIndex
-            engine.readAlongHighlightRange = attrRange
+        activeSentenceRange = attrRange
+        activeSpineIndex = engine.activeSpineIndex
+        engine.readAlongHighlightRange = attrRange
+        logger.info("TTS playing sentence[\(currentIdx)]: \"\(sentence.text.prefix(60))\" attrRange=\(attrRange)")
 
-            if shouldLog {
-                logger.info("TTS highlight: sentence[\(sentenceIndex)] attrRange=\(attrRange)")
-            }
-
-            // Auto-advance page if needed
-            if !autoAdvanceSuppressed {
-                engine.showPage(containingRange: attrRange)
-            }
+        // Auto-advance page if needed
+        if !autoAdvanceSuppressed {
+            engine.showPage(containingRange: attrRange)
         }
     }
 
-    /// Binary search for the sentence being spoken at a given time.
-    private func findActiveSentence(at time: Double) -> Int? {
-        guard !ttsSentences.isEmpty else { return nil }
+    /// Highlight the first sentence when TTS playback begins.
+    private func highlightFirstSentence() {
+        guard let engine = engine,
+              let currentIdx = ttsSentencePlaybackQueue.first,
+              currentIdx < ttsSentences.count else { return }
 
-        // Find the last sentence whose audioStartTime <= time
-        var lo = 0, hi = ttsSentences.count - 1
-        var result = 0
+        ttsCurrentSentenceIndex = currentIdx
+        let sentence = ttsSentences[currentIdx]
 
-        while lo <= hi {
-            let mid = (lo + hi) / 2
-            if ttsSentences[mid].audioStartTime <= time {
-                result = mid
-                lo = mid + 1
-            } else {
-                hi = mid - 1
-            }
+        guard let plainTextMap = engine.currentChapterPlainTextMap,
+              let attrRange = plainTextMap.attrStringRange(for: sentence.plainTextRange) else { return }
+
+        activeSentenceRange = attrRange
+        activeSpineIndex = engine.activeSpineIndex
+        engine.readAlongHighlightRange = attrRange
+        logger.info("TTS first sentence[\(currentIdx)]: \"\(sentence.text.prefix(60))\" attrRange=\(attrRange)")
+
+        if !autoAdvanceSuppressed {
+            engine.showPage(containingRange: attrRange)
         }
-
-        return result
     }
 
     // MARK: - TTS Playback Controls
@@ -1173,10 +1174,12 @@ class ReadAlongService {
         guard let playerNode = ttsPlayerNode,
               let engineFormat = ttsEngineFormat else { return }
 
+        ttsStartSentenceIndex = index
         ttsGenerationTask?.cancel()
         playerNode.stop()
         ttsTotalSamplesScheduled = 0
         ttsBuffersQueued = 0
+        ttsSentencePlaybackQueue = []
         ttsCurrentSentenceIndex = index
 
         // Restart generation from this sentence
@@ -1229,10 +1232,12 @@ class ReadAlongService {
 
                     await MainActor.run {
                         self.ttsBuffersQueued += 1
+                        self.ttsSentencePlaybackQueue.append(i)
                         let options: AVAudioPlayerNodeBufferOptions = i == index ? .interrupts : []
                         playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
                             Task { @MainActor in
                                 self?.ttsBuffersQueued -= 1
+                                self?.handleSentenceBufferCompleted()
                             }
                         }
                         self.ttsTotalSamplesScheduled += sampleCount
@@ -1241,6 +1246,7 @@ class ReadAlongService {
                             playerNode.play()
                             self.ttsIsPlaying = true
                             self.state = .active
+                            self.highlightFirstSentence()
                         }
                     }
                 } catch {
