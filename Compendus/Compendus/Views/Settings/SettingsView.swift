@@ -24,7 +24,6 @@ struct SettingsView: View {
     @State private var connectionStatus: ConnectionStatus = .unknown
     @State private var showingDeleteAllConfirmation = false
     @State private var showingClearCacheConfirmation = false
-    @State private var showingClearTTSCacheConfirmation = false
     @State private var showingDisconnectConfirmation = false
     @State private var showingStorageChart = false
 
@@ -172,18 +171,14 @@ struct SettingsView: View {
                         }
                     }
 
-                    HStack {
-                        Text("TTS Cache")
-                        Spacer()
-                        Text(ByteCountFormatter.string(fromByteCount: storageManager.ttsCacheSize(), countStyle: .file))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if storageManager.ttsCacheSize() > 0 {
-                        Button(role: .destructive) {
-                            showingClearTTSCacheConfirmation = true
-                        } label: {
-                            Label("Clear TTS Cache", systemImage: "trash")
+                    NavigationLink {
+                        TTSCacheBreakdownView()
+                    } label: {
+                        HStack {
+                            Text("Generated Data")
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: storageManager.ttsCacheSize(), countStyle: .file))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 } header: {
@@ -192,7 +187,7 @@ struct SettingsView: View {
                     if !pocketTTSModelManager.isModelAvailable {
                         Text("TTS model not available. Download it to enable read-along generation.")
                     } else {
-                        Text("Automatically generate read-along audio or transcripts when books are downloaded.")
+                        Text("Automatically generate read-along audio or transcripts when books are downloaded. Processing runs on-device while connected to power.")
                     }
                 }
 
@@ -321,14 +316,6 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This will clear cached comic pages. They will be re-downloaded when you open comics.")
-            }
-            .confirmationDialog("Clear TTS Cache?", isPresented: $showingClearTTSCacheConfirmation, titleVisibility: .visible) {
-                Button("Clear Cache", role: .destructive) {
-                    try? storageManager.clearTTSCache()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This will remove all pre-generated read-along audio. It will be regenerated when needed.")
             }
             .confirmationDialog("Disconnect from Server?", isPresented: $showingDisconnectConfirmation, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {

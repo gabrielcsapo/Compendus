@@ -477,7 +477,7 @@ struct ReadAlongPill: View {
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         } else {
-                                            Text("Pre-generate audio for faster playback")
+                                            Text("Pre-generate audio · runs while connected to power")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }

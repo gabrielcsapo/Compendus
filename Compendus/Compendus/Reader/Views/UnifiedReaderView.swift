@@ -486,13 +486,16 @@ struct UnifiedReaderView: View {
                             Button {
                                 if readAlongService.isActive {
                                     readAlongService.deactivate()
-                                } else if matchingAudiobook != nil {
-                                    activateReadAlong()
                                 } else {
-                                    activateTTSReadAloud()
+                                    // Show the pill so users can choose between
+                                    // Read Along (audiobook) and Read Aloud (TTS)
+                                    withAnimation {
+                                        readAlongPillDismissed = false
+                                        showReadAlongPill = true
+                                    }
                                 }
                             } label: {
-                                Image(systemName: matchingAudiobook != nil ? "headphones" : "speaker.wave.2")
+                                Image(systemName: readAlongService.isActive ? "speaker.wave.2.fill" : "speaker.wave.2")
                                     .foregroundStyle(readAlongService.isActive ? Color.accentColor : .primary)
                             }
                         }

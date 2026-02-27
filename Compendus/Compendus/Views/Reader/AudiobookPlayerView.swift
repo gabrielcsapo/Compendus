@@ -20,11 +20,20 @@ struct AudiobookPlayerView: View {
     @State private var showLyrics = false
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
+    @State private var transcriptionPillDismissed = false
     /// When live transcribing, we pause playback until the transcript has
     /// buffered at least 30 s ahead of this position, then auto-resume.
     @State private var liveBufferResumeTime: Double?
     /// True when the current transcription was started as "live" (tied to playback).
     @State private var isLiveTranscription = false
+
+    private var showTranscriptionPill: Bool {
+        !transcriptionPillDismissed && (
+            transcriptionService.isAvailable ||
+            effectiveTranscript != nil ||
+            transcriptionService.activeBookId == book.id
+        )
+    }
 
     /// Uses the full transcript if available, otherwise the partial transcript
     /// from an in-progress on-device transcription for this book.
@@ -145,6 +154,21 @@ struct AudiobookPlayerView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
+                    }
+
+                    // Transcription pill (above player controls)
+                    if showTranscriptionPill {
+                        TranscriptionPill(
+                            book: book,
+                            showLyrics: showLyrics,
+                            onToggleLyrics: { showLyrics.toggle() },
+                            onStartLiveTranscription: { startLiveTranscription() },
+                            onStartFullTranscription: { startFullTranscription() },
+                            onDismiss: { withAnimation { transcriptionPillDismissed = true } }
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
 
                     // Player controls (fixed at bottom)
@@ -292,39 +316,6 @@ struct AudiobookPlayerView: View {
                 }
 
                 Spacer()
-
-                if effectiveTranscript != nil {
-                    // Transcript available — toggle lyrics view
-                    Button {
-                        showLyrics.toggle()
-                    } label: {
-                        Image(systemName: showLyrics ? "text.quote.fill" : "text.quote")
-                            .font(.title3)
-                    }
-                } else if transcriptionService.activeBookId == book.id {
-                    // Transcription in progress for this book
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else if book.isAudiobook, transcriptionService.isAvailable {
-                    // No transcript — offer transcription options
-                    Menu {
-                        Button {
-                            startLiveTranscription()
-                        } label: {
-                            Label("Live Transcribe", systemImage: "waveform")
-                        }
-
-                        Button {
-                            startFullTranscription()
-                        } label: {
-                            Label("Full Book", systemImage: "book.closed")
-                        }
-                    } label: {
-                        Image(systemName: "text.quote")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                    }
-                }
 
                 if let chapters = book.chapters, !chapters.isEmpty {
                     Button {

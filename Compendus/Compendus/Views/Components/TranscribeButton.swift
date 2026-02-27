@@ -47,7 +47,7 @@ struct TranscribeButton: View {
                         Button {
                             startOnDeviceTranscription()
                         } label: {
-                            Label("On-Device Transcription", systemImage: "iphone")
+                            Label("On-Device Transcription (best while charging)", systemImage: "iphone")
                         }
                     } label: {
                         Label("Transcribe", systemImage: "waveform")

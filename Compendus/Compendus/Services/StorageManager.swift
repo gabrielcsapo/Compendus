@@ -107,6 +107,33 @@ class StorageManager {
         }
     }
 
+    /// List book IDs that have TTS cache directories.
+    func ttsCacheBookIds() -> [String] {
+        guard fileManager.fileExists(atPath: ttsCacheURL.path),
+              let contents = try? fileManager.contentsOfDirectory(
+                  at: ttsCacheURL,
+                  includingPropertiesForKeys: [.isDirectoryKey],
+                  options: [.skipsHiddenFiles]
+              ) else { return [] }
+        return contents.compactMap { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+            return values?.isDirectory == true ? url.lastPathComponent : nil
+        }
+    }
+
+    /// Get TTS cache size for a specific book.
+    func ttsCacheSize(for bookId: String) -> Int64 {
+        let bookDir = ttsCacheURL.appendingPathComponent(bookId, isDirectory: true)
+        return directorySize(at: bookDir)
+    }
+
+    /// Clear TTS cache for a specific book.
+    func clearTTSCache(for bookId: String) throws {
+        let bookDir = ttsCacheURL.appendingPathComponent(bookId, isDirectory: true)
+        guard fileManager.fileExists(atPath: bookDir.path) else { return }
+        try fileManager.removeItem(at: bookDir)
+    }
+
     /// Get available disk space
     func availableDiskSpace() -> Int64 {
         let homeURL = URL(fileURLWithPath: NSHomeDirectory())

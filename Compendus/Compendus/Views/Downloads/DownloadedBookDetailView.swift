@@ -505,6 +505,8 @@ struct BookManagementSheet: View {
                         }
                     } header: {
                         Text("Transcription")
+                    } footer: {
+                        Text("On-device transcription runs best while connected to power.")
                     }
                 }
 

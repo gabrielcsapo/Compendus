@@ -48,10 +48,10 @@ final class PocketTTSContext {
 
         let config = TtsConfig(
             voiceIndex: voiceIndex,
-            temperature: 0.7,
-            topP: 0.9,
+            temperature: 0.55,
+            topP: 0.85,
             speed: speed,
-            consistencySteps: 2,
+            consistencySteps: 4,
             useFixedSeed: false,
             seed: 42
         )
