@@ -56,6 +56,98 @@ function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
+function getFileExtension(name: string): string {
+  return (name.split(".").pop() || "").toLowerCase();
+}
+
+function OrphanedFilePreview({ file }: { file: FileInfo }) {
+  const ext = getFileExtension(file.name);
+  const previewUrl = `/api/admin/preview/${encodeURIComponent(file.name)}`;
+
+  if (ext === "pdf") {
+    return (
+      <iframe
+        src={previewUrl}
+        className="w-full h-full min-h-[60vh] rounded border border-border"
+      />
+    );
+  }
+
+  if (ext === "epub") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-foreground-muted">
+        <p className="text-sm mb-3">
+          EPUB files cannot be previewed directly. Download to inspect.
+        </p>
+        <a
+          href={previewUrl}
+          download={file.name}
+          className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90"
+        >
+          Download File
+        </a>
+      </div>
+    );
+  }
+
+  if (["m4b", "m4a", "mp3"].includes(ext)) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 min-h-[200px]">
+        <p className="text-sm text-foreground-muted">Audio preview</p>
+        <audio controls className="w-full max-w-lg">
+          <source src={previewUrl} />
+          Your browser does not support the audio element.
+        </audio>
+      </div>
+    );
+  }
+
+  if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[200px]">
+        <img
+          src={previewUrl}
+          alt={file.name}
+          className="max-w-full max-h-[70vh] object-contain rounded"
+        />
+      </div>
+    );
+  }
+
+  if (["cbz", "cbr"].includes(ext)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-foreground-muted">
+        <p className="text-sm mb-3">
+          Comic archive files cannot be previewed directly. Download to inspect.
+        </p>
+        <a
+          href={previewUrl}
+          download={file.name}
+          className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90"
+        >
+          Download File
+        </a>
+      </div>
+    );
+  }
+
+  // Fallback for unknown types
+  return (
+    <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-foreground-muted">
+      <p className="text-sm mb-3">
+        No preview available for .{ext} files.
+      </p>
+      <a
+        href={previewUrl}
+        download={file.name}
+        className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90"
+      >
+        Download File
+      </a>
+    </div>
+  );
+}
+
 export function AdminDataClient({
   orphanedFiles: initialOrphanedFiles,
   matchedFiles: initialMatchedFiles,
@@ -74,6 +166,7 @@ export function AdminDataClient({
   const [jobs, setJobs] = useState(initialJobs);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadBookIdRef = useRef<string | null>(null);
@@ -465,7 +558,13 @@ export function AdminDataClient({
                     <td className="p-3 text-foreground-muted text-right">
                       {formatBytes(file.size)}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setPreviewFile(file)}
+                        className="text-primary hover:text-primary/80 text-xs"
+                      >
+                        View
+                      </button>
                       <button
                         onClick={() => handleDeleteOrphanedFile(file)}
                         disabled={deleting === file.path}
@@ -481,6 +580,38 @@ export function AdminDataClient({
           </div>
         )}
       </section>
+
+      {/* Orphaned File Preview Modal */}
+      {previewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setPreviewFile(null)}
+          />
+          <div className="relative bg-surface border border-border rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">
+                  {previewFile.name}
+                </h3>
+                <p className="text-sm text-foreground-muted">
+                  {formatBytes(previewFile.size)} &middot;{" "}
+                  {previewFile.name.split(".").pop()?.toUpperCase()}
+                </p>
+              </div>
+              <button
+                onClick={() => setPreviewFile(null)}
+                className="text-foreground-muted hover:text-foreground text-xl leading-none px-2"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden p-4 min-h-0">
+              <OrphanedFilePreview file={previewFile} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Missing Files Section */}
       <section className="mb-8">

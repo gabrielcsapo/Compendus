@@ -1,7 +1,7 @@
 "use server";
 
 import { db, books, wantedBooks } from "../lib/db";
-import { sql, isNotNull, eq, and, or } from "drizzle-orm";
+import { sql, isNotNull, eq, and, or, asc } from "drizzle-orm";
 import { type BookType, getFormatsByType } from "../lib/book-types";
 import { searchAllSources, type MetadataSearchResult } from "../lib/metadata";
 
@@ -186,6 +186,40 @@ export async function findMissingSeriesBooks(seriesName: string): Promise<Metada
 
     return true;
   });
+}
+
+/**
+ * Get books in a series that belong to a different type than the one specified.
+ * Used to show "In a different format" section on series detail pages.
+ */
+export async function getSeriesBooksOtherFormats(seriesName: string, currentType: BookType) {
+  const otherTypes = (["audiobook", "ebook", "comic"] as BookType[]).filter(t => t !== currentType);
+
+  const conditions = [
+    eq(books.series, seriesName),
+  ];
+
+  // Build OR condition for all other types
+  const typeConditions = otherTypes.map(otherType => {
+    const formats = getFormatsByType(otherType);
+    return or(
+      and(
+        sql`${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)})`,
+        sql`${books.bookTypeOverride} IS NULL`,
+      ),
+      eq(books.bookTypeOverride, otherType),
+    )!;
+  });
+
+  conditions.push(or(...typeConditions)!);
+
+  const result = await db
+    .select()
+    .from(books)
+    .where(and(...conditions))
+    .orderBy(asc(sql`CAST(${books.seriesNumber} AS REAL)`), asc(books.title));
+
+  return result;
 }
 
 export interface SeriesWithCovers {

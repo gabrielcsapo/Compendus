@@ -58,9 +58,12 @@ export async function isWhisperAvailable(): Promise<boolean> {
 async function getAudioDuration(audioPath: string): Promise<number> {
   return new Promise((resolve) => {
     const proc = spawn("ffprobe", [
-      "-v", "quiet",
-      "-show_entries", "format=duration",
-      "-of", "csv=p=0",
+      "-v",
+      "quiet",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "csv=p=0",
       audioPath,
     ]);
     let output = "";
@@ -109,16 +112,20 @@ async function ensureModelDownloaded(
   } catch (err) {
     // Clean up partial download
     if (existsSync(modelPath)) {
-      try { execSync(`rm "${modelPath}"`); } catch {}
+      try {
+        execSync(`rm "${modelPath}"`);
+      } catch {}
     }
     throw new Error(
       `Failed to download whisper model '${model}'. ` +
-      `Download manually from ${url} and place at ${modelPath}`,
+        `Download manually from ${url} and place at ${modelPath}`,
     );
   }
 
   if (!existsSync(modelPath)) {
-    throw new Error(`Model download completed but file not found at ${modelPath}`);
+    throw new Error(
+      `Model download completed but file not found at ${modelPath}`,
+    );
   }
 
   onProgress?.(4, "Model downloaded");
@@ -129,42 +136,6 @@ async function ensureModelDownloaded(
  */
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
-}
-
-/**
- * Transform whisper.cpp full JSON output to our Transcript format
- */
-function transformWhisperOutput(raw: WhisperCppOutput, duration: number): Transcript {
-  const segments = raw.transcription.map((seg) => {
-    const words = seg.tokens
-      .filter((t) => t.text.trim().length > 0)
-      .filter((t) => !t.text.startsWith("["))
-      .map((t) => ({
-        word: t.text.trim(),
-        start: round3(t.offsets.from / 1000),
-        end: round3(t.offsets.to / 1000),
-      }));
-
-    return {
-      start: round3(seg.offsets.from / 1000),
-      end: round3(seg.offsets.to / 1000),
-      text: seg.text.trim(),
-      words,
-    };
-  });
-
-  // Use ffprobe duration, fall back to last segment end
-  const finalDuration = duration > 0
-    ? round3(duration)
-    : segments.length > 0
-      ? segments[segments.length - 1].end
-      : 0;
-
-  return {
-    duration: finalDuration,
-    language: raw.result.language,
-    segments,
-  };
 }
 
 /** Chunk duration in seconds (30 minutes) — keeps WAV under ~58MB per chunk */
@@ -187,7 +158,10 @@ async function splitAudioToChunks(
 
   for (let i = 0; i < totalChunks; i++) {
     const startOffset = i * CHUNK_SECONDS;
-    const chunkPath = resolve(tempDir, `chunk_${String(i).padStart(4, "0")}.wav`);
+    const chunkPath = resolve(
+      tempDir,
+      `chunk_${String(i).padStart(4, "0")}.wav`,
+    );
 
     // Report splitting progress (6-8% range)
     const splitPct = 6 + Math.round(((i + 1) / totalChunks) * 2);
@@ -195,20 +169,38 @@ async function splitAudioToChunks(
 
     await new Promise<void>((res, rej) => {
       const args = [
-        "-y", "-i", audioPath,
-        "-ss", String(startOffset),
-        "-t", String(CHUNK_SECONDS),
-        "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+        "-y",
+        "-i",
+        audioPath,
+        "-ss",
+        String(startOffset),
+        "-t",
+        String(CHUNK_SECONDS),
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
         chunkPath,
       ];
       const ff = spawn("ffmpeg", args, { stdio: "pipe" });
       let stderr = "";
-      ff.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+      ff.stderr.on("data", (d: Buffer) => {
+        stderr += d.toString();
+      });
       ff.on("close", (code) => {
         if (code === 0) res();
-        else rej(new Error(`Failed to split chunk ${i} (exit ${code}): ${stderr.slice(-300)}`));
+        else
+          rej(
+            new Error(
+              `Failed to split chunk ${i} (exit ${code}): ${stderr.slice(-300)}`,
+            ),
+          );
       });
-      ff.on("error", (err) => rej(new Error(`Failed to start ffmpeg: ${err.message}`)));
+      ff.on("error", (err) =>
+        rej(new Error(`Failed to start ffmpeg: ${err.message}`)),
+      );
     });
 
     chunks.push({ path: chunkPath, startOffset });
@@ -232,15 +224,22 @@ async function transcribeChunk(
   const tempOutputBase = chunkPath.replace(/\.wav$/, ".whisper");
 
   const args = [
-    "-m", modelPath,
-    "-f", chunkPath,
+    "-m",
+    modelPath,
+    "-f",
+    chunkPath,
     "-ojf",
-    "-of", tempOutputBase,
+    "-of",
+    tempOutputBase,
     "-pp",
-    "--max-len", "1",
-    "-t", String(threads),
-    "-bs", "1",
-    "--best-of", "1",
+    "--max-len",
+    "1",
+    "-t",
+    String(threads),
+    "-bs",
+    "1",
+    "--best-of",
+    "1",
   ];
 
   onLog?.(`[whisper-cli] ${args.join(" ")}`);
@@ -261,7 +260,9 @@ async function transcribeChunk(
       const elapsed = Date.now() - lastOutputTime;
       if (elapsed > CHUNK_TIMEOUT_MS) {
         clearInterval(timeoutCheck);
-        onLog?.(`[timeout] No output for ${Math.round(elapsed / 60000)}min, killing process`);
+        onLog?.(
+          `[timeout] No output for ${Math.round(elapsed / 60000)}min, killing process`,
+        );
         proc.kill("SIGKILL");
       }
     }, 30000);
@@ -309,7 +310,11 @@ async function transcribeChunk(
       }
 
       if (spawnError) {
-        reject(new Error(`Failed to start whisper-cli: ${spawnError.message}. Is whisper.cpp installed?`));
+        reject(
+          new Error(
+            `Failed to start whisper-cli: ${spawnError.message}. Is whisper.cpp installed?`,
+          ),
+        );
         return;
       }
 
@@ -321,9 +326,15 @@ async function transcribeChunk(
         .slice(-500);
 
       if (errorLines) {
-        reject(new Error(`Transcription failed (exit code ${code}): ${errorLines}`));
+        reject(
+          new Error(`Transcription failed (exit code ${code}): ${errorLines}`),
+        );
       } else if (code === null) {
-        reject(new Error("Transcription process was killed (out of memory or signal). Check server resources."));
+        reject(
+          new Error(
+            "Transcription process was killed (out of memory or signal). Check server resources.",
+          ),
+        );
       } else {
         reject(new Error(`Transcription failed with exit code ${code}.`));
       }
@@ -335,7 +346,9 @@ async function transcribeChunk(
     const rawJson = await readFile(whisperJsonPath, "utf-8");
     return JSON.parse(rawJson) as WhisperCppOutput;
   } finally {
-    try { await unlink(whisperJsonPath); } catch {}
+    try {
+      await unlink(whisperJsonPath);
+    } catch {}
   }
 }
 
@@ -345,7 +358,9 @@ async function transcribeChunk(
 async function cleanupTempDir(tempDir: string): Promise<void> {
   try {
     const files = await readdir(tempDir);
-    await Promise.all(files.map((f) => unlink(resolve(tempDir, f)).catch(() => {})));
+    await Promise.all(
+      files.map((f) => unlink(resolve(tempDir, f)).catch(() => {})),
+    );
     // Remove the directory itself
     await new Promise<void>((res) => {
       const proc = spawn("rmdir", [tempDir]);
@@ -374,7 +389,11 @@ export async function transcribeAudio(
   options.onProgress?.(5, "Analyzing audio...");
   const duration = await getAudioDuration(audioPath);
 
-  const threads = Math.max(2, (process.env.WHISPER_THREADS ? parseInt(process.env.WHISPER_THREADS) : 0) || 4);
+  const threads = Math.max(
+    2,
+    (process.env.WHISPER_THREADS ? parseInt(process.env.WHISPER_THREADS) : 0) ||
+      4,
+  );
 
   // Create temp directory for chunks
   const tempDir = resolve(dirname(outputPath), `.transcribe_tmp_${Date.now()}`);
@@ -382,9 +401,16 @@ export async function transcribeAudio(
   try {
     // Split audio into 30-minute WAV chunks
     const totalChunks = Math.max(1, Math.ceil(duration / CHUNK_SECONDS));
-    console.log(`[Transcribe] Duration: ${round3(duration)}s, splitting into ${totalChunks} chunks of ${CHUNK_SECONDS}s`);
+    console.log(
+      `[Transcribe] Duration: ${round3(duration)}s, splitting into ${totalChunks} chunks of ${CHUNK_SECONDS}s`,
+    );
 
-    const chunks = await splitAudioToChunks(audioPath, tempDir, duration, options.onProgress);
+    const chunks = await splitAudioToChunks(
+      audioPath,
+      tempDir,
+      duration,
+      options.onProgress,
+    );
 
     // Transcribe each chunk sequentially
     const allSegments: TranscriptSegment[] = [];
@@ -393,11 +419,23 @@ export async function transcribeAudio(
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       const chunkPct = Math.round((i / chunks.length) * 85) + 8; // 8-93% range
-      options.onProgress?.(chunkPct, `Transcribing chunk ${i + 1}/${chunks.length}...`);
+      options.onProgress?.(
+        chunkPct,
+        `Transcribing chunk ${i + 1}/${chunks.length}...`,
+      );
 
-      console.log(`[Transcribe] Processing chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s)`);
-      options.onLog?.(`--- Chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s) ---`);
-      const whisperOutput = await transcribeChunk(chunk.path, modelPath, threads, options.onLog);
+      console.log(
+        `[Transcribe] Processing chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s)`,
+      );
+      options.onLog?.(
+        `--- Chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s) ---`,
+      );
+      const whisperOutput = await transcribeChunk(
+        chunk.path,
+        modelPath,
+        threads,
+        options.onLog,
+      );
 
       if (i === 0 && whisperOutput.result?.language) {
         language = whisperOutput.result.language;
@@ -423,17 +461,20 @@ export async function transcribeAudio(
       }
 
       // Delete chunk WAV immediately after transcription to free disk space
-      try { await unlink(chunk.path); } catch {}
+      try {
+        await unlink(chunk.path);
+      } catch {}
     }
 
     // Build final transcript
     options.onProgress?.(97, "Processing transcript...");
 
-    const finalDuration = duration > 0
-      ? round3(duration)
-      : allSegments.length > 0
-        ? allSegments[allSegments.length - 1].end
-        : 0;
+    const finalDuration =
+      duration > 0
+        ? round3(duration)
+        : allSegments.length > 0
+          ? allSegments[allSegments.length - 1].end
+          : 0;
 
     const transcript: Transcript = {
       duration: finalDuration,
@@ -441,7 +482,9 @@ export async function transcribeAudio(
       segments: allSegments,
     };
 
-    console.log(`[Transcribe] Complete: ${transcript.segments.length} segments, duration: ${transcript.duration}s`);
+    console.log(
+      `[Transcribe] Complete: ${transcript.segments.length} segments, duration: ${transcript.duration}s`,
+    );
     await writeFile(outputPath, JSON.stringify(transcript), "utf-8");
   } finally {
     await cleanupTempDir(tempDir);

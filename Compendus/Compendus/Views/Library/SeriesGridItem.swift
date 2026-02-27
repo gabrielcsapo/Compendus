@@ -9,30 +9,13 @@ import SwiftUI
 
 struct SeriesGridItem: View {
     let series: SeriesItem
-    /// Standard book cover aspect ratio (2:3)
-    private let bookAspectRatio: CGFloat = 2/3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Fanned covers
-            ZStack {
-                if series.coverBooks.isEmpty {
-                    placeholderCover
-                } else if series.coverBooks.count == 1 {
-                    // Single book — no fan
-                    singleCover(series.coverBooks[0])
-                } else {
-                    // Multiple books — fan out
-                    ForEach(Array(series.coverBooks.prefix(3).enumerated()), id: \.element.id) { index, book in
-                        coverImage(book)
-                            .rotationEffect(.degrees(rotation(for: index, total: min(series.coverBooks.count, 3))))
-                            .offset(x: offset(for: index, total: min(series.coverBooks.count, 3)))
-                            .zIndex(Double(index))
-                    }
-                }
+            FannedCoverStack(count: series.coverBooks.count) { index in
+                CachedCoverImage(bookId: series.coverBooks[index].id, hasCover: series.coverBooks[index].coverUrl != nil)
             }
-            .aspectRatio(bookAspectRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal)
 
             // Series name and count
             VStack(alignment: .leading, spacing: 2) {
@@ -49,50 +32,6 @@ struct SeriesGridItem: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(series.name) series, \(series.bookCount) books")
         .accessibilityHint("Double tap to view books in this series")
-    }
-
-    // MARK: - Cover Views
-
-    @ViewBuilder
-    private func singleCover(_ book: SeriesCoverBook) -> some View {
-        coverImage(book)
-    }
-
-    @ViewBuilder
-    private func coverImage(_ book: SeriesCoverBook) -> some View {
-        CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil)
-            .aspectRatio(bookAspectRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
-    }
-
-    @ViewBuilder
-    private var placeholderCover: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.gray.opacity(0.2))
-            .overlay {
-                Image(systemName: "books.vertical")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-            }
-    }
-
-    // MARK: - Fan Layout
-
-    private func rotation(for index: Int, total: Int) -> Double {
-        switch total {
-        case 1: return 0
-        case 2: return index == 0 ? -4 : 4
-        default: return [-6, 0, 6][index]
-        }
-    }
-
-    private func offset(for index: Int, total: Int) -> CGFloat {
-        switch total {
-        case 1: return 0
-        case 2: return index == 0 ? -6 : 6
-        default: return [-8, 0, 8][index]
-        }
     }
 }
 

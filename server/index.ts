@@ -16,6 +16,7 @@ import { transcribeRoutes } from "./routes/transcribe";
 import { editorRoutes } from "./routes/editor";
 import { assetsRoutes } from "./routes/assets";
 import { libraryRoutes } from "./routes/library";
+import { adminRoutes } from "./routes/admin";
 import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
@@ -49,6 +50,7 @@ app.route("/", convertRoutes);
 app.route("/", transcribeRoutes);
 app.route("/", editorRoutes);
 app.route("/", libraryRoutes);
+app.route("/", adminRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);

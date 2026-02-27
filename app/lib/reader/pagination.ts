@@ -176,7 +176,7 @@ class PaginationEngine {
   private getTextPage(
     content: TextContent,
     pageNum: number,
-    totalPages: number,
+    _totalPages: number,
     viewport: ViewportConfig,
   ): PageContent {
     // For image-based content (0 characters), each page is one chapter

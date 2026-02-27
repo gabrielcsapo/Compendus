@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
 import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { SeriesCard } from "../components/SeriesCard";
-import { getSeriesWithCovers } from "../actions/series";
+import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
 import { BookGrid } from "../components/BookGrid";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
@@ -47,6 +47,7 @@ type HomeData = {
   currentType: TypeFilter;
   currentFormats: string[];
   formatCounts: Awaited<ReturnType<typeof getFormatCounts>>;
+  otherFormatBooks: Awaited<ReturnType<typeof getBooks>>;
 };
 
 export default function Home() {
@@ -92,15 +93,18 @@ export default function Home() {
           currentType: type,
           currentFormats: format ?? [],
           formatCounts: [],
+          otherFormatBooks: [],
         };
       }
 
-      const [books, totalCount, recentBooks, unmatchedCount, formatCounts] = await Promise.all([
+      const [books, totalCount, recentBooks, unmatchedCount, formatCounts, otherFormatBooks] = await Promise.all([
         getBooks({ limit: BOOKS_PER_PAGE, offset: 0, orderBy, order, type: typeFilter, format, series: seriesFilter || undefined }),
         getBooksCount(typeFilter, format, seriesFilter || undefined),
         seriesFilter ? Promise.resolve([]) : getRecentBooks(5),
         getUnmatchedBooksCount(),
         getFormatCounts(typeFilter),
+        // When viewing a series with a type filter, also get books in other formats
+        seriesFilter && typeFilter ? getSeriesBooksOtherFormats(seriesFilter, typeFilter) : Promise.resolve([]),
       ]);
 
       return {
@@ -115,6 +119,7 @@ export default function Home() {
         currentType: type,
         currentFormats: format ?? [],
         formatCounts,
+        otherFormatBooks,
       };
     }
 
@@ -141,7 +146,7 @@ export default function Home() {
   const {
     view: currentView, seriesList, seriesFilter: currentSeriesFilter,
     books, totalCount, recentBooks, unmatchedCount,
-    currentSort, currentType, currentFormats, formatCounts,
+    currentSort, currentType, currentFormats, formatCounts, otherFormatBooks,
   } = data;
 
   return (
@@ -293,6 +298,17 @@ export default function Home() {
               emptyMessage={currentSeriesFilter ? "No books found in this series." : "Your library is empty. Drop some books above to get started!"}
             />
           </section>
+
+          {/* Other formats for this series */}
+          {currentSeriesFilter && otherFormatBooks.length > 0 && (
+            <section className="mt-10 pt-8 border-t border-border">
+              <h2 className="text-lg font-semibold mb-1 text-foreground">In a different format</h2>
+              <p className="text-sm text-foreground-muted mb-4">
+                {otherFormatBooks.length} {otherFormatBooks.length === 1 ? "book" : "books"} from this series in other formats
+              </p>
+              <BookGrid books={otherFormatBooks} size="compact" />
+            </section>
+          )}
         </>
       )}
     </main>

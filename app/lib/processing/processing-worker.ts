@@ -7,7 +7,7 @@
  * This worker only performs CPU-bound transformations and returns results.
  */
 import { parentPort } from "worker_threads";
-import type { BookFormat, BookMetadata, CoverResult } from "../types";
+import type { BookFormat, BookMetadata } from "../types";
 
 // Lazy imports to avoid loading heavy modules until needed
 let _extractPdfMetadata: typeof import("./pdf").extractPdfMetadata;
@@ -116,6 +116,7 @@ async function handleTask(task: WorkerTask): Promise<unknown> {
       // Serialize CoverResult: convert Buffer to Uint8Array for transfer
       return {
         buffer: new Uint8Array(result.buffer),
+        thumbnail: new Uint8Array(result.thumbnail),
         mimeType: result.mimeType,
         dominantColor: result.dominantColor,
       };

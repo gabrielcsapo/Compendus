@@ -134,8 +134,7 @@ async function extractPageContent(
 
     for (let i = 0; i < operatorList.fnArray.length; i++) {
       if (
-        operatorList.fnArray[i] === OPS.paintImageXObject ||
-        operatorList.fnArray[i] === OPS.paintJpegXObject
+        operatorList.fnArray[i] === OPS.paintImageXObject
       ) {
         const imgName = operatorList.argsArray[i]?.[0] as string;
         if (imgName && !imgIds.has(imgName)) {

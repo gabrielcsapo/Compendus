@@ -107,9 +107,7 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<Book[]> {
   }
 
   if (conditions.length > 0) {
-    for (const condition of conditions) {
-      query = query.where(condition);
-    }
+    query = query.where(and(...conditions));
   }
 
   // Apply ordering — when filtering by series, sort by series number first
