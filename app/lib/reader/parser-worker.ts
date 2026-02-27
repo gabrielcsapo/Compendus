@@ -2,6 +2,9 @@
  * Worker thread for CPU-intensive book parsing
  * Runs parsing in a separate thread to avoid blocking the main event loop
  */
+// Must be imported before pdfjs-dist (which pdf.ts imports)
+import "./parsers/pdf-polyfill";
+
 import { parentPort, workerData } from "worker_threads";
 import type { NormalizedContent } from "./types";
 import type { BookFormat } from "../types";

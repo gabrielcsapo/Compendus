@@ -1,6 +1,55 @@
-import { readFile, writeFile } from "fs/promises";
+import { readFile, writeFile, rename, unlink } from "fs/promises";
+import { dirname, join } from "path";
+import { randomBytes } from "crypto";
 import type { BookFormat } from "../types";
 import NodeID3Module from "node-id3";
+
+/**
+ * Atomically replace a file by writing to a temp file in the same directory
+ * and then renaming. This ensures the original file is never deleted without
+ * a valid replacement ready, preventing data loss on crash or disk errors.
+ *
+ * @param targetPath - The file to replace
+ * @param content - The new content (Buffer)
+ */
+async function safeWriteFile(targetPath: string, content: Buffer): Promise<void> {
+  const dir = dirname(targetPath);
+  const tempPath = join(dir, `.compendus-tmp-${randomBytes(8).toString("hex")}`);
+  try {
+    await writeFile(tempPath, content);
+    await rename(tempPath, targetPath);
+  } catch (error) {
+    try { await unlink(tempPath); } catch {}
+    throw error;
+  }
+}
+
+/**
+ * Atomically replace a file with a temp file that was produced by an external
+ * process (e.g. ffmpeg). The temp file must be on the same filesystem as the
+ * target for atomic rename. Returns a path to use as the temp output target.
+ *
+ * @param targetPath - The file to replace
+ * @returns tempPath to pass to the external process as output
+ */
+function getTempPathForAtomic(targetPath: string): string {
+  const dir = dirname(targetPath);
+  const suffix = randomBytes(8).toString("hex");
+  return join(dir, `.compendus-tmp-${suffix}`);
+}
+
+/**
+ * Atomically replace targetPath with tempPath via rename.
+ * On failure, cleans up tempPath and throws.
+ */
+async function atomicReplace(tempPath: string, targetPath: string): Promise<void> {
+  try {
+    await rename(tempPath, targetPath);
+  } catch (error) {
+    try { await unlink(tempPath); } catch {}
+    throw error;
+  }
+}
 /**
  * Metadata fields that can be written to book files
  */
@@ -146,7 +195,7 @@ async function writeEpubMetadata(
     compressionOptions: { level: 9 },
   });
 
-  await writeFile(filePath, newBuffer);
+  await safeWriteFile(filePath, newBuffer);
 
   return { success: true, format: "epub", coverEmbedded };
 }
@@ -369,9 +418,9 @@ async function writePdfMetadata(
   // Set creator to indicate metadata was updated by Compendus
   pdfDoc.setCreator("Compendus");
 
-  // Step 3: Save the modified PDF
+  // Step 3: Save the modified PDF (atomic write to prevent corruption)
   const newBuffer = await pdfDoc.save();
-  await writeFile(filePath, Buffer.from(newBuffer));
+  await safeWriteFile(filePath, Buffer.from(newBuffer));
 
   return { success: true, format: "pdf" };
 }
@@ -453,7 +502,7 @@ async function writeMp3Metadata(
   const result = NodeID3Module.update(tags, fileBuffer);
 
   if (result instanceof Buffer) {
-    await writeFile(filePath, result);
+    await safeWriteFile(filePath, result);
     return { success: true, format: "mp3", coverEmbedded };
   }
 
@@ -475,8 +524,6 @@ async function writeMp3MetadataWithFfmpeg(
 ): Promise<MetadataWriteResult> {
   const { spawn } = await import("child_process");
   const { tmpdir } = await import("os");
-  const { join } = await import("path");
-  const { rename, unlink } = await import("fs/promises");
 
   // Check if ffmpeg is available
   try {
@@ -523,7 +570,8 @@ async function writeMp3MetadataWithFfmpeg(
     }
   }
 
-  const tempPath = join(tmpdir(), `compendus-mp3-${Date.now()}.mp3`);
+  // Temp file in same directory as original for atomic rename (same filesystem)
+  const tempPath = getTempPathForAtomic(filePath);
   let coverTempPath: string | null = null;
   let coverEmbedded = false;
 
@@ -574,8 +622,8 @@ async function writeMp3MetadataWithFfmpeg(
       proc.on("error", reject);
     });
 
-    await unlink(filePath);
-    await rename(tempPath, filePath);
+    // Atomically replace original — no delete-then-rename race condition
+    await atomicReplace(tempPath, filePath);
 
     return { success: true, format: "mp3", coverEmbedded };
   } catch (error) {
@@ -603,8 +651,6 @@ async function writeM4Metadata(
 ): Promise<MetadataWriteResult> {
   const { spawn } = await import("child_process");
   const { tmpdir } = await import("os");
-  const { join } = await import("path");
-  const { rename, unlink } = await import("fs/promises");
 
   // Check if ffmpeg is available
   try {
@@ -654,12 +700,12 @@ async function writeM4Metadata(
     }
   }
 
-  // Create temp files
-  const tempPath = join(tmpdir(), `compendus-m4-${Date.now()}.${format}`);
+  // Temp file in same directory as original for atomic rename (same filesystem)
+  const tempPath = getTempPathForAtomic(filePath);
   let coverTempPath: string | null = null;
   let coverEmbedded = false;
 
-  // Write cover to temp file if provided
+  // Write cover to temp file if provided (can use system tmpdir since it's ephemeral)
   if (metadata.coverImage) {
     coverTempPath = join(tmpdir(), `compendus-cover-${Date.now()}.jpg`);
     await writeFile(coverTempPath, metadata.coverImage);
@@ -710,9 +756,8 @@ async function writeM4Metadata(
       proc.on("error", reject);
     });
 
-    // Replace original with updated file
-    await unlink(filePath);
-    await rename(tempPath, filePath);
+    // Atomically replace original — no delete-then-rename race condition
+    await atomicReplace(tempPath, filePath);
 
     return { success: true, format, coverEmbedded };
   } catch (error) {

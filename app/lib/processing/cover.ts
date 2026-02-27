@@ -5,7 +5,7 @@ import { fromBuffer } from "pdf2pic";
 import { extractEpubCover } from "./epub";
 import { extractMobiCover } from "./mobi";
 import { extractAudioCover } from "./audio";
-import { storeCoverImage } from "../storage";
+import { storeCoverImage, storeCoverThumbnail } from "../storage";
 import type { BookFormat, CoverResult } from "../types";
 
 // Image extensions for comic book archives
@@ -14,6 +14,23 @@ const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 const COVER_WIDTH = 600; // Increased for better quality
 const COVER_HEIGHT = 900;
 const COVER_QUALITY = 90;
+
+const THUMB_WIDTH = 200;
+const THUMB_HEIGHT = 300;
+const THUMB_QUALITY = 80;
+
+/**
+ * Generate a 200x300 thumbnail from a processed cover image buffer
+ */
+export async function generateThumbnail(buffer: Buffer): Promise<Buffer> {
+  return sharp(buffer)
+    .resize(THUMB_WIDTH, THUMB_HEIGHT, {
+      fit: "cover",
+      position: "top",
+    })
+    .jpeg({ quality: THUMB_QUALITY, mozjpeg: true })
+    .toBuffer();
+}
 
 /**
  * Validate that a buffer contains a supported image format by checking magic bytes
@@ -157,6 +174,9 @@ export async function extractCover(
       .jpeg({ quality: 85 })
       .toBuffer();
 
+    // Generate thumbnail
+    const thumbnail = await generateThumbnail(processed);
+
     // Get dominant color for placeholder
     const { dominant } = await sharp(coverBuffer)
       .resize(1, 1)
@@ -168,6 +188,7 @@ export async function extractCover(
 
     return {
       buffer: processed,
+      thumbnail,
       mimeType: "image/jpeg",
       dominantColor: dominant,
     };
@@ -237,11 +258,15 @@ export async function processAndStoreCover(
       })
       .toBuffer();
 
+    // Generate thumbnail
+    const thumbnail = await generateThumbnail(processed);
+
     // Get dominant color for placeholder
     const dominantColor = await getDominantColor(buffer);
 
-    // Store the processed cover
+    // Store the processed cover and thumbnail
     const path = storeCoverImage(processed, bookId);
+    storeCoverThumbnail(thumbnail, bookId);
 
     return { path, dominantColor };
   } catch (error) {
@@ -370,5 +395,45 @@ async function extractPdfCover(buffer: Buffer): Promise<Buffer | null> {
   } catch (error) {
     console.error("Error extracting PDF cover:", error);
     return null;
+  }
+}
+
+/**
+ * Generate missing thumbnails for existing covers.
+ * Scans data/covers/ for .jpg files without a matching .thumb.jpg and creates them.
+ * Safe to call on every startup — skips covers that already have thumbnails.
+ */
+export async function generateMissingThumbnails(): Promise<void> {
+  const { readdirSync, readFileSync, existsSync } = await import("fs");
+  const { resolve } = await import("path");
+
+  const coversDir = resolve(process.cwd(), "data", "covers");
+  if (!existsSync(coversDir)) return;
+
+  const files = readdirSync(coversDir);
+  const coverFiles = files.filter(
+    (f) => f.endsWith(".jpg") && !f.endsWith(".thumb.jpg"),
+  );
+
+  let generated = 0;
+  for (const file of coverFiles) {
+    const thumbFile = file.replace(/\.jpg$/, ".thumb.jpg");
+    const thumbPath = resolve(coversDir, thumbFile);
+
+    if (existsSync(thumbPath)) continue;
+
+    try {
+      const coverBuffer = readFileSync(resolve(coversDir, file));
+      const thumbnail = await generateThumbnail(coverBuffer);
+      const { writeFileSync } = await import("fs");
+      writeFileSync(thumbPath, thumbnail);
+      generated++;
+    } catch (error) {
+      console.warn(`Failed to generate thumbnail for ${file}:`, error);
+    }
+  }
+
+  if (generated > 0) {
+    console.log(`[thumbnails] Generated ${generated} missing thumbnail(s)`);
   }
 }

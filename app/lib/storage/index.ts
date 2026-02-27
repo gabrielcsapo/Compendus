@@ -58,6 +58,14 @@ export function storeCoverImage(buffer: Buffer, bookId: string): string {
   return `data/covers/${fileName}`;
 }
 
+export function storeCoverThumbnail(buffer: Buffer, bookId: string): void {
+  const fileName = `${bookId}.thumb.jpg`;
+  const absolutePath = resolve(COVERS_DIR, fileName);
+
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, buffer);
+}
+
 export function deleteBookFile(filePath: string): boolean {
   try {
     const absolutePath = resolveStoragePath(filePath);
@@ -76,9 +84,13 @@ export function deleteCoverImage(coverPath: string): boolean {
     const absolutePath = resolveStoragePath(coverPath);
     if (existsSync(absolutePath)) {
       unlinkSync(absolutePath);
-      return true;
     }
-    return false;
+    // Also delete thumbnail if it exists
+    const thumbPath = absolutePath.replace(/\.jpg$/, ".thumb.jpg");
+    if (existsSync(thumbPath)) {
+      unlinkSync(thumbPath);
+    }
+    return true;
   } catch {
     return false;
   }

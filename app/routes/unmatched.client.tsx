@@ -15,7 +15,8 @@ import { getReaderInfo, getReaderPage } from "../actions/reader";
 import type { PageContent } from "../lib/reader/types";
 import type { BookFormat } from "../lib/types";
 import { THEMES } from "../lib/reader/settings";
-import { ClickableCoverPlaceholder } from "../components/CoverExtractButton";
+import { CoverExtractButton } from "../components/CoverExtractButton";
+import { CoverDropZone } from "../components/CoverDropZone";
 import type { Book } from "../lib/db/schema";
 import type { MetadataSearchResult } from "../lib/metadata";
 
@@ -303,27 +304,26 @@ export default function UnmatchedBooks() {
             <div className="grid md:grid-cols-[280px_1fr] gap-6">
               {/* Book info */}
               <div>
-                {currentBook.coverPath ? (
-                  <div
-                    className="aspect-[2/3] w-full max-w-[200px] overflow-hidden rounded-lg bg-surface-elevated"
-                    style={{ backgroundColor: currentBook.coverColor || undefined }}
-                  >
-                    <img
-                      src={`/covers/${currentBook.id}.jpg?v=${currentBook.updatedAt?.getTime() || ""}`}
-                      alt={currentBook.title}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                ) : (
-                  <ClickableCoverPlaceholder
+                <div className="w-full max-w-[200px]">
+                  <CoverDropZone
                     bookId={currentBook.id}
-                    bookFormat={currentBook.format}
-                    title={currentBook.title}
+                    coverPath={currentBook.coverPath}
                     coverColor={currentBook.coverColor}
+                    title={currentBook.title}
+                    updatedAt={currentBook.updatedAt}
                     onSuccess={loadNextBook}
-                    className="aspect-[2/3] w-full max-w-[200px] overflow-hidden rounded-lg"
                   />
-                )}
+                  {!currentBook.coverPath && (
+                    <div className="mt-2 text-center">
+                      <CoverExtractButton
+                        bookId={currentBook.id}
+                        bookFormat={currentBook.format}
+                        onSuccess={loadNextBook}
+                        variant="inline"
+                      />
+                    </div>
+                  )}
+                </div>
                 <h3 className="font-semibold text-foreground mt-3 line-clamp-2">
                   {currentBook.title}
                 </h3>

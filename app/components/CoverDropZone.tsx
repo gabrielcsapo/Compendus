@@ -9,6 +9,7 @@ interface CoverDropZoneProps {
   title: string;
   updatedAt?: Date | null;
   children?: React.ReactNode;
+  onSuccess?: () => void;
 }
 
 export function CoverDropZone({
@@ -18,6 +19,7 @@ export function CoverDropZone({
   title,
   updatedAt,
   children,
+  onSuccess,
 }: CoverDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -60,7 +62,11 @@ export function CoverDropZone({
         const result = await response.json();
 
         if (result.success) {
-          window.location.reload();
+          if (onSuccess) {
+            onSuccess();
+          } else {
+            window.location.reload();
+          }
         } else {
           setError(
             result.error === "processing_failed"
@@ -74,7 +80,7 @@ export function CoverDropZone({
         setIsUploading(false);
       }
     },
-    [bookId, previewUrl]
+    [bookId, previewUrl, onSuccess]
   );
 
   const showConfirmation = useCallback(

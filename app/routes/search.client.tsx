@@ -603,7 +603,7 @@ function SearchResultCard({
         style={{ backgroundColor: book.coverColor || undefined }}
       >
         {book.coverPath ? (
-          <img src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`} alt="" className="w-full h-full object-cover" />
+          <img src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`} alt="" className="w-full h-full object-cover" />
         ) : null}
       </div>
 

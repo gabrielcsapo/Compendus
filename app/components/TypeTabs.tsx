@@ -60,8 +60,11 @@ const TYPE_OPTIONS: { value: TypeFilter; label: string; icon: React.ReactNode }[
   },
 ];
 
-function buildUrl(type: TypeFilter, currentSort: string): string {
+function buildUrl(type: TypeFilter, currentSort: string, currentView?: "series" | "books"): string {
   const params = new URLSearchParams();
+  if (currentView === "series") {
+    params.set("view", "series");
+  }
   if (type !== "all") {
     params.set("type", type);
   }
@@ -75,9 +78,11 @@ function buildUrl(type: TypeFilter, currentSort: string): string {
 export function TypeTabs({
   currentType,
   currentSort,
+  currentView,
 }: {
   currentType: TypeFilter;
   currentSort: string;
+  currentView?: "series" | "books";
 }) {
   return (
     <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
@@ -86,7 +91,7 @@ export function TypeTabs({
         return (
           <Link
             key={option.value}
-            to={buildUrl(option.value, currentSort)}
+            to={buildUrl(option.value, currentSort, currentView)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
               isActive
                 ? "bg-primary text-white shadow-sm"

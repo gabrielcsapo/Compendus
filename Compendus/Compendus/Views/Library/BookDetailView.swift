@@ -152,7 +152,7 @@ struct BookDetailView: View {
     @ViewBuilder
     private var heroCoverSection: some View {
         VStack {
-            CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
+            CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format, useThumbnail: false)
                 .aspectRatio(2/3, contentMode: .fit)
                 .frame(width: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 10))

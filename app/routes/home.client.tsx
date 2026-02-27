@@ -72,12 +72,12 @@ export default function Home() {
 
       // Series grid view
       if (view === "series") {
-        const rawSeriesList = await getSeriesWithCovers();
+        const rawSeriesList = await getSeriesWithCovers(typeFilter);
         const seriesList = rawSeriesList.map(s => ({
           ...s,
           coverBooks: s.coverBooks.map(b => ({
             id: b.id,
-            coverUrl: b.coverPath ? `/covers/${b.id}.jpg?v=${b.updatedAt?.getTime() || ""}` : null,
+            coverUrl: b.coverPath ? `/covers/${b.id}.thumb.jpg?v=${b.updatedAt?.getTime() || ""}` : null,
           })),
         }));
         return {
@@ -153,7 +153,7 @@ export default function Home() {
             {currentSeriesFilter ? (
               <>
                 <div className="flex items-center gap-2 mb-1">
-                  <Link to="/?view=series" className="text-sm text-primary hover:text-primary-hover transition-colors">
+                  <Link to={`/?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`} className="text-sm text-primary hover:text-primary-hover transition-colors">
                     &larr; All Series
                   </Link>
                 </div>
@@ -211,7 +211,7 @@ export default function Home() {
                 Books
               </Link>
               <Link
-                to="/?view=series"
+                to={`/?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
                   currentView === "series"
                     ? "bg-primary text-white shadow-sm"
@@ -224,9 +224,9 @@ export default function Home() {
                 Series
               </Link>
             </div>
+            <TypeTabs currentType={currentType} currentSort={currentSort} currentView={currentView} />
             {currentView !== "series" && (
               <>
-                <TypeTabs currentType={currentType} currentSort={currentSort} />
                 {formatCounts.length > 1 && (
                   <FormatDropdown
                     formatCounts={formatCounts}
@@ -265,6 +265,7 @@ export default function Home() {
                   name={series.name}
                   bookCount={series.bookCount}
                   coverBooks={series.coverBooks}
+                  currentType={currentType}
                 />
               ))}
             </div>

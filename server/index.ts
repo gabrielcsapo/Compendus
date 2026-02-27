@@ -16,6 +16,7 @@ import { transcribeRoutes } from "./routes/transcribe";
 import { editorRoutes } from "./routes/editor";
 import { assetsRoutes } from "./routes/assets";
 import { libraryRoutes } from "./routes/library";
+import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
 
@@ -51,6 +52,11 @@ app.route("/", libraryRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);
+
+// Generate thumbnails for any existing covers that don't have them yet
+generateMissingThumbnails().catch((err) =>
+  console.warn("[thumbnails] Failed to generate missing thumbnails:", err),
+);
 
 // 404 for unmatched API routes
 app.all("/api/*", (c) => {

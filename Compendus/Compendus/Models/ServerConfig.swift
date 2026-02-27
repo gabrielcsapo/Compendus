@@ -51,9 +51,14 @@ class ServerConfig {
         return URL(string: "\(base.absoluteString)\(cleanPath)")
     }
 
-    /// Build a URL for a book cover
+    /// Build a URL for a book cover (full size 600x900)
     func coverURL(for bookId: String) -> URL? {
         apiURL("/covers/\(bookId).jpg")
+    }
+
+    /// Build a URL for a book cover thumbnail (200x300)
+    func coverThumbnailURL(for bookId: String) -> URL? {
+        apiURL("/covers/\(bookId).thumb.jpg")
     }
 
     /// Build a URL for downloading a book file

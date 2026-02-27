@@ -1,3 +1,6 @@
+// Must be imported before pdfjs-dist to polyfill DOMMatrix/Path2D/ImageData in Node.js
+import "./pdf-polyfill";
+
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PdfContent, TocEntry } from "../types";
 

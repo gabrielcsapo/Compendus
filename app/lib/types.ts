@@ -40,6 +40,7 @@ export interface ExtractedContent {
 
 export interface CoverResult {
   buffer: Buffer;
+  thumbnail: Buffer;
   mimeType: string;
   dominantColor?: string;
 }

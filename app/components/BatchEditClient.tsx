@@ -1283,7 +1283,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
                   <div className="shrink-0">
                     {book.coverPath ? (
                       <img
-                        src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
+                        src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
                         alt={book.title}
                         className="w-36 aspect-[2/3] object-cover rounded-lg shadow-md"
                       />
@@ -1523,7 +1523,7 @@ export function BatchEditClient({ books: initialBooks, bookTags: initialBookTags
                   >
                     {book.coverPath ? (
                       <img
-                        src={`/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}`}
+                        src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
                         alt=""
                         className="w-8 h-10 object-cover rounded"
                         loading="lazy"

@@ -1,7 +1,8 @@
 "use server";
 
 import { db, books, wantedBooks } from "../lib/db";
-import { sql, isNotNull, eq } from "drizzle-orm";
+import { sql, isNotNull, eq, and, or } from "drizzle-orm";
+import { type BookType, getFormatsByType } from "../lib/book-types";
 import { searchAllSources, type MetadataSearchResult } from "../lib/metadata";
 
 export interface SeriesInfo {
@@ -201,7 +202,23 @@ export interface SeriesWithCovers {
 /**
  * Get all series with cover data for fan-out display
  */
-export async function getSeriesWithCovers(): Promise<SeriesWithCovers[]> {
+export async function getSeriesWithCovers(type?: BookType): Promise<SeriesWithCovers[]> {
+  // Build where conditions
+  const conditions = [isNotNull(books.series)];
+
+  if (type) {
+    const formats = getFormatsByType(type);
+    conditions.push(
+      or(
+        and(
+          sql`${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)})`,
+          sql`${books.bookTypeOverride} IS NULL`,
+        ),
+        eq(books.bookTypeOverride, type),
+      )!,
+    );
+  }
+
   // Get all books that belong to a series
   const seriesBooks = await db
     .select({
@@ -212,7 +229,7 @@ export async function getSeriesWithCovers(): Promise<SeriesWithCovers[]> {
       updatedAt: books.updatedAt,
     })
     .from(books)
-    .where(isNotNull(books.series))
+    .where(and(...conditions))
     .orderBy(books.series);
 
   // Group by series

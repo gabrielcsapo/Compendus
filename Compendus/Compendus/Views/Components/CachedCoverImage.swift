@@ -11,6 +11,7 @@ struct CachedCoverImage: View {
     let bookId: String
     let hasCover: Bool
     var format: String = "epub"
+    var useThumbnail: Bool = true
 
     @Environment(ImageCache.self) private var imageCache
     @Environment(ServerConfig.self) private var serverConfig
@@ -39,7 +40,10 @@ struct CachedCoverImage: View {
     }
 
     private func loadImage() async {
-        guard hasCover, let url = serverConfig.coverURL(for: bookId) else {
+        let url = useThumbnail
+            ? serverConfig.coverThumbnailURL(for: bookId)
+            : serverConfig.coverURL(for: bookId)
+        guard hasCover, let url else {
             isLoading = false
             hasFailed = true
             return

@@ -4,7 +4,7 @@ import { promisify } from "util";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, extname } from "path";
-import type { BookMetadata, AudioChapter, CoverResult } from "../types";
+import type { BookMetadata, AudioChapter } from "../types";
 
 export interface AudioMetadata extends BookMetadata {
   duration?: number;
@@ -122,7 +122,7 @@ function extractChapters(metadata: mm.IAudioMetadata): AudioChapter[] {
   return chapters;
 }
 
-export async function extractAudioCover(buffer: Buffer): Promise<CoverResult | null> {
+export async function extractAudioCover(buffer: Buffer): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
     const metadata = await mm.parseBuffer(buffer);
     const picture = metadata.common.picture?.[0];

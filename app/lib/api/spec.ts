@@ -510,7 +510,8 @@ export const apiSpec: ApiSpec = {
   series: string | null;
   seriesNumber: string | null;
   format: "pdf" | "epub" | "mobi" | "cbr" | "cbz" | "m4b" | "mp3" | "m4a";
-  coverUrl: string | null; // URL path: /covers/{id}.jpg
+  coverUrl: string | null;          // URL path: /covers/{id}.jpg
+  coverThumbnailUrl: string | null; // URL path: /covers/{id}.thumb.jpg (200x300)
   addedAt: string;         // ISO timestamp
 }`,
     },

@@ -9,15 +9,17 @@ interface SeriesCardProps {
   name: string;
   bookCount: number;
   coverBooks: SeriesCoverBook[];
+  currentType?: string;
 }
 
-export function SeriesCard({ name, bookCount, coverBooks }: SeriesCardProps) {
+export function SeriesCard({ name, bookCount, coverBooks, currentType }: SeriesCardProps) {
   const rotations = [-6, 0, 6];
   const offsets = [-8, 0, 8];
+  const typeParam = currentType && currentType !== "all" ? `&type=${currentType}` : "";
 
   return (
     <Link
-      to={`/?series=${encodeURIComponent(name)}`}
+      to={`/?series=${encodeURIComponent(name)}${typeParam}`}
       className="group relative transition-all duration-200 hover:-translate-y-1"
     >
       {/* Fanned covers */}

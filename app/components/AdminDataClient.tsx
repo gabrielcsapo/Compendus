@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Link } from "react-flight-router/client";
 import {
   deleteOrphanedFile,
@@ -73,7 +73,10 @@ export function AdminDataClient({
   const [orphanedSize, setOrphanedSize] = useState(initialOrphanedSize);
   const [jobs, setJobs] = useState(initialJobs);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadBookIdRef = useRef<string | null>(null);
 
   // Matched files: search, filter, pagination
   const [matchedSearch, setMatchedSearch] = useState("");
@@ -151,6 +154,57 @@ export function AdminDataClient({
     }
   };
 
+  const handleUploadMissingFile = (book: BookRecord) => {
+    uploadBookIdRef.current = book.id;
+    if (fileInputRef.current) {
+      fileInputRef.current.accept = `.${book.format}`;
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const bookId = uploadBookIdRef.current;
+    if (!file || !bookId) return;
+
+    setUploading(bookId);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`/api/books/${bookId}/file`, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await res.json();
+
+      if (result.success) {
+        const book = missingFiles.find((b) => b.id === bookId);
+        if (book) {
+          setMissingFiles((prev) => prev.filter((b) => b.id !== bookId));
+          setMatchedFiles((prev) => [
+            ...prev,
+            {
+              name: `${bookId}.${book.format}`,
+              size: result.book.fileSize,
+              path: `data/books/${bookId}.${book.format}`,
+              bookId,
+              book: { ...book, fileSize: result.book.fileSize },
+            },
+          ].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      } else {
+        alert(result.message || result.error || "Upload failed");
+      }
+    } catch {
+      alert("Upload failed");
+    } finally {
+      setUploading(null);
+      uploadBookIdRef.current = null;
+    }
+  };
+
   const handleDeleteMissingRecord = async (book: BookRecord) => {
     if (
       !confirm(
@@ -193,6 +247,12 @@ export function AdminDataClient({
 
   return (
     <main className="container my-8 px-6 mx-auto max-w-6xl">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileSelected}
+        className="hidden"
+      />
       <div className="mb-8">
         <Link to="/" className="text-primary hover:underline text-sm">
           &larr; Back to Library
@@ -481,7 +541,14 @@ export function AdminDataClient({
                     <td className="p-3 text-foreground-muted text-right">
                       {formatBytes(book.fileSize)}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleUploadMissingFile(book)}
+                        disabled={uploading === book.id}
+                        className="text-primary hover:text-primary/80 disabled:opacity-50 text-xs"
+                      >
+                        {uploading === book.id ? "Uploading..." : "Upload File"}
+                      </button>
                       <button
                         onClick={() => handleDeleteMissingRecord(book)}
                         disabled={deleting === book.id}

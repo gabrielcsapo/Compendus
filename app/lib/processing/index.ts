@@ -5,7 +5,7 @@ import { lookup } from "mime-types";
 import { eq, sql } from "drizzle-orm";
 
 import { db, books } from "../db";
-import { storeBookFile, storeCoverImage, getBookFilePath, getBookFileRelativePath } from "../storage";
+import { storeBookFile, storeCoverImage, storeCoverThumbnail, getBookFilePath, getBookFileRelativePath } from "../storage";
 import { extractPdfMetadata } from "./pdf";
 import { extractEpubMetadata } from "./epub";
 import { extractMobiMetadata } from "./mobi";
@@ -17,7 +17,7 @@ import {
   type AudioMetadata,
   type AudioFileInput,
 } from "./audio";
-import { extractCover } from "./cover";
+import { extractCover, processAndStoreCover } from "./cover";
 import { convertCbrToCbz } from "./comic";
 import { suppressConsole, yieldToEventLoop, scheduleBackground, runInWorker } from "./utils";
 import { createJob, updateJobProgress } from "../queue";
@@ -172,9 +172,10 @@ export async function processBook(
   );
   // Worker returns Uint8Array for buffer, convert back to Buffer
   const coverResult = coverResultRaw
-    ? { ...coverResultRaw, buffer: Buffer.from(coverResultRaw.buffer) }
+    ? { ...coverResultRaw, buffer: Buffer.from(coverResultRaw.buffer), thumbnail: Buffer.from(coverResultRaw.thumbnail) }
     : null;
   const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
+  if (coverResult) storeCoverThumbnail(coverResult.thumbnail, bookId);
 
   // Merge extracted metadata with overrides (overrides take precedence)
   const meta = options.metadata;
@@ -355,9 +356,10 @@ function queueBackgroundProcessing(
       () => suppressConsole(() => extractCover(buffer, format)),
     );
     const coverResult = coverResultRaw
-      ? { ...coverResultRaw, buffer: Buffer.from(coverResultRaw.buffer) }
+      ? { ...coverResultRaw, buffer: Buffer.from(coverResultRaw.buffer), thumbnail: Buffer.from(coverResultRaw.thumbnail) }
       : null;
     const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
+    if (coverResult) storeCoverThumbnail(coverResult.thumbnail, bookId);
 
     // Yield again before database operations
     await yieldToEventLoop();
@@ -500,13 +502,14 @@ export async function processMultiFileAudiobookWithProgress(
   }
 
   // Extract cover from first file (or try all files until we find one)
-  let coverResult = await suppressConsole(() => extractAudioCover(sortedFiles[0].buffer));
-  if (!coverResult) {
-    for (let i = 1; i < sortedFiles.length && !coverResult; i++) {
-      coverResult = await suppressConsole(() => extractAudioCover(sortedFiles[i].buffer));
+  let rawCover = await suppressConsole(() => extractAudioCover(sortedFiles[0].buffer));
+  if (!rawCover) {
+    for (let i = 1; i < sortedFiles.length && !rawCover; i++) {
+      rawCover = await suppressConsole(() => extractAudioCover(sortedFiles[i].buffer));
     }
   }
-  const coverPath = coverResult ? storeCoverImage(coverResult.buffer, bookId) : null;
+  const coverResult = rawCover ? await processAndStoreCover(rawCover.buffer, bookId) : null;
+  const coverPath = coverResult?.path || null;
 
   // Merge metadata with overrides
   const meta = options.metadata;

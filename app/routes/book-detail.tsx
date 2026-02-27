@@ -36,8 +36,24 @@ export default async function BookDetail({ params }: { params?: Record<string, s
     : [];
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
 
+  // Parse coverColor hex to RGB for gradient
+  const heroGradient = (() => {
+    const hex = book.coverColor;
+    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return undefined;
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `linear-gradient(to bottom, rgba(${r}, ${g}, ${b}, 0.15) 0%, rgba(${r}, ${g}, ${b}, 0.05) 60%, transparent 100%)`;
+  })();
+
   return (
     <main className="max-w-5xl my-8 px-4 sm:px-6 mx-auto">
+      {heroGradient && (
+        <div
+          className="absolute inset-x-0 top-0 h-[420px] -z-10 pointer-events-none"
+          style={{ background: heroGradient }}
+        />
+      )}
       <div className="mb-8">
         <Link
           to="/"

@@ -1,8 +1,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
+import { createHash } from "crypto";
 import { processBook } from "../../app/lib/processing";
 import { db, books } from "../../app/lib/db";
+import { storeBookFile } from "../../app/lib/storage";
+import type { BookFormat } from "../../app/lib/types";
 import Busboy from "busboy";
 import { createWriteStream, readFileSync, unlinkSync, mkdtempSync, rmdirSync } from "fs";
 import { tmpdir } from "os";
@@ -248,6 +251,68 @@ app.post("/api/upload-multifile", async (c) => {
     });
   } catch (error) {
     console.error("Multi-file upload error:", error);
+    return c.json({ success: false, error: "upload_failed" }, 500);
+  } finally {
+    parsed.cleanup();
+  }
+});
+
+// POST /api/books/:id/file - re-upload a missing file for an existing book record
+app.post("/api/books/:id/file", async (c) => {
+  const bookId = c.req.param("id");
+
+  // Look up the book
+  const book = await db.select().from(books).where(eq(books.id, bookId)).get();
+  if (!book) {
+    return c.json({ success: false, error: "book_not_found" }, 404);
+  }
+
+  const parsed = await parseMultipartToDisk(c);
+  try {
+    const fileEntry = parsed.files.find((f) => f.fieldName === "file");
+    if (!fileEntry) {
+      return c.json({ success: false, error: "no_file" }, 400);
+    }
+
+    // Validate the uploaded file's extension matches the book's format
+    const expectedExt = `.${book.format}`;
+    if (!fileEntry.fileName.toLowerCase().endsWith(expectedExt)) {
+      return c.json({
+        success: false,
+        error: "format_mismatch",
+        message: `Expected a ${book.format.toUpperCase()} file`,
+      }, 400);
+    }
+
+    // Read file and compute hash
+    const buffer = readFileSync(fileEntry.tempPath);
+    const fileHash = createHash("sha256").update(buffer).digest("hex");
+
+    // Store the file at the expected path
+    const storedPath = storeBookFile(buffer, bookId, book.format as BookFormat);
+
+    // Update the book record
+    await db
+      .update(books)
+      .set({
+        filePath: storedPath,
+        fileName: fileEntry.fileName,
+        fileSize: buffer.length,
+        fileHash,
+      })
+      .where(eq(books.id, bookId));
+
+    return c.json({
+      success: true,
+      book: {
+        id: book.id,
+        title: book.title,
+        format: book.format,
+        fileSize: buffer.length,
+      },
+    });
+  } catch (error) {
+    console.error("Re-upload error:", error);
     return c.json({ success: false, error: "upload_failed" }, 500);
   } finally {
     parsed.cleanup();
