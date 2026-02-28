@@ -1,4 +1,0 @@
-module whisper {
-    umbrella header "/Users/gabrielcsapo/Documents/coding/Compendus/Compendus/Packages/whisper.cpp/spm-headers/whisper.h"
-    export *
-}

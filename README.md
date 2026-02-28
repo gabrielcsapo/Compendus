@@ -17,37 +17,44 @@ A personal digital library for managing and reading your book collection. Suppor
 
 ## Prerequisites
 
+- [Git LFS](https://git-lfs.github.com/) — required for cloning (large binary files are stored with Git LFS)
 - [Node.js](https://nodejs.org/) 20+
 - [pnpm](https://pnpm.io/) (recommended) or npm
 
 ## Getting Started
 
-1. **Clone the repository**
+1. **Install Git LFS** (if not already installed)
+
+   ```bash
+   git lfs install
+   ```
+
+2. **Clone the repository**
 
    ```bash
    git clone https://github.com/gabrielcsapo/compendus.git
    cd compendus
    ```
 
-2. **Install dependencies**
+3. **Install dependencies**
 
    ```bash
    pnpm install
    ```
 
-3. **Initialize the database**
+4. **Initialize the database**
 
    ```bash
    pnpm db:migrate
    ```
 
-4. **Start the development server**
+5. **Start the development server**
 
    ```bash
    pnpm dev
    ```
 
-5. **Open in browser**
+6. **Open in browser**
    ```
    http://localhost:3000
    ```
