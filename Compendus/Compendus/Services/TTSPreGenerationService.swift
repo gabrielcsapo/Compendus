@@ -133,15 +133,6 @@ class TTSPreGenerationService {
         modelContainer: ModelContainer
     ) async {
         do {
-            // Initialize Whisper-based word aligner for precise timestamps
-            let wordAligner = TTSWordAligner()
-            do {
-                try await wordAligner.loadModel()
-                logger.info("Word aligner loaded for offline TTS generation")
-            } catch {
-                logger.warning("Word aligner unavailable: \(error) — using estimated timing")
-            }
-
             // Parse the EPUB
             await MainActor.run { state = .generating(progress: 0, message: "Parsing EPUB...") }
             let parser = try await EPUBParser.parse(epubURL: fileURL)
@@ -272,16 +263,13 @@ class TTSPreGenerationService {
                         chapterSentences[i].audioStartTime = chapterCumulativeTime
                         chapterSentences[i].audioEndTime = chapterCumulativeTime + duration
 
-                        // Run Whisper alignment for word-level timestamps
-                        let wordTimings = await wordAligner.alignWords(
-                            samples: samples,
-                            originalText: rawText,
-                            sentencePlainTextRange: sentence.plainTextRange,
-                            timeOffset: chapterCumulativeTime
+                        // Compute proportional word timings
+                        chapterSentences[i].wordTimings = TextProcessingUtils.estimateWordTimings(
+                            sentence: rawText,
+                            plainTextRange: sentence.plainTextRange,
+                            startTime: chapterCumulativeTime,
+                            endTime: chapterCumulativeTime + duration
                         )
-                        if !wordTimings.isEmpty {
-                            chapterSentences[i].wordTimings = wordTimings
-                        }
 
                         chapterCumulativeTime += duration
                         chapterSamples.append(contentsOf: samples)

@@ -84,7 +84,6 @@ class ReadAlongService {
 
     private var pocketTTSContext: PocketTTSContext?
     private var ttsAudioCache: TTSAudioCache?
-    @ObservationIgnored private var ttsWordAligner: TTSWordAligner?
     @ObservationIgnored private var ttsVoiceIndex: UInt32 = 0
 
     // MARK: - Internal State
@@ -111,6 +110,7 @@ class ReadAlongService {
     @ObservationIgnored private var ttsAudioEngine: AVAudioEngine?
     @ObservationIgnored private var ttsPlayerNode: AVAudioPlayerNode?
     @ObservationIgnored private var ttsTimePitchNode: AVAudioUnitTimePitch?
+    @ObservationIgnored private var ttsEQNode: AVAudioUnitEQ?
     @ObservationIgnored private var ttsEngineFormat: AVAudioFormat?
     @ObservationIgnored private var ttsSentences: [SentenceSpan] = []
     @ObservationIgnored private var ttsCurrentSentenceIndex: Int = 0
@@ -139,6 +139,8 @@ class ReadAlongService {
     private let ttsSilencePaddingSamples: Int = 3600
     /// Tail samples from the previous buffer for crossfading.
     @ObservationIgnored private var ttsPreviousBufferTail: [Float] = []
+    /// Envelope follower state for the software compressor (persists across buffers).
+    @ObservationIgnored private var ttsCompressorEnvelope: Float = 0
     @ObservationIgnored private var backgroundObservers: [Any] = []
 
     // MARK: - Book Matching
@@ -232,6 +234,9 @@ class ReadAlongService {
                 let startTime = player.currentTime
                 logger.info("Starting live transcription from time=\(startTime)s, duration=\(audioDuration)s")
 
+                // Live mode: transcribe ephemerally for read-along highlighting only.
+                // The transcript is NOT saved to the database.
+                transcriptionService.liveMode = true
                 transcriptionService.transcribe(
                     fileURL: fileURL,
                     duration: audioDuration,
@@ -273,6 +278,7 @@ class ReadAlongService {
             ttsPlayerNode?.stop()
             ttsAudioEngine?.stop()
             ttsPlayerNode = nil
+            ttsEQNode = nil
             ttsTimePitchNode = nil
             ttsEngineFormat = nil
             ttsAudioEngine = nil
@@ -286,7 +292,6 @@ class ReadAlongService {
             ttsPlaybackStartHostTime = 0
             ttsPlaybackStartSampleTime = 0
             pocketTTSContext = nil
-            ttsWordAligner = nil
             ttsBackgrounded = false
             for observer in backgroundObservers {
                 NotificationCenter.default.removeObserver(observer)
@@ -300,10 +305,13 @@ class ReadAlongService {
             player?.pause()
         }
 
-        // Cancel transcription if active for read-along
-        if transcriptionService?.isActive == true {
+        // Cancel transcription if active for read-along, and clean up live transcript
+        if transcriptionService?.liveMode == true {
+            transcriptionService?.cancel()
+        } else if transcriptionService?.isActive == true {
             transcriptionService?.cancel()
         }
+        transcriptionService?.partialTranscript = nil
 
         // Clear highlight
         activeSentenceRange = nil
@@ -788,8 +796,7 @@ class ReadAlongService {
         ttsCurrentSpineIndex = engine.activeSpineIndex
 
         // Release any existing Whisper context from the transcription service
-        // (audiobook mode uses a larger Whisper model). TTS mode uses Whisper-tiny
-        // for word alignment, which coexists with PocketTTS in memory.
+        // to free Metal GPU memory. TTS mode does not use Whisper.
         Task {
             if let transcriptionService {
                 transcriptionService.releaseWhisperContext()
@@ -841,16 +848,21 @@ class ReadAlongService {
         let audioEngine = AVAudioEngine()
         let playerNode = AVAudioPlayerNode()
         let timePitch = AVAudioUnitTimePitch()
+        let eq = configureTTSEQ()
 
         audioEngine.attach(playerNode)
+        audioEngine.attach(eq)
         audioEngine.attach(timePitch)
 
         // PocketTTS outputs 24kHz mono.
         let engineFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
 
-        // Chain: playerNode → timePitch → mainMixer
+        // Chain: playerNode → EQ → timePitch → mainMixer
+        // EQ shapes frequency response for warmth/presence.
+        // Software compressor runs in makeEngineBuffer() for cross-buffer envelope tracking.
         // TimePitch enables speed control without pitch distortion.
-        audioEngine.connect(playerNode, to: timePitch, format: engineFormat)
+        audioEngine.connect(playerNode, to: eq, format: engineFormat)
+        audioEngine.connect(eq, to: timePitch, format: engineFormat)
         audioEngine.connect(timePitch, to: audioEngine.mainMixerNode, format: engineFormat)
         timePitch.rate = ttsPlaybackRate
 
@@ -858,11 +870,98 @@ class ReadAlongService {
 
         self.ttsAudioEngine = audioEngine
         self.ttsPlayerNode = playerNode
+        self.ttsEQNode = eq
         self.ttsTimePitchNode = timePitch
         self.ttsEngineFormat = engineFormat
 
         setupTTSRemoteCommands()
-        logger.info("TTS audio engine started (24kHz mono, rate: \(self.ttsPlaybackRate)x)")
+        logger.info("TTS audio engine started (24kHz mono, rate: \(self.ttsPlaybackRate)x, EQ+compressor enabled)")
+    }
+
+    /// Configure a 5-band parametric EQ tuned for neural TTS voice enhancement.
+    private func configureTTSEQ() -> AVAudioUnitEQ {
+        let eq = AVAudioUnitEQ(numberOfBands: 5)
+        eq.globalGain = 0 // No global gain offset; per-band only
+
+        // Band 0: High-pass at 80Hz — remove DC offset and low-frequency rumble
+        let band0 = eq.bands[0]
+        band0.filterType = .highPass
+        band0.frequency = 80
+        band0.bypass = false
+
+        // Band 1: Cut mud at 300Hz — reduces boxy/hollow quality common in TTS
+        let band1 = eq.bands[1]
+        band1.filterType = .parametric
+        band1.frequency = 300
+        band1.bandwidth = 1.0 // ~1 octave
+        band1.gain = -2.5     // Gentle cut
+        band1.bypass = false
+
+        // Band 2: Boost warmth at 150Hz — adds body to thin-sounding TTS
+        let band2 = eq.bands[2]
+        band2.filterType = .parametric
+        band2.frequency = 150
+        band2.bandwidth = 0.8
+        band2.gain = 1.5
+        band2.bypass = false
+
+        // Band 3: Presence boost at 3kHz — improves clarity and intelligibility
+        let band3 = eq.bands[3]
+        band3.filterType = .parametric
+        band3.frequency = 3000
+        band3.bandwidth = 1.2
+        band3.gain = 2.0
+        band3.bypass = false
+
+        // Band 4: Air/brightness shelf above 6kHz — adds openness
+        // (24kHz sample rate caps usable spectrum at ~11kHz, but this still helps)
+        let band4 = eq.bands[4]
+        band4.filterType = .highShelf
+        band4.frequency = 6000
+        band4.gain = 1.5
+        band4.bypass = false
+
+        return eq
+    }
+
+    /// Apply feed-forward compression to smooth loudness across buffer boundaries.
+    /// Maintains `ttsCompressorEnvelope` state across calls for seamless transitions.
+    private func applyCompression(_ samples: inout [Float]) {
+        let sampleRate: Float = 24000
+        // Threshold in linear amplitude (~-20 dBFS)
+        let threshold: Float = 0.1
+        let ratio: Float = 3.0          // 3:1 compression above threshold
+        // Smoothing coefficients (exponential envelope follower)
+        let attackCoeff = expf(-1.0 / (0.005 * sampleRate))   // 5ms attack
+        let releaseCoeff = expf(-1.0 / (0.100 * sampleRate))  // 100ms release
+        // Makeup gain to compensate for compression (+2dB ≈ 1.26x)
+        let makeupGain: Float = 1.26
+
+        var envelope = ttsCompressorEnvelope
+
+        for i in 0..<samples.count {
+            let inputLevel = abs(samples[i])
+
+            // Envelope follower: fast attack, slow release
+            if inputLevel > envelope {
+                envelope = attackCoeff * envelope + (1.0 - attackCoeff) * inputLevel
+            } else {
+                envelope = releaseCoeff * envelope + (1.0 - releaseCoeff) * inputLevel
+            }
+
+            // Compute gain reduction when envelope exceeds threshold
+            var gain: Float = 1.0
+            if envelope > threshold {
+                // Gain in dB: reduce by (1 - 1/ratio) for every dB above threshold
+                let overDB = 20.0 * log10f(envelope / threshold)
+                let reductionDB = overDB * (1.0 - 1.0 / ratio)
+                gain = powf(10.0, -reductionDB / 20.0)
+            }
+
+            samples[i] = samples[i] * gain * makeupGain
+        }
+
+        ttsCompressorEnvelope = envelope
     }
 
     private func deactivateAudioSession() {
@@ -1229,11 +1328,15 @@ class ReadAlongService {
             }
         }
 
-        // 3. Crossfade with previous buffer's tail
+        // 3. Feed-forward compression (envelope persists across buffers)
+        applyCompression(&trimmed)
+
+        // 4. Crossfade with previous buffer's tail (raised-cosine / Hann window)
         if !ttsPreviousBufferTail.isEmpty {
             let fadeLen = min(ttsCrossfadeSamples, trimmed.count, ttsPreviousBufferTail.count)
             for i in 0..<fadeLen {
-                let t = Float(i) / Float(fadeLen)
+                // Hann fade: smoother than linear, eliminates spectral artifacts at boundaries
+                let t = 0.5 * (1.0 - cosf(Float.pi * Float(i) / Float(fadeLen)))
                 trimmed[i] = ttsPreviousBufferTail[i] * (1.0 - t) + trimmed[i] * t
             }
         }
@@ -1242,7 +1345,7 @@ class ReadAlongService {
         let tailLen = min(ttsCrossfadeSamples, trimmed.count)
         ttsPreviousBufferTail = Array(trimmed.suffix(tailLen))
 
-        // 4. Apply fade-out to last few ms (avoids click at sentence end)
+        // 5. Apply fade-out to last few ms (avoids click at sentence end)
         let fadeOutLen = min(ttsCrossfadeSamples, trimmed.count)
         for i in 0..<fadeOutLen {
             let idx = trimmed.count - fadeOutLen + i
@@ -1250,7 +1353,7 @@ class ReadAlongService {
             trimmed[idx] = trimmed[idx] * t
         }
 
-        // 5. Append inter-sentence silence padding
+        // 6. Append inter-sentence silence padding
         let padding = [Float](repeating: 0, count: ttsSilencePaddingSamples)
         let finalSamples = trimmed + padding
 
@@ -1309,6 +1412,7 @@ class ReadAlongService {
         ttsRunningRMS = 0
         ttsRunningRMSCount = 0
         ttsPreviousBufferTail = []
+        ttsCompressorEnvelope = 0
     }
 
     /// Producer pipeline: generates audio sentence by sentence, schedules onto player.
@@ -1336,7 +1440,7 @@ class ReadAlongService {
         let pcmFileHandle = try? FileHandle(forWritingTo: tempPCMURL)
         var totalSamplesWritten = 0
 
-        // Phase 1: Generate ALL audio with PocketTTS (no Whisper loaded)
+        // Generate audio for all sentences with PocketTTS
         for i in startIndex..<ttsSentences.count {
             guard !Task.isCancelled else {
                 pcmFileHandle?.closeFile()
@@ -1422,11 +1526,17 @@ class ReadAlongService {
                 let audioDuration = Double(sampleCount) / 24000.0
                 successCount += 1
 
-                // Update sentence timing
+                // Update sentence timing and compute proportional word timings
                 await MainActor.run {
                     guard i < self.ttsSentences.count else { return }
                     self.ttsSentences[i].audioStartTime = cumulativeTime
                     self.ttsSentences[i].audioEndTime = cumulativeTime + audioDuration
+                    self.ttsSentences[i].wordTimings = TextProcessingUtils.estimateWordTimings(
+                        sentence: self.ttsSentences[i].text,
+                        plainTextRange: self.ttsSentences[i].plainTextRange,
+                        startTime: cumulativeTime,
+                        endTime: cumulativeTime + audioDuration
+                    )
                     self.ttsDuration = cumulativeTime + audioDuration
                     self.ttsTotalSamplesScheduled += sampleCount
                 }
@@ -1487,9 +1597,8 @@ class ReadAlongService {
 
         logger.info("All \(self.ttsSentences.count) sentences queued, total duration=\(String(format: "%.1f", cumulativeTime))s, \(totalSamplesWritten) samples streamed to disk")
 
-        // Phase 2: Cache + align — runs DURING playback.
-        // Both PocketTTS and Whisper-tiny coexist in memory (no model swapping).
-        // Word-level highlighting becomes available during first playback.
+        // Cache generated audio for future sessions.
+        // Word timings are already computed inline during generation.
         if let bookId = ebook?.id, let cache = ttsAudioCache, startIndex == 0, totalSamplesWritten > 0 {
             let metadata = TTSAudioCache.buildMetadata(
                 voiceId: Int(self.ttsVoiceIndex),
@@ -1502,11 +1611,6 @@ class ReadAlongService {
                 pcmFileURL: tempPCMURL,
                 metadata: metadata
             )
-
-            // Whisper alignment runs concurrently with playback.
-            // Word timings update live on ttsSentences, enabling word-level highlighting
-            // during the current playback session.
-            await alignChapterFromCache(bookId: bookId, spineIndex: ttsCurrentSpineIndex, cache: cache)
         } else {
             try? FileManager.default.removeItem(at: tempPCMURL)
         }
@@ -1519,71 +1623,6 @@ class ReadAlongService {
         await MainActor.run { [weak self] in
             self?.handleTTSChapterComplete()
         }
-    }
-
-    // MARK: - Word Alignment
-
-    /// Align all sentences for a cached chapter using Whisper-tiny.
-    /// Both PocketTTS and Whisper-tiny coexist in memory (tiny model ~75MB vs base ~370MB).
-    /// Reads PCM samples per-sentence from disk (no bulk memory load).
-    private func alignChapterFromCache(bookId: String, spineIndex: Int, cache: TTSAudioCache) async {
-        let aligner = TTSWordAligner()
-        do {
-            try await aligner.loadModel()
-            logger.info("Whisper loaded for chapter alignment")
-        } catch {
-            logger.warning("Whisper unavailable for alignment: \(error)")
-            return
-        }
-
-        let sentences = await MainActor.run { self.ttsSentences }
-
-        for (i, sentence) in sentences.enumerated() {
-            guard !Task.isCancelled else { break }
-
-            let rawText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let sampleRate = 24000.0
-            let startSample = Int(sentence.audioStartTime * sampleRate)
-            let sampleCount = Int((sentence.audioEndTime - sentence.audioStartTime) * sampleRate)
-
-            guard !rawText.isEmpty, sampleCount > 0 else { continue }
-
-            // Read only this sentence's samples from disk
-            guard let sentenceSamples = cache.loadSampleRange(
-                bookId: bookId,
-                spineIndex: spineIndex,
-                sampleOffset: startSample,
-                sampleCount: sampleCount
-            ) else { continue }
-
-            let wordTimings = await aligner.alignWords(
-                samples: sentenceSamples,
-                originalText: rawText,
-                sentencePlainTextRange: sentence.plainTextRange,
-                timeOffset: sentence.audioStartTime
-            )
-
-            if !wordTimings.isEmpty {
-                await MainActor.run {
-                    if i < self.ttsSentences.count {
-                        self.ttsSentences[i].wordTimings = wordTimings
-                    }
-                }
-            }
-        }
-
-        // Update cache metadata with word timings
-        if !Task.isCancelled {
-            let updatedSentences = await MainActor.run { self.ttsSentences }
-            let metadata = TTSAudioCache.buildMetadata(
-                voiceId: Int(ttsVoiceIndex),
-                sentences: updatedSentences,
-                chapterSamples: []
-            )
-            cache.updateMetadata(bookId: bookId, spineIndex: spineIndex, metadata: metadata)
-        }
-
-        logger.info("Chapter word alignment complete")
     }
 
     // MARK: - TTS Update Loop
@@ -1623,8 +1662,7 @@ class ReadAlongService {
     }
 
     /// Advance the page mid-sentence based on the current reading position.
-    /// Uses word-level timestamps from Whisper when available, otherwise
-    /// falls back to linear interpolation based on audio progress.
+    /// Uses proportional word-level timestamps for precise page advancement.
     private func checkMidSentencePageAdvance() {
         guard let engine = engine,
               !autoAdvanceSuppressed,
@@ -1636,7 +1674,7 @@ class ReadAlongService {
         let currentOffset: Int
 
         if !sentence.wordTimings.isEmpty {
-            // Use precise Whisper-aligned word timestamps
+            // Use word-level timestamps for precise page advancement
             guard let currentWord = sentence.wordTimings.last(where: { $0.start <= ttsCurrentTime }) else { return }
             currentOffset = currentWord.plainTextOffset
         } else {

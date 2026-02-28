@@ -4,7 +4,7 @@
 //
 //  Converts TTS sentence spans into Transcript-compatible data
 //  with estimated word-level timing, unifying the output format
-//  across Whisper transcription and PocketTTS generation.
+//  across transcription and PocketTTS generation.
 //
 
 import Foundation
@@ -22,7 +22,7 @@ enum TTSTranscriptBuilder {
             guard sentence.audioEndTime > sentence.audioStartTime else { continue }
             let words: [TranscriptWord]
             if !sentence.wordTimings.isEmpty {
-                // Use actual Whisper-aligned timestamps
+                // Use word-level timestamps
                 words = sentence.wordTimings.map {
                     TranscriptWord(word: $0.word, start: $0.start, end: $0.end)
                 }

@@ -11,6 +11,15 @@ import NaturalLanguage
 
 enum TextProcessingUtils {
 
+    /// A single word with its timestamp and position in the chapter plain text.
+    struct WordTiming: Codable, Sendable {
+        let word: String
+        let start: Double           // absolute time in chapter audio (seconds)
+        let end: Double             // absolute time in chapter audio (seconds)
+        let plainTextOffset: Int    // character offset in chapter plain text
+        let plainTextLength: Int    // character count in chapter plain text
+    }
+
     /// A span of text corresponding to one sentence (or sub-sentence chunk)
     /// with its position in the chapter's plain text and optional audio timing.
     struct SentenceSpan {
@@ -18,15 +27,84 @@ enum TextProcessingUtils {
         let plainTextRange: NSRange
         var audioStartTime: Double = 0  // cumulative start within chapter
         var audioEndTime: Double = 0    // cumulative end within chapter
-        var wordTimings: [TTSWordAligner.WordTiming] = []  // from Whisper alignment
+        var wordTimings: [WordTiming] = []
     }
 
     /// Maximum characters per TTS chunk. Larger chunks produce more natural
-    /// prosody since the TTS model has more context. Word-level alignment
-    /// via Whisper handles precise highlighting regardless of chunk size.
+    /// prosody since the TTS model has more context. Proportional word timing
+    /// estimation handles precise highlighting regardless of chunk size.
     /// Note: PocketTTS memory scales with token count (~2.6 chars/token),
     /// so keep this moderate to avoid OOM on long chapters.
     static let maxCharsPerChunk = 250
+
+    /// Estimate word-level timing by distributing the sentence duration
+    /// proportionally by character count. Produces WordTiming with
+    /// plainTextOffset/plainTextLength mapped to the sentence's position
+    /// in the chapter plain text.
+    static func estimateWordTimings(
+        sentence: String,
+        plainTextRange: NSRange,
+        startTime: Double,
+        endTime: Double
+    ) -> [WordTiming] {
+        let words = sentence.split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { return [] }
+
+        let totalDuration = endTime - startTime
+        guard totalDuration > 0 else { return [] }
+
+        let totalChars = words.reduce(0) { $0 + $1.count }
+        guard totalChars > 0 else { return [] }
+
+        var result: [WordTiming] = []
+        var currentTime = startTime
+
+        let nsText = sentence as NSString
+        var searchStart = 0
+
+        for word in words {
+            let wordStr = String(word)
+            let fraction = Double(word.count) / Double(totalChars)
+            let wordDuration = totalDuration * fraction
+
+            // Find the word's position in the original sentence text
+            let remaining = nsText.length - searchStart
+            let searchRange = NSRange(location: searchStart, length: remaining)
+            let foundRange = nsText.range(of: wordStr, range: searchRange)
+
+            let plainTextOffset: Int
+            let plainTextLength: Int
+            if foundRange.location != NSNotFound {
+                plainTextOffset = plainTextRange.location + foundRange.location
+                plainTextLength = foundRange.length
+                searchStart = foundRange.location + foundRange.length
+            } else {
+                plainTextOffset = plainTextRange.location + searchStart
+                plainTextLength = word.count
+                searchStart += word.count + 1
+            }
+
+            result.append(WordTiming(
+                word: wordStr,
+                start: currentTime,
+                end: currentTime + wordDuration,
+                plainTextOffset: plainTextOffset,
+                plainTextLength: plainTextLength
+            ))
+            currentTime += wordDuration
+        }
+
+        // Snap the last word's end time to avoid floating point drift
+        if let last = result.last {
+            result[result.count - 1] = WordTiming(
+                word: last.word, start: last.start, end: endTime,
+                plainTextOffset: last.plainTextOffset,
+                plainTextLength: last.plainTextLength
+            )
+        }
+
+        return result
+    }
 
     /// Split text into sentence spans using NLTokenizer.
     /// Small consecutive sentences are merged into larger chunks for natural

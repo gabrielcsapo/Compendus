@@ -55,6 +55,12 @@ class OnDeviceTranscriptionService {
         }
     }
 
+    /// When true, transcription is ephemeral (used for live read-along).
+    /// The transcript is kept in `partialTranscript` for real-time highlighting
+    /// but is NOT saved to disk or emitted via `.completed` state.
+    /// Users who want a persistent transcript should use the offline "Transcribe" button.
+    var liveMode: Bool = false
+
     /// Partial transcript built progressively as chunks complete.
     /// Available for live lyrics display while transcription is in progress.
     var partialTranscript: Transcript?
@@ -158,6 +164,7 @@ class OnDeviceTranscriptionService {
         clearResumableState()
         clearActiveBook()
         partialTranscript = nil
+        liveMode = false
         whisperContext = nil
         state = .idle
     }
@@ -336,7 +343,7 @@ class OnDeviceTranscriptionService {
 
         for chunkIndex in rs.nextChunkIndex..<rs.totalChunks {
             guard !Task.isCancelled else {
-                saveProgressToDisk()
+                if !liveMode { saveProgressToDisk() }
                 return
             }
 
@@ -386,13 +393,13 @@ class OnDeviceTranscriptionService {
                     segments: rs.accumulatedSegments
                 )
 
-                // Periodically save progress to disk (every 5 chunks)
-                if chunkIndex % 5 == 0 {
+                // Periodically save progress to disk (every 5 chunks) — skip in live mode
+                if !liveMode && chunkIndex % 5 == 0 {
                     saveProgressToDisk()
                 }
             } catch {
                 if Task.isCancelled {
-                    saveProgressToDisk()
+                    if !liveMode { saveProgressToDisk() }
                     return
                 }
                 state = .error("Transcription failed on chunk \(chunkIndex + 1): \(error.localizedDescription)")
@@ -400,15 +407,22 @@ class OnDeviceTranscriptionService {
             }
         }
 
-        let transcript = Transcript(
-            duration: rs.duration,
-            language: rs.language,
-            segments: rs.accumulatedSegments
-        )
+        if liveMode {
+            // Live mode: transcript stays in partialTranscript for read-along,
+            // nothing is saved or emitted — just go idle.
+            clearResumableState()
+            state = .idle
+        } else {
+            let transcript = Transcript(
+                duration: rs.duration,
+                language: rs.language,
+                segments: rs.accumulatedSegments
+            )
 
-        clearResumableState()
-        partialTranscript = nil
-        state = .completed(transcript)
+            clearResumableState()
+            partialTranscript = nil
+            state = .completed(transcript)
+        }
     }
 
     // MARK: - Audio Sample Extraction

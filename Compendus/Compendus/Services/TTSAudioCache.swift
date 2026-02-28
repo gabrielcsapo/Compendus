@@ -32,7 +32,7 @@ class TTSAudioCache {
         let audioEndTime: Double
         let sampleOffset: Int               // Sample offset in PCM file (Float32 index)
         let sampleCount: Int                // Number of Float32 samples
-        let wordTimings: [TTSWordAligner.WordTiming]  // Whisper-aligned word timestamps
+        let wordTimings: [TextProcessingUtils.WordTiming]
 
         // Backwards compatibility: old cache files won't have wordTimings
         init(from decoder: Decoder) throws {
@@ -44,13 +44,13 @@ class TTSAudioCache {
             audioEndTime = try container.decode(Double.self, forKey: .audioEndTime)
             sampleOffset = try container.decode(Int.self, forKey: .sampleOffset)
             sampleCount = try container.decode(Int.self, forKey: .sampleCount)
-            wordTimings = (try? container.decodeIfPresent([TTSWordAligner.WordTiming].self, forKey: .wordTimings)) ?? []
+            wordTimings = (try? container.decodeIfPresent([TextProcessingUtils.WordTiming].self, forKey: .wordTimings)) ?? []
         }
 
         init(text: String, plainTextLocation: Int, plainTextLength: Int,
              audioStartTime: Double, audioEndTime: Double,
              sampleOffset: Int, sampleCount: Int,
-             wordTimings: [TTSWordAligner.WordTiming] = []) {
+             wordTimings: [TextProcessingUtils.WordTiming] = []) {
             self.text = text
             self.plainTextLocation = plainTextLocation
             self.plainTextLength = plainTextLength

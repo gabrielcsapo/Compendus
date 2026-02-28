@@ -288,6 +288,12 @@ struct TranscribeButton: View {
         case .transcribing(let progress, let message):
             state = .onDeviceTranscribing(progress: progress, message: message)
         case .completed(let transcript):
+            // Live mode transcriptions are ephemeral (used for read-along only) — don't save
+            guard !onDeviceService.liveMode else {
+                onDeviceService.state = .idle
+                return
+            }
+
             // Save transcript locally
             if let data = try? JSONEncoder().encode(transcript) {
                 book.transcriptData = data
