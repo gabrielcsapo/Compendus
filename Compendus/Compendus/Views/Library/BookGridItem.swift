@@ -64,6 +64,7 @@ struct BookGridItem: View {
                     }
                 }
             }
+            .frame(height: 80, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format\(book.series != nil ? ", \(book.series!) series" : "")")
@@ -143,6 +144,7 @@ struct DownloadedBookGridItem: View {
                     }
                 }
             }
+            .frame(height: 80, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format, \(Int(book.readingProgress * 100))% complete\(book.series != nil ? ", \(book.series!) series" : "")")

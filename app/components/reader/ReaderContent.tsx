@@ -243,6 +243,12 @@ function TextContent({
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        return;
+      }
+
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
         onNextPage?.();
@@ -450,7 +456,7 @@ function TextContent({
   return (
     <div
       ref={containerRef}
-      className="h-full overflow-auto p-4 md:p-8 relative"
+      className="h-full overflow-auto px-4 md:px-8 pt-14 md:pt-16 pb-4 md:pb-8 relative"
       style={{
         backgroundColor: theme.background,
         color: theme.foreground,
@@ -560,7 +566,18 @@ function TextContent({
             setEditingHighlight((prev) => prev ? { ...prev, note: note ?? undefined } : null);
           }}
           onCopy={(text) => {
-            navigator.clipboard.writeText(text);
+            if (navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(text);
+            } else {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+            }
           }}
           onDelete={(highlightId) => {
             onRemoveHighlight?.(highlightId);
@@ -685,6 +702,12 @@ function ImageContent({
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        return;
+      }
+
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
         onNextPage?.();

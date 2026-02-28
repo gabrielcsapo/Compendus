@@ -336,7 +336,7 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
         />
 
         {/* Content area with viewport measurement */}
-        <div ref={reader.viewport.containerRef} className="flex-1 relative">
+        <div ref={reader.viewport.containerRef} className="flex-1 relative overflow-hidden">
           <ReaderContent
             content={reader.pageContent}
             rightContent={reader.rightPageContent}

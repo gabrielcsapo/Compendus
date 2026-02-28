@@ -20,11 +20,20 @@ enum TTSTranscriptBuilder {
         var segments: [TranscriptSegment] = []
         for sentence in sentences {
             guard sentence.audioEndTime > sentence.audioStartTime else { continue }
-            let words = estimateWordTimings(
-                sentence: sentence.text,
-                startTime: sentence.audioStartTime,
-                endTime: sentence.audioEndTime
-            )
+            let words: [TranscriptWord]
+            if !sentence.wordTimings.isEmpty {
+                // Use actual Whisper-aligned timestamps
+                words = sentence.wordTimings.map {
+                    TranscriptWord(word: $0.word, start: $0.start, end: $0.end)
+                }
+            } else {
+                // Fall back to proportional estimation
+                words = estimateWordTimings(
+                    sentence: sentence.text,
+                    startTime: sentence.audioStartTime,
+                    endTime: sentence.audioEndTime
+                )
+            }
             segments.append(TranscriptSegment(
                 start: sentence.audioStartTime,
                 end: sentence.audioEndTime,
@@ -49,11 +58,22 @@ enum TTSTranscriptBuilder {
         for chapterSentences in chapters {
             for sentence in chapterSentences {
                 guard sentence.audioEndTime > sentence.audioStartTime else { continue }
-                let words = estimateWordTimings(
-                    sentence: sentence.text,
-                    startTime: cumulativeOffset + sentence.audioStartTime,
-                    endTime: cumulativeOffset + sentence.audioEndTime
-                )
+                let words: [TranscriptWord]
+                if !sentence.wordTimings.isEmpty {
+                    words = sentence.wordTimings.map {
+                        TranscriptWord(
+                            word: $0.word,
+                            start: $0.start + cumulativeOffset,
+                            end: $0.end + cumulativeOffset
+                        )
+                    }
+                } else {
+                    words = estimateWordTimings(
+                        sentence: sentence.text,
+                        startTime: cumulativeOffset + sentence.audioStartTime,
+                        endTime: cumulativeOffset + sentence.audioEndTime
+                    )
+                }
                 allSegments.append(TranscriptSegment(
                     start: cumulativeOffset + sentence.audioStartTime,
                     end: cumulativeOffset + sentence.audioEndTime,

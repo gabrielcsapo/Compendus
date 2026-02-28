@@ -31,6 +31,7 @@ class NativeEPUBEngine: ReaderEngine {
     var onHighlightTapped: ((String) -> Void)?
     var onTapZone: ((String) -> Void)?
     var onFootnoteTapped: ((String) -> Void)?
+    var onLinkNavigationRequested: ((URL, Bool) -> Void)?  // (url, isExternal)
 
     private var parser: EPUBParser?
     private var pageViewController: NativePageViewController?
@@ -348,6 +349,16 @@ class NativeEPUBEngine: ReaderEngine {
     }
 
     private func handleLinkTap(_ url: URL) {
+        let isExternal = url.scheme == "http" || url.scheme == "https"
+
+        if let callback = onLinkNavigationRequested {
+            callback(url, isExternal)
+        } else {
+            performLinkNavigation(url)
+        }
+    }
+
+    func performLinkNavigation(_ url: URL) {
         guard let parser = parser else { return }
 
         // Get the href relative to the EPUB root

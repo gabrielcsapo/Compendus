@@ -158,7 +158,16 @@ class OnDeviceTranscriptionService {
         clearResumableState()
         clearActiveBook()
         partialTranscript = nil
+        whisperContext = nil
         state = .idle
+    }
+
+    /// Release the Whisper model from memory without cancelling transcription state.
+    /// Call this before loading another Whisper-based service (e.g. TTS word aligner)
+    /// to avoid two Whisper models coexisting in Metal GPU memory.
+    func releaseWhisperContext() {
+        whisperContext = nil
+        print("[Whisper] Transcription service context released to free Metal memory")
     }
 
     private func clearActiveBook() {

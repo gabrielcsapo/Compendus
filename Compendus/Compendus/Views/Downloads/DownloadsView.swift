@@ -81,9 +81,12 @@ struct DownloadsView: View {
     @State private var viewMode: DownloadViewMode = .books
     @State private var seriesSheet: DownloadSeriesSheet? = nil
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)
-    ]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var columns: [GridItem] {
+        let count = horizontalSizeClass == .compact ? 2 : 4
+        return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
+    }
 
     private var filteredBooks: [DownloadedBook] {
         var result = books

@@ -62,6 +62,21 @@ struct PlainTextToAttrStringMap {
         }
         return nil
     }
+
+    /// Character-accurate plain text location for a given attributed string location.
+    /// Uses proportional delta mapping within content nodes (inverse of `attrStringRange(for:)`).
+    func plainTextLocation(forAttrStringLocation location: Int) -> Int? {
+        if let entry = entries.first(where: {
+            NSLocationInRange(location, $0.attrStringRange)
+        }) {
+            let delta = location - entry.attrStringRange.location
+            return entry.plainTextRange.location + delta
+        }
+        if let next = entries.first(where: { $0.attrStringRange.location > location }) {
+            return next.plainTextRange.location
+        }
+        return nil
+    }
 }
 
 class TextAlignmentEngine {

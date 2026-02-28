@@ -40,6 +40,7 @@ struct DownloadedSeriesGridItem: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(height: 52, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(series.name) series, \(series.bookCount) books")

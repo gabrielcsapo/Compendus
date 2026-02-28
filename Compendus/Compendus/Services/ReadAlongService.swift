@@ -84,6 +84,7 @@ class ReadAlongService {
 
     private var pocketTTSContext: PocketTTSContext?
     private var ttsAudioCache: TTSAudioCache?
+    @ObservationIgnored private var ttsWordAligner: TTSWordAligner?
     @ObservationIgnored private var ttsVoiceIndex: UInt32 = 0
 
     // MARK: - Internal State
@@ -285,6 +286,7 @@ class ReadAlongService {
             ttsPlaybackStartHostTime = 0
             ttsPlaybackStartSampleTime = 0
             pocketTTSContext = nil
+            ttsWordAligner = nil
             ttsBackgrounded = false
             for observer in backgroundObservers {
                 NotificationCenter.default.removeObserver(observer)
@@ -764,7 +766,8 @@ class ReadAlongService {
         engine: NativeEPUBEngine,
         ttsContext: PocketTTSContext,
         voiceIndex: UInt32,
-        audioCache: TTSAudioCache? = nil
+        audioCache: TTSAudioCache? = nil,
+        transcriptionService: OnDeviceTranscriptionService? = nil
     ) {
         logger.info("Activating read-along (TTS mode): '\(ebook.title)' voice=\(voiceIndex)")
 
@@ -784,15 +787,22 @@ class ReadAlongService {
         ttsTotalSamplesScheduled = 0
         ttsCurrentSpineIndex = engine.activeSpineIndex
 
-        // Engine is already loaded with voice — just set up audio and start
-        do {
-            try setupTTSAudioEngine()
-            logger.info("TTS audio engine ready, starting chapter generation...")
-            startTTSForCurrentChapter()
-        } catch {
-            logger.error("TTS activation failed: \(error)")
-            print("[TTS] Audio engine setup failed: \(error)")
-            state = .error("TTS setup failed: \(error.localizedDescription)")
+        // Release any existing Whisper context from the transcription service
+        // (audiobook mode uses a larger Whisper model). TTS mode uses Whisper-tiny
+        // for word alignment, which coexists with PocketTTS in memory.
+        Task {
+            if let transcriptionService {
+                transcriptionService.releaseWhisperContext()
+            }
+
+            do {
+                try self.setupTTSAudioEngine()
+                logger.info("TTS audio engine ready, starting chapter generation...")
+                self.startTTSForCurrentChapter()
+            } catch {
+                logger.error("TTS activation failed: \(error)")
+                self.state = .error("TTS setup failed: \(error.localizedDescription)")
+            }
         }
 
         // Listen for spine index changes (user manually navigating)
@@ -930,6 +940,102 @@ class ReadAlongService {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    // MARK: - Page-Boundary Sentence Splitting
+
+    /// Split sentences that cross page boundaries so each TTS chunk maps to
+    /// exactly one page. Page turns then happen naturally at buffer boundaries.
+    private func splitSentencesAtPageBoundaries(
+        _ sentences: [TextProcessingUtils.SentenceSpan]
+    ) -> [TextProcessingUtils.SentenceSpan] {
+        guard let engine = engine,
+              let pages = engine.currentChapterPageInfos,
+              pages.count > 1,
+              let plainTextMap = engine.currentChapterPlainTextMap else {
+            return sentences
+        }
+
+        // Build sorted list of plain text offsets where pages break.
+        // Each entry is the plain text character where a new page begins.
+        var pageBreakPlainOffsets: [Int] = []
+        for i in 1..<pages.count {
+            let pageAttrStart = pages[i].range.location
+            if let plainOffset = plainTextMap.plainTextLocation(forAttrStringLocation: pageAttrStart) {
+                pageBreakPlainOffsets.append(plainOffset)
+            }
+        }
+        guard !pageBreakPlainOffsets.isEmpty else { return sentences }
+        pageBreakPlainOffsets.sort()
+
+        var result: [TextProcessingUtils.SentenceSpan] = []
+
+        for sentence in sentences {
+            let sentStart = sentence.plainTextRange.location
+            let sentEnd = sentStart + sentence.plainTextRange.length
+
+            // Find page breaks that fall strictly inside this sentence
+            let breaksInside = pageBreakPlainOffsets.filter { $0 > sentStart && $0 < sentEnd }
+
+            if breaksInside.isEmpty {
+                result.append(sentence)
+                continue
+            }
+
+            // Split the sentence at each page break
+            let sentText = sentence.text
+            var currentPlainStart = sentStart
+
+            for breakOffset in breaksInside {
+                let offsetInText = breakOffset - sentStart
+                guard offsetInText > 0, offsetInText < sentText.count else { continue }
+
+                // Find nearest word boundary by searching backward for whitespace
+                let breakIdx = sentText.index(sentText.startIndex, offsetBy: offsetInText)
+                var splitIdx = breakIdx
+
+                // Search backward (up to 80 chars) for the nearest space
+                let searchLimit = max(0, offsetInText - 80)
+                let searchStart = sentText.index(sentText.startIndex, offsetBy: searchLimit)
+                if let spaceIdx = sentText[searchStart..<breakIdx].lastIndex(where: { $0.isWhitespace }) {
+                    splitIdx = sentText.index(after: spaceIdx)
+                }
+
+                // Extract segment from currentPlainStart to splitIdx
+                let segStart = currentPlainStart - sentStart
+                let segEnd = sentText.distance(from: sentText.startIndex, to: splitIdx)
+                guard segEnd > segStart else { continue }
+
+                let startIdx = sentText.index(sentText.startIndex, offsetBy: segStart)
+                let segmentText = String(sentText[startIdx..<splitIdx])
+                let trimmed = segmentText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !trimmed.isEmpty {
+                    result.append(TextProcessingUtils.SentenceSpan(
+                        text: trimmed,
+                        plainTextRange: NSRange(location: currentPlainStart, length: segEnd - segStart)
+                    ))
+                }
+
+                currentPlainStart = sentStart + segEnd
+            }
+
+            // Add remaining text after the last page break
+            let remainingStart = currentPlainStart - sentStart
+            if remainingStart < sentText.count {
+                let remainIdx = sentText.index(sentText.startIndex, offsetBy: remainingStart)
+                let remainText = String(sentText[remainIdx...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !remainText.isEmpty {
+                    result.append(TextProcessingUtils.SentenceSpan(
+                        text: remainText,
+                        plainTextRange: NSRange(location: currentPlainStart, length: sentText.count - remainingStart)
+                    ))
+                }
+            }
+        }
+
+        logger.info("Page-boundary split: \(sentences.count) sentences → \(result.count) chunks")
+        return result
+    }
+
     // MARK: - TTS Chapter Generation
 
     private func startTTSForCurrentChapter() {
@@ -953,13 +1059,17 @@ class ReadAlongService {
         // correctly map to the PlainTextToAttrStringMap offsets.
         // TTS preprocessing (hyphen removal, etc.) is applied per-sentence
         // in the generation pipeline to avoid offset drift.
-        let sentences = rawText.isEmpty ? [] : TextProcessingUtils.sentencize(rawText)
+        let rawSentences = rawText.isEmpty ? [] : TextProcessingUtils.sentencize(rawText)
 
-        if sentences.isEmpty {
+        if rawSentences.isEmpty {
             logger.info("Empty chapter at spine \(engine.activeSpineIndex), auto-advancing")
             handleTTSChapterComplete()
             return
         }
+
+        // Split sentences at page boundaries so each TTS chunk
+        // maps to exactly one page for crisp auto-advance.
+        let sentences = splitSentencesAtPageBoundaries(rawSentences)
 
         ttsSentences = sentences
         ttsTotalSamplesScheduled = 0
@@ -1205,10 +1315,9 @@ class ReadAlongService {
     /// Uses a sliding window to limit memory — only keeps up to ttsMaxBuffersAhead
     /// buffers queued on the player at any time.
     private func ttsGenerationPipeline(startingFrom startIndex: Int = 0) async {
-        guard let pocketTTSContext = pocketTTSContext,
-              let playerNode = ttsPlayerNode,
+        guard let playerNode = ttsPlayerNode,
               let engineFormat = ttsEngineFormat else {
-            logger.error("TTS pipeline guard failed — context=\(self.pocketTTSContext != nil), player=\(self.ttsPlayerNode != nil), format=\(self.ttsEngineFormat != nil)")
+            logger.error("TTS pipeline guard failed — player=\(self.ttsPlayerNode != nil), format=\(self.ttsEngineFormat != nil)")
             state = .error("TTS engine not ready")
             return
         }
@@ -1219,75 +1328,127 @@ class ReadAlongService {
         await MainActor.run { self.ttsSentencePlaybackQueue = [] }
         var cumulativeTime: Double = 0
         var successCount = 0
-        var allGeneratedSamples: [Float] = []  // Collect for caching
 
+        // Stream samples to a temp file for caching + later alignment reads
+        let tempPCMURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tts_stream_\(UUID().uuidString).pcm")
+        FileManager.default.createFile(atPath: tempPCMURL.path, contents: nil)
+        let pcmFileHandle = try? FileHandle(forWritingTo: tempPCMURL)
+        var totalSamplesWritten = 0
+
+        // Phase 1: Generate ALL audio with PocketTTS (no Whisper loaded)
         for i in startIndex..<ttsSentences.count {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                pcmFileHandle?.closeFile()
+                try? FileManager.default.removeItem(at: tempPCMURL)
+                return
+            }
 
             // Throttle: wait if too many buffers are queued ahead
             while ttsBuffersQueued >= ttsMaxBuffersAhead && !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(200))
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                pcmFileHandle?.closeFile()
+                try? FileManager.default.removeItem(at: tempPCMURL)
+                return
+            }
 
+            guard i < ttsSentences.count else { break }
             let sentence = ttsSentences[i]
             let rawSentenceText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !rawSentenceText.isEmpty else { continue }
 
-            // Preprocess for better TTS pronunciation (doesn't affect highlighting ranges)
             let sentenceText = TextProcessingUtils.preprocessTextForTTS(rawSentenceText)
 
             do {
+                guard let ttsContext = pocketTTSContext else {
+                    logger.error("PocketTTS context lost mid-pipeline at chunk \(i)")
+                    break
+                }
+
                 logger.info("Generating chunk[\(i)]: \"\(sentenceText.prefix(80))\"")
 
-                let result = try await pocketTTSContext.generateAudio(
+                // Register sentence in playback queue before generation starts
+                await MainActor.run {
+                    self.ttsBuffersQueued += 1
+                    self.ttsSentencePlaybackQueue.append(i)
+                }
+
+                // Stream audio chunks directly to player as they arrive from Mimi decoder.
+                // Each onChunk callback fires on ttsQueue with a playable audio fragment,
+                // enabling near-immediate playback instead of waiting for full sentence.
+                let result = try await ttsContext.generateAudioStreaming(
                     text: sentenceText,
-                    speed: 1.0
+                    onChunk: { [weak self] chunkSamples in
+                        guard !chunkSamples.isEmpty else { return }
+
+                        // Create PCM buffer at 24kHz mono (matches engine format)
+                        guard let buffer = AVAudioPCMBuffer(
+                            pcmFormat: engineFormat,
+                            frameCapacity: AVAudioFrameCount(chunkSamples.count)
+                        ) else { return }
+                        buffer.frameLength = AVAudioFrameCount(chunkSamples.count)
+                        chunkSamples.withUnsafeBufferPointer { src in
+                            buffer.floatChannelData![0].update(from: src.baseAddress!, count: chunkSamples.count)
+                        }
+
+                        // Schedule immediately — AVAudioPlayerNode.scheduleBuffer is thread-safe
+                        playerNode.scheduleBuffer(buffer)
+
+                        // Start playback on the very first audio chunk
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self, self.state == .loading else { return }
+                            playerNode.play()
+                            self.ttsIsPlaying = true
+                            self.state = .active
+                            self.startTTSUpdateLoop()
+                            self.highlightFirstSentence()
+                            logger.info("TTS playback started (first audio chunk at sentence \(i))")
+                        }
+                    }
                 )
                 let generatedSamples = result.audioSamples
 
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, i < self.ttsSentences.count else {
+                    pcmFileHandle?.closeFile()
+                    try? FileManager.default.removeItem(at: tempPCMURL)
+                    return
+                }
 
                 let sampleCount = generatedSamples.count
                 guard sampleCount > 0 else { continue }
 
                 let audioDuration = Double(sampleCount) / 24000.0
+                successCount += 1
 
                 // Update sentence timing
                 await MainActor.run {
+                    guard i < self.ttsSentences.count else { return }
                     self.ttsSentences[i].audioStartTime = cumulativeTime
                     self.ttsSentences[i].audioEndTime = cumulativeTime + audioDuration
                     self.ttsDuration = cumulativeTime + audioDuration
+                    self.ttsTotalSamplesScheduled += sampleCount
                 }
 
                 cumulativeTime += audioDuration
-                allGeneratedSamples.append(contentsOf: generatedSamples)
 
-                guard let buffer = makeEngineBuffer(from: generatedSamples, engineFormat: engineFormat) else { continue }
+                // Write collected samples to disk for caching
+                generatedSamples.withUnsafeBufferPointer { buffer in
+                    pcmFileHandle?.write(Data(buffer: buffer))
+                }
+                totalSamplesWritten += sampleCount
 
-                successCount += 1
-
-                // Schedule buffer; completion callback advances sentence tracking.
-                await MainActor.run {
-                    self.ttsBuffersQueued += 1
-                    self.ttsSentencePlaybackQueue.append(i)
-                    let options: AVAudioPlayerNodeBufferOptions = successCount == 1 ? .interrupts : []
-                    playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
-                        Task { @MainActor in
-                            self?.ttsBuffersQueued -= 1
-                            self?.handleSentenceBufferCompleted()
-                        }
-                    }
-                    self.ttsTotalSamplesScheduled += sampleCount
-
-                    // Start playback once first chunk is ready
-                    if self.state == .loading {
-                        playerNode.play()
-                        self.ttsIsPlaying = true
-                        self.state = .active
-                        self.startTTSUpdateLoop()
-                        self.highlightFirstSentence()
-                        logger.info("TTS playback started (first audio ready at chunk \(i))")
+                // Schedule sentence boundary sentinel for highlight advancement.
+                // This 1-sample silence plays after all of this sentence's audio chunks,
+                // triggering handleSentenceBufferCompleted to advance highlighting.
+                let sentinel = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
+                sentinel.frameLength = 1
+                sentinel.floatChannelData![0][0] = 0
+                playerNode.scheduleBuffer(sentinel) { [weak self] in
+                    Task { @MainActor in
+                        self?.ttsBuffersQueued -= 1
+                        self?.handleSentenceBufferCompleted()
                     }
                 }
 
@@ -1296,43 +1457,133 @@ class ReadAlongService {
             }
         }
 
-        // If no sentences produced audio, report error
+        pcmFileHandle?.closeFile()
+
         if successCount == 0 && !Task.isCancelled {
             logger.error("TTS pipeline produced no audio for any sentence")
+            try? FileManager.default.removeItem(at: tempPCMURL)
             state = .error("Failed to generate speech audio")
             return
         }
 
-        // All sentences generated — schedule completion handler for chapter advance
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            try? FileManager.default.removeItem(at: tempPCMURL)
+            return
+        }
 
+        // Schedule a silence buffer with completion handler to detect end of playback.
+        // This goes into the player queue after all audio buffers.
         let silenceBuffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
         silenceBuffer.frameLength = 1
         silenceBuffer.floatChannelData![0][0] = 0
 
-        await playerNode.scheduleBuffer(silenceBuffer)
-
-        logger.info("All \(self.ttsSentences.count) sentences queued, total duration=\(String(format: "%.1f", cumulativeTime))s")
-
-        // Cache the generated audio for future sessions
-        if let bookId = ebook?.id, let cache = ttsAudioCache, startIndex == 0, !allGeneratedSamples.isEmpty {
-            let metadata = TTSAudioCache.buildMetadata(
-                voiceId: Int(ttsVoiceIndex),
-                sentences: ttsSentences,
-                chapterSamples: allGeneratedSamples
-            )
-            cache.cacheChapterAudio(
-                bookId: bookId,
-                spineIndex: ttsCurrentSpineIndex,
-                samples: allGeneratedSamples,
-                metadata: metadata
-            )
+        let playbackFinished: Task<Void, Never> = Task { @MainActor [playerNode] in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                playerNode.scheduleBuffer(silenceBuffer) {
+                    continuation.resume()
+                }
+            }
         }
 
-        // Wait for playback to finish, then advance chapter
+        logger.info("All \(self.ttsSentences.count) sentences queued, total duration=\(String(format: "%.1f", cumulativeTime))s, \(totalSamplesWritten) samples streamed to disk")
+
+        // Phase 2: Cache + align — runs DURING playback.
+        // Both PocketTTS and Whisper-tiny coexist in memory (no model swapping).
+        // Word-level highlighting becomes available during first playback.
+        if let bookId = ebook?.id, let cache = ttsAudioCache, startIndex == 0, totalSamplesWritten > 0 {
+            let metadata = TTSAudioCache.buildMetadata(
+                voiceId: Int(self.ttsVoiceIndex),
+                sentences: ttsSentences,
+                chapterSamples: []
+            )
+            cache.cacheChapterAudioFromFile(
+                bookId: bookId,
+                spineIndex: ttsCurrentSpineIndex,
+                pcmFileURL: tempPCMURL,
+                metadata: metadata
+            )
+
+            // Whisper alignment runs concurrently with playback.
+            // Word timings update live on ttsSentences, enabling word-level highlighting
+            // during the current playback session.
+            await alignChapterFromCache(bookId: bookId, spineIndex: ttsCurrentSpineIndex, cache: cache)
+        } else {
+            try? FileManager.default.removeItem(at: tempPCMURL)
+        }
+
+        // Wait for all audio playback to finish before advancing chapter
+        await playbackFinished.value
+
+        guard !Task.isCancelled else { return }
+
         await MainActor.run { [weak self] in
             self?.handleTTSChapterComplete()
         }
+    }
+
+    // MARK: - Word Alignment
+
+    /// Align all sentences for a cached chapter using Whisper-tiny.
+    /// Both PocketTTS and Whisper-tiny coexist in memory (tiny model ~75MB vs base ~370MB).
+    /// Reads PCM samples per-sentence from disk (no bulk memory load).
+    private func alignChapterFromCache(bookId: String, spineIndex: Int, cache: TTSAudioCache) async {
+        let aligner = TTSWordAligner()
+        do {
+            try await aligner.loadModel()
+            logger.info("Whisper loaded for chapter alignment")
+        } catch {
+            logger.warning("Whisper unavailable for alignment: \(error)")
+            return
+        }
+
+        let sentences = await MainActor.run { self.ttsSentences }
+
+        for (i, sentence) in sentences.enumerated() {
+            guard !Task.isCancelled else { break }
+
+            let rawText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let sampleRate = 24000.0
+            let startSample = Int(sentence.audioStartTime * sampleRate)
+            let sampleCount = Int((sentence.audioEndTime - sentence.audioStartTime) * sampleRate)
+
+            guard !rawText.isEmpty, sampleCount > 0 else { continue }
+
+            // Read only this sentence's samples from disk
+            guard let sentenceSamples = cache.loadSampleRange(
+                bookId: bookId,
+                spineIndex: spineIndex,
+                sampleOffset: startSample,
+                sampleCount: sampleCount
+            ) else { continue }
+
+            let wordTimings = await aligner.alignWords(
+                samples: sentenceSamples,
+                originalText: rawText,
+                sentencePlainTextRange: sentence.plainTextRange,
+                timeOffset: sentence.audioStartTime
+            )
+
+            if !wordTimings.isEmpty {
+                await MainActor.run {
+                    if i < self.ttsSentences.count {
+                        self.ttsSentences[i].wordTimings = wordTimings
+                    }
+                }
+            }
+        }
+
+        // Update cache metadata with word timings
+        if !Task.isCancelled {
+            let updatedSentences = await MainActor.run { self.ttsSentences }
+            let metadata = TTSAudioCache.buildMetadata(
+                voiceId: Int(ttsVoiceIndex),
+                sentences: updatedSentences,
+                chapterSamples: []
+            )
+            cache.updateMetadata(bookId: bookId, spineIndex: spineIndex, metadata: metadata)
+        }
+
+        logger.info("Chapter word alignment complete")
     }
 
     // MARK: - TTS Update Loop
@@ -1364,6 +1615,46 @@ class ReadAlongService {
 
         ttsCurrentTime = currentTime
         updateTTSNowPlayingInfo()
+
+        // Advance page mid-sentence if the estimated reading position
+        // has crossed a page boundary (fallback for cached audio where
+        // sentences may not align with current page layout).
+        checkMidSentencePageAdvance()
+    }
+
+    /// Advance the page mid-sentence based on the current reading position.
+    /// Uses word-level timestamps from Whisper when available, otherwise
+    /// falls back to linear interpolation based on audio progress.
+    private func checkMidSentencePageAdvance() {
+        guard let engine = engine,
+              !autoAdvanceSuppressed,
+              ttsCurrentSentenceIndex < ttsSentences.count else { return }
+
+        let sentence = ttsSentences[ttsCurrentSentenceIndex]
+        guard let plainTextMap = engine.currentChapterPlainTextMap else { return }
+
+        let currentOffset: Int
+
+        if !sentence.wordTimings.isEmpty {
+            // Use precise Whisper-aligned word timestamps
+            guard let currentWord = sentence.wordTimings.last(where: { $0.start <= ttsCurrentTime }) else { return }
+            currentOffset = currentWord.plainTextOffset
+        } else {
+            // Fall back to linear interpolation
+            let duration = sentence.audioEndTime - sentence.audioStartTime
+            guard duration > 0 else { return }
+            let elapsed = ttsCurrentTime - sentence.audioStartTime
+            let progress = min(1.0, max(0.0, elapsed / duration))
+            currentOffset = sentence.plainTextRange.location
+                + Int(progress * Double(sentence.plainTextRange.length))
+        }
+
+        let clampedOffset = min(currentOffset, sentence.plainTextRange.location + sentence.plainTextRange.length - 1)
+        guard let attrRange = plainTextMap.attrStringRange(
+            for: NSRange(location: clampedOffset, length: 1)
+        ) else { return }
+
+        engine.showPage(containingRange: attrRange)
     }
 
     /// Called when a buffer finishes playing. Advances to the next sentence
@@ -1463,11 +1754,14 @@ class ReadAlongService {
 
     private func restartTTSFromSentence(_ index: Int) {
         guard let playerNode = ttsPlayerNode,
-              let engineFormat = ttsEngineFormat else { return }
+              let engineFormat = ttsEngineFormat,
+              !ttsSentences.isEmpty,
+              index < ttsSentences.count else { return }
 
         ttsStartSentenceIndex = index
         ttsGenerationTask?.cancel()
         playerNode.stop()
+        ttsIsPlaying = false
         ttsTotalSamplesScheduled = 0
         ttsBuffersQueued = 0
         ttsSentencePlaybackQueue = []
@@ -1477,18 +1771,19 @@ class ReadAlongService {
         ttsGenerationTask = Task { [weak self] in
             guard let self = self else { return }
 
-            guard let pocketTTSContext = self.pocketTTSContext else { return }
+            guard let pocketTTSContext = self.pocketTTSContext,
+                  index < self.ttsSentences.count else { return }
 
             var cumulativeTime = self.ttsSentences[index].audioStartTime
 
             for i in index..<self.ttsSentences.count {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, i < self.ttsSentences.count else { return }
 
                 // Throttle: wait if too many buffers are queued ahead
                 while self.ttsBuffersQueued >= self.ttsMaxBuffersAhead && !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(200))
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, i < self.ttsSentences.count else { return }
 
                 let sentence = self.ttsSentences[i]
                 let rawSentenceText = sentence.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1498,13 +1793,42 @@ class ReadAlongService {
                 let sentenceText = TextProcessingUtils.preprocessTextForTTS(rawSentenceText)
 
                 do {
-                    let result = try await pocketTTSContext.generateAudio(
+                    // Register sentence in playback queue before generation starts
+                    await MainActor.run {
+                        self.ttsBuffersQueued += 1
+                        self.ttsSentencePlaybackQueue.append(i)
+                    }
+
+                    // Stream audio chunks directly to player as they arrive
+                    let result = try await pocketTTSContext.generateAudioStreaming(
                         text: sentenceText,
-                        speed: 1.0
+                        onChunk: { [weak self] chunkSamples in
+                            guard !chunkSamples.isEmpty else { return }
+
+                            guard let buffer = AVAudioPCMBuffer(
+                                pcmFormat: engineFormat,
+                                frameCapacity: AVAudioFrameCount(chunkSamples.count)
+                            ) else { return }
+                            buffer.frameLength = AVAudioFrameCount(chunkSamples.count)
+                            chunkSamples.withUnsafeBufferPointer { src in
+                                buffer.floatChannelData![0].update(from: src.baseAddress!, count: chunkSamples.count)
+                            }
+
+                            playerNode.scheduleBuffer(buffer)
+
+                            // Start playback on the first audio chunk after restart
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self = self, !self.ttsIsPlaying else { return }
+                                playerNode.play()
+                                self.ttsIsPlaying = true
+                                self.state = .active
+                                self.highlightFirstSentence()
+                            }
+                        }
                     )
                     let generatedSamples = result.audioSamples
 
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled, i < self.ttsSentences.count else { return }
 
                     let sampleCount = generatedSamples.count
                     guard sampleCount > 0 else { continue }
@@ -1512,32 +1836,23 @@ class ReadAlongService {
                     let audioDuration = Double(sampleCount) / 24000.0
 
                     await MainActor.run {
+                        guard i < self.ttsSentences.count else { return }
                         self.ttsSentences[i].audioStartTime = cumulativeTime
                         self.ttsSentences[i].audioEndTime = cumulativeTime + audioDuration
                         self.ttsDuration = cumulativeTime + audioDuration
+                        self.ttsTotalSamplesScheduled += sampleCount
                     }
 
                     cumulativeTime += audioDuration
 
-                    guard let buffer = self.makeEngineBuffer(from: generatedSamples, engineFormat: engineFormat) else { continue }
-
-                    await MainActor.run {
-                        self.ttsBuffersQueued += 1
-                        self.ttsSentencePlaybackQueue.append(i)
-                        let options: AVAudioPlayerNodeBufferOptions = i == index ? .interrupts : []
-                        playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
-                            Task { @MainActor in
-                                self?.ttsBuffersQueued -= 1
-                                self?.handleSentenceBufferCompleted()
-                            }
-                        }
-                        self.ttsTotalSamplesScheduled += sampleCount
-
-                        if i == index {
-                            playerNode.play()
-                            self.ttsIsPlaying = true
-                            self.state = .active
-                            self.highlightFirstSentence()
+                    // Sentence boundary sentinel for highlight advancement
+                    let sentinel = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
+                    sentinel.frameLength = 1
+                    sentinel.floatChannelData![0][0] = 0
+                    playerNode.scheduleBuffer(sentinel) { [weak self] in
+                        Task { @MainActor in
+                            self?.ttsBuffersQueued -= 1
+                            self?.handleSentenceBufferCompleted()
                         }
                     }
                 } catch {

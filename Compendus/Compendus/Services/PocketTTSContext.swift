@@ -51,7 +51,7 @@ final class PocketTTSContext {
             temperature: 0.55,
             topP: 0.85,
             speed: speed,
-            consistencySteps: 4,
+            consistencySteps: 2,
             useFixedSeed: false,
             seed: 42
         )
@@ -69,18 +69,29 @@ final class PocketTTSContext {
 
     // MARK: - Generation
 
-    /// Generate speech audio from text.
-    /// Runs on a serial DispatchQueue to prevent concurrent access.
-    /// Returns raw Float samples (24kHz mono) extracted from the WAV output.
-    func generateAudio(text: String, speed: Float = 1.0) async throws -> TTSResult {
+    /// Generate speech audio with per-chunk streaming callback.
+    /// Each audio chunk is forwarded to `onChunk` as it arrives from the Mimi decoder,
+    /// enabling immediate playback scheduling. Also collects all samples for caching.
+    /// The `onChunk` callback is called on `ttsQueue` — AVAudioPlayerNode.scheduleBuffer
+    /// is thread-safe so callers can schedule directly from the callback.
+    func generateAudioStreaming(
+        text: String,
+        onChunk: @escaping (_ samples: [Float]) -> Void
+    ) async throws -> TTSResult {
         let engine = self.engine
 
         return try await withCheckedThrowingContinuation { continuation in
             Self.ttsQueue.async {
+                let handler = StreamingPlaybackHandler(onChunk: onChunk)
                 do {
-                    let result = try engine.synthesize(text: text)
-                    let samples = Self.extractSamplesFromWav(result.audioData)
-                    continuation.resume(returning: TTSResult(audioSamples: samples))
+                    logger.info("startTrueStreaming begin for: \"\(text.prefix(60))\"")
+                    try engine.startTrueStreaming(text: text, handler: handler)
+                    logger.info("startTrueStreaming returned: \(handler.collectedSamples.count) total samples, error=\(handler.error ?? "none")")
+                    if let error = handler.error {
+                        continuation.resume(throwing: PocketTTSError.generationFailed(error))
+                    } else {
+                        continuation.resume(returning: TTSResult(audioSamples: handler.collectedSamples))
+                    }
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -88,7 +99,73 @@ final class PocketTTSContext {
         }
     }
 
-    // MARK: - WAV Parsing
+    /// Collects audio chunks AND forwards each to a callback for immediate playback.
+    private class StreamingPlaybackHandler: TtsEventHandler {
+        private(set) var collectedSamples: [Float] = []
+        private(set) var error: String?
+        private let onChunk: ([Float]) -> Void
+        private var chunkCount = 0
+
+        init(onChunk: @escaping ([Float]) -> Void) {
+            self.onChunk = onChunk
+        }
+
+        func onAudioChunk(chunk: AudioChunk) {
+            chunkCount += 1
+            let data = chunk.audioData
+            let header = data.prefix(4).map { String(format: "%02X", $0) }.joined(separator: " ")
+            logger.info("onAudioChunk[\(self.chunkCount)]: \(data.count) bytes, sampleRate=\(chunk.sampleRate), isFinal=\(chunk.isFinal), header=\(header)")
+
+            let samples = PocketTTSContext.extractSamples(from: data)
+            logger.info("onAudioChunk[\(self.chunkCount)]: extracted \(samples.count) samples")
+
+            if !samples.isEmpty {
+                collectedSamples.append(contentsOf: samples)
+                onChunk(samples)
+            }
+        }
+
+        func onProgress(progress: Float) {
+            logger.info("onProgress: \(progress)")
+        }
+
+        func onComplete() {
+            logger.info("onComplete: total collected \(self.collectedSamples.count) samples from \(self.chunkCount) chunks")
+        }
+
+        func onError(message: String) {
+            logger.error("onError: \(message)")
+            error = message
+        }
+    }
+
+    // MARK: - Audio Parsing
+
+    /// Extract float32 samples from audio data (WAV or raw float32 PCM).
+    /// Tries WAV parsing first; falls back to raw float32 PCM (Mimi decoder output).
+    static func extractSamples(from data: Data) -> [Float] {
+        guard !data.isEmpty else { return [] }
+
+        // Check for RIFF/WAV header
+        if data.count > 44,
+           let magic = String(data: data.prefix(4), encoding: .ascii),
+           magic == "RIFF" {
+            return extractSamplesFromWav(data)
+        }
+
+        // Raw float32 PCM from Mimi decoder (24kHz mono)
+        let sampleCount = data.count / MemoryLayout<Float>.size
+        guard sampleCount > 0 else { return [] }
+        var samples = [Float](repeating: 0, count: sampleCount)
+        data.withUnsafeBytes { rawBuffer in
+            let floatBuffer = rawBuffer.bindMemory(to: Float.self)
+            for i in 0..<sampleCount {
+                samples[i] = floatBuffer[i]
+            }
+        }
+        logger.info("extractSamples: raw float32 PCM, \(sampleCount) samples from \(data.count) bytes, first few: [\(samples.prefix(4).map { String(format: "%.4f", $0) }.joined(separator: ", "))]")
+        return samples
+    }
 
     /// Extract raw float32 samples from WAV data.
     /// PocketTTS outputs 24kHz mono 16-bit integer PCM WAV.

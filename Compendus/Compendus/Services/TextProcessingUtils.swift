@@ -18,35 +18,82 @@ enum TextProcessingUtils {
         let plainTextRange: NSRange
         var audioStartTime: Double = 0  // cumulative start within chapter
         var audioEndTime: Double = 0    // cumulative end within chapter
+        var wordTimings: [TTSWordAligner.WordTiming] = []  // from Whisper alignment
     }
 
-    /// Maximum characters per TTS chunk. PocketTTS handles longer sequences but
-    /// we chunk for sentence-level highlighting and streaming playback.
-    static let maxCharsPerChunk = 500
+    /// Maximum characters per TTS chunk. Larger chunks produce more natural
+    /// prosody since the TTS model has more context. Word-level alignment
+    /// via Whisper handles precise highlighting regardless of chunk size.
+    /// Note: PocketTTS memory scales with token count (~2.6 chars/token),
+    /// so keep this moderate to avoid OOM on long chapters.
+    static let maxCharsPerChunk = 250
 
     /// Split text into sentence spans using NLTokenizer.
-    /// Long sentences are further split at clause boundaries.
+    /// Small consecutive sentences are merged into larger chunks for natural
+    /// TTS prosody. Long sentences are further split at clause boundaries.
     static func sentencize(_ text: String, maxChunkSize: Int = maxCharsPerChunk) -> [SentenceSpan] {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
         let nsText = text as NSString
 
-        var spans: [SentenceSpan] = []
+        var rawSpans: [SentenceSpan] = []
         tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
             let nsRange = NSRange(range, in: text)
             let sentenceText = nsText.substring(with: nsRange)
             let trimmed = sentenceText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 if trimmed.count > maxChunkSize {
-                    spans.append(contentsOf: splitLongSentence(trimmed, baseRange: nsRange, maxChunkSize: maxChunkSize))
+                    rawSpans.append(contentsOf: splitLongSentence(trimmed, baseRange: nsRange, maxChunkSize: maxChunkSize))
                 } else {
-                    spans.append(SentenceSpan(text: trimmed, plainTextRange: nsRange))
+                    rawSpans.append(SentenceSpan(text: trimmed, plainTextRange: nsRange))
                 }
             }
             return true
         }
 
-        return spans
+        return mergeSmallSpans(rawSpans, maxChunkSize: maxChunkSize, sourceText: nsText)
+    }
+
+    /// Merge consecutive small spans into larger chunks up to maxChunkSize.
+    /// This prevents tiny fragments (headings, short lines) from becoming
+    /// isolated TTS calls that sound choppy and unnatural.
+    static func mergeSmallSpans(_ spans: [SentenceSpan], maxChunkSize: Int, sourceText: NSString) -> [SentenceSpan] {
+        guard spans.count > 1 else { return spans }
+
+        var merged: [SentenceSpan] = []
+        var accumText = ""
+        var accumStart = -1
+        var accumEnd = -1
+
+        for span in spans {
+            let candidateText = accumText.isEmpty ? span.text : accumText + " " + span.text
+
+            if candidateText.count <= maxChunkSize {
+                // Merge this span into the accumulator
+                if accumStart < 0 {
+                    accumStart = span.plainTextRange.location
+                }
+                accumText = candidateText
+                accumEnd = span.plainTextRange.location + span.plainTextRange.length
+            } else {
+                // Flush the accumulator and start a new one
+                if !accumText.isEmpty {
+                    let range = NSRange(location: accumStart, length: accumEnd - accumStart)
+                    merged.append(SentenceSpan(text: accumText, plainTextRange: range))
+                }
+                accumText = span.text
+                accumStart = span.plainTextRange.location
+                accumEnd = span.plainTextRange.location + span.plainTextRange.length
+            }
+        }
+
+        // Flush remaining
+        if !accumText.isEmpty {
+            let range = NSRange(location: accumStart, length: accumEnd - accumStart)
+            merged.append(SentenceSpan(text: accumText, plainTextRange: range))
+        }
+
+        return merged
     }
 
     /// Split a long sentence at clause boundaries to keep each chunk under maxChunkSize.

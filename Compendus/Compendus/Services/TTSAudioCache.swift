@@ -32,6 +32,34 @@ class TTSAudioCache {
         let audioEndTime: Double
         let sampleOffset: Int               // Sample offset in PCM file (Float32 index)
         let sampleCount: Int                // Number of Float32 samples
+        let wordTimings: [TTSWordAligner.WordTiming]  // Whisper-aligned word timestamps
+
+        // Backwards compatibility: old cache files won't have wordTimings
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            text = try container.decode(String.self, forKey: .text)
+            plainTextLocation = try container.decode(Int.self, forKey: .plainTextLocation)
+            plainTextLength = try container.decode(Int.self, forKey: .plainTextLength)
+            audioStartTime = try container.decode(Double.self, forKey: .audioStartTime)
+            audioEndTime = try container.decode(Double.self, forKey: .audioEndTime)
+            sampleOffset = try container.decode(Int.self, forKey: .sampleOffset)
+            sampleCount = try container.decode(Int.self, forKey: .sampleCount)
+            wordTimings = (try? container.decodeIfPresent([TTSWordAligner.WordTiming].self, forKey: .wordTimings)) ?? []
+        }
+
+        init(text: String, plainTextLocation: Int, plainTextLength: Int,
+             audioStartTime: Double, audioEndTime: Double,
+             sampleOffset: Int, sampleCount: Int,
+             wordTimings: [TTSWordAligner.WordTiming] = []) {
+            self.text = text
+            self.plainTextLocation = plainTextLocation
+            self.plainTextLength = plainTextLength
+            self.audioStartTime = audioStartTime
+            self.audioEndTime = audioEndTime
+            self.sampleOffset = sampleOffset
+            self.sampleCount = sampleCount
+            self.wordTimings = wordTimings
+        }
     }
 
     // MARK: - Cache Result
@@ -47,7 +75,8 @@ class TTSAudioCache {
                     text: timing.text,
                     plainTextRange: NSRange(location: timing.plainTextLocation, length: timing.plainTextLength),
                     audioStartTime: timing.audioStartTime,
-                    audioEndTime: timing.audioEndTime
+                    audioEndTime: timing.audioEndTime,
+                    wordTimings: timing.wordTimings
                 )
             }
         }
@@ -140,6 +169,38 @@ class TTSAudioCache {
         }
     }
 
+    /// Cache TTS audio from a streamed PCM file (avoids loading all samples into memory).
+    func cacheChapterAudioFromFile(
+        bookId: String,
+        spineIndex: Int,
+        pcmFileURL: URL,
+        metadata: TTSCacheMetadata
+    ) {
+        do {
+            let bookDir = bookCacheURL(bookId: bookId)
+            try fileManager.createDirectory(at: bookDir, withIntermediateDirectories: true)
+
+            // Move streamed PCM file to cache location
+            let destPCM = pcmURL(bookId: bookId, spineIndex: spineIndex)
+            if fileManager.fileExists(atPath: destPCM.path) {
+                try fileManager.removeItem(at: destPCM)
+            }
+            try fileManager.moveItem(at: pcmFileURL, to: destPCM)
+
+            // Write metadata as JSON
+            let meta = metadataURL(bookId: bookId, spineIndex: spineIndex)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let metaData = try encoder.encode(metadata)
+            try metaData.write(to: meta, options: .atomic)
+
+            let fileSize = (try? fileManager.attributesOfItem(atPath: destPCM.path)[.size] as? Int) ?? 0
+            logger.info("Cached TTS audio (streamed): \(bookId)/\(spineIndex) — \(fileSize) bytes")
+        } catch {
+            logger.error("Failed to cache TTS audio from file: \(error)")
+        }
+    }
+
     /// Build cache metadata from sentence spans and their audio samples.
     static func buildMetadata(
         voiceId: Int,
@@ -160,7 +221,8 @@ class TTSAudioCache {
                 audioStartTime: sentence.audioStartTime,
                 audioEndTime: sentence.audioEndTime,
                 sampleOffset: sampleOffset,
-                sampleCount: sampleCount
+                sampleCount: sampleCount,
+                wordTimings: sentence.wordTimings
             ))
 
             sampleOffset += sampleCount
@@ -227,6 +289,43 @@ class TTSAudioCache {
             return 0
         }
         return contents.filter { $0.pathExtension == "pcm" }.count
+    }
+
+    /// Load a range of PCM samples from a cached chapter (avoids loading entire file into memory).
+    func loadSampleRange(bookId: String, spineIndex: Int, sampleOffset: Int, sampleCount: Int) -> [Float]? {
+        let url = pcmURL(bookId: bookId, spineIndex: spineIndex)
+        guard let fileHandle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fileHandle.close() }
+
+        let byteOffset = UInt64(sampleOffset * MemoryLayout<Float>.size)
+        let byteCount = sampleCount * MemoryLayout<Float>.size
+
+        do {
+            try fileHandle.seek(toOffset: byteOffset)
+            guard let data = try fileHandle.read(upToCount: byteCount), data.count > 0 else { return nil }
+            let floatCount = data.count / MemoryLayout<Float>.size
+            return data.withUnsafeBytes { rawBuffer in
+                let floatBuffer = rawBuffer.bindMemory(to: Float.self)
+                return Array(floatBuffer.prefix(floatCount))
+            }
+        } catch {
+            logger.warning("Failed to read sample range: \(error)")
+            return nil
+        }
+    }
+
+    /// Update just the metadata JSON for a cached chapter (e.g. after deferred word alignment).
+    func updateMetadata(bookId: String, spineIndex: Int, metadata: TTSCacheMetadata) {
+        let meta = metadataURL(bookId: bookId, spineIndex: spineIndex)
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(metadata)
+            try data.write(to: meta, options: .atomic)
+            logger.info("Updated cache metadata: \(bookId)/\(spineIndex) — \(metadata.sentenceTimings.count) sentences")
+        } catch {
+            logger.error("Failed to update cache metadata: \(error)")
+        }
     }
 
     // MARK: - Private Helpers

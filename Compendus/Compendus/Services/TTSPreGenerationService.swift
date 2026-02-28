@@ -133,6 +133,15 @@ class TTSPreGenerationService {
         modelContainer: ModelContainer
     ) async {
         do {
+            // Initialize Whisper-based word aligner for precise timestamps
+            let wordAligner = TTSWordAligner()
+            do {
+                try await wordAligner.loadModel()
+                logger.info("Word aligner loaded for offline TTS generation")
+            } catch {
+                logger.warning("Word aligner unavailable: \(error) — using estimated timing")
+            }
+
             // Parse the EPUB
             await MainActor.run { state = .generating(progress: 0, message: "Parsing EPUB...") }
             let parser = try await EPUBParser.parse(epubURL: fileURL)
@@ -255,13 +264,25 @@ class TTSPreGenerationService {
                     let processedText = TextProcessingUtils.preprocessTextForTTS(rawText)
 
                     do {
-                        let result = try await ttsContext.generateAudio(text: processedText, speed: 1.0)
+                        let result = try await ttsContext.generateAudioStreaming(text: processedText, onChunk: { _ in })
                         let samples = result.audioSamples
                         guard !samples.isEmpty else { continue }
 
                         let duration = Double(samples.count) / 24000.0
                         chapterSentences[i].audioStartTime = chapterCumulativeTime
                         chapterSentences[i].audioEndTime = chapterCumulativeTime + duration
+
+                        // Run Whisper alignment for word-level timestamps
+                        let wordTimings = await wordAligner.alignWords(
+                            samples: samples,
+                            originalText: rawText,
+                            sentencePlainTextRange: sentence.plainTextRange,
+                            timeOffset: chapterCumulativeTime
+                        )
+                        if !wordTimings.isEmpty {
+                            chapterSentences[i].wordTimings = wordTimings
+                        }
+
                         chapterCumulativeTime += duration
                         chapterSamples.append(contentsOf: samples)
                     } catch {

@@ -73,6 +73,11 @@ struct UnifiedReaderView: View {
     @State private var showingFootnote = false
     @State private var footnoteContent = ""
 
+    // Link confirmation
+    @State private var showingLinkConfirmation = false
+    @State private var pendingLinkURL: URL?
+    @State private var pendingLinkIsExternal = false
+
     enum ReaderState {
         case loading
         case ready
@@ -313,6 +318,29 @@ struct UnifiedReaderView: View {
             }
             .presentationDetents([.medium])
             .readerThemed(readerSettings)
+        }
+        .alert(
+            pendingLinkIsExternal ? "Open External Link?" : "Navigate to Link?",
+            isPresented: $showingLinkConfirmation
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingLinkURL = nil
+            }
+            Button(pendingLinkIsExternal ? "Open" : "Go") {
+                if let url = pendingLinkURL,
+                   let nativeEngine = engine as? NativeEPUBEngine {
+                    nativeEngine.performLinkNavigation(url)
+                }
+                pendingLinkURL = nil
+            }
+        } message: {
+            if let url = pendingLinkURL {
+                if pendingLinkIsExternal {
+                    Text("This will open \(url.absoluteString) in your browser.")
+                } else {
+                    Text("Navigate to this section in the book?")
+                }
+            }
         }
         // Settings changes — skip while settings sheet is open (applied on dismiss)
         .onChange(of: readerSettings.theme) { _, _ in
@@ -905,6 +933,12 @@ struct UnifiedReaderView: View {
                 footnoteContent = text
                 showingFootnote = true
             }
+
+            nativeEngine.onLinkNavigationRequested = { [self] url, isExternal in
+                pendingLinkURL = url
+                pendingLinkIsExternal = isExternal
+                showingLinkConfirmation = true
+            }
         }
     }
 
@@ -1010,7 +1044,7 @@ struct UnifiedReaderView: View {
             readAlongService.state = .loading
         }
 
-        Task.detached(priority: .userInitiated) { [pocketTTSModelManager, readAlongService, book, ttsAudioCache] in
+        Task.detached(priority: .userInitiated) { [pocketTTSModelManager, readAlongService, book, ttsAudioCache, transcriptionService] in
             do {
                 let voiceIndex = await pocketTTSModelManager.selectedVoiceIndex
                 print("[TTS] Loading model with voice \(voiceIndex)...")
@@ -1022,7 +1056,8 @@ struct UnifiedReaderView: View {
                         engine: nativeEngine,
                         ttsContext: context,
                         voiceIndex: voiceIndex,
-                        audioCache: ttsAudioCache
+                        audioCache: ttsAudioCache,
+                        transcriptionService: transcriptionService
                     )
                 }
             } catch {

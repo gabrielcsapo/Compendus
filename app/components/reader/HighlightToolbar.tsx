@@ -71,7 +71,18 @@ export function HighlightToolbar({
   }, [showNoteInput]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(selectedText);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(selectedText);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = selectedText;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     onDismiss();
   };
 

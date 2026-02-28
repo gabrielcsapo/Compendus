@@ -107,8 +107,8 @@ struct AudiobookPlayerView: View {
                                 Image(uiImage: uiImage)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: geometry.size.width - 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .frame(width: geometry.size.width - 48)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16))
                                     .shadow(color: .black.opacity(0.3), radius: 16, x: 0, y: 8)
                                     .onTapGesture { showBookDetail = true }
                             } else {

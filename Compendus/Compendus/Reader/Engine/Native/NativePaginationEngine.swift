@@ -2,12 +2,12 @@
 //  NativePaginationEngine.swift
 //  Compendus
 //
-//  Calculates precise page breaks for attributed strings using Core Text.
-//  Uses CTFramesetter to determine how many characters fit in each page.
+//  Calculates precise page breaks for attributed strings using TextKit 1.
+//  Uses NSLayoutManager with multiple text containers so pagination matches
+//  UITextView's rendering exactly — no text is lost between pages.
 //
 
 import UIKit
-import CoreText
 
 struct PageInfo {
     /// Character range in the full attributed string
@@ -32,6 +32,11 @@ class NativePaginationEngine {
     }
 
     /// Calculate pages for the given attributed string within the viewport.
+    ///
+    /// Uses TextKit 1 (NSLayoutManager) with multiple text containers to determine
+    /// page breaks. This matches UITextView's internal layout engine exactly,
+    /// preventing text from being lost between pages due to Core Text vs TextKit
+    /// measurement differences.
     static func paginate(
         attributedString: NSAttributedString,
         viewportSize: CGSize,
@@ -49,36 +54,38 @@ class NativePaginationEngine {
             return [PageInfo(range: NSRange(location: 0, length: length), pageIndex: 0)]
         }
 
-        let framesetter = CTFramesetterCreateWithAttributedString(attributedString)
+        let containerSize = CGSize(width: contentWidth, height: contentHeight)
+
+        // Build a TextKit 1 stack identical to what UITextView uses.
+        // NSLayoutManager flows text across multiple text containers,
+        // each representing one page.
+        let textStorage = NSTextStorage(attributedString: attributedString)
+        let layoutManager = NSLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+
         var pages: [PageInfo] = []
-        var currentIndex = 0
         var pageIndex = 0
 
-        while currentIndex < length {
-            let remainingRange = CFRangeMake(currentIndex, length - currentIndex)
+        while true {
+            let textContainer = NSTextContainer(size: containerSize)
+            textContainer.lineFragmentPadding = 0
+            layoutManager.addTextContainer(textContainer)
 
-            // Create a path for this page's content area
-            let path = CGPath(rect: CGRect(x: 0, y: 0, width: contentWidth, height: contentHeight), transform: nil)
+            layoutManager.ensureLayout(for: textContainer)
 
-            // Create a frame to find how much text fits
-            let frame = CTFramesetterCreateFrame(framesetter, remainingRange, path, nil)
-            let visibleRange = CTFrameGetVisibleStringRange(frame)
+            let glyphRange = layoutManager.glyphRange(for: textContainer)
+            guard glyphRange.length > 0 else { break }
 
-            // Determine how many characters fit on this page
-            var charsFit = visibleRange.length
-            if charsFit <= 0 {
-                // Safety: advance at least 1 character to prevent infinite loop
-                charsFit = 1
-            }
-
-            let pageRange = NSRange(location: currentIndex, length: charsFit)
-            pages.append(PageInfo(range: pageRange, pageIndex: pageIndex))
-
-            currentIndex += charsFit
+            let charRange = layoutManager.characterRange(
+                forGlyphRange: glyphRange, actualGlyphRange: nil
+            )
+            pages.append(PageInfo(range: charRange, pageIndex: pageIndex))
             pageIndex += 1
+
+            // All text consumed
+            if charRange.location + charRange.length >= length { break }
         }
 
-        // Ensure at least one page
         if pages.isEmpty {
             pages.append(PageInfo(range: NSRange(location: 0, length: length), pageIndex: 0))
         }

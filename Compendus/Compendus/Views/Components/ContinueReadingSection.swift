@@ -104,7 +104,6 @@ struct ContinueReadingCard: View {
                     .font(.caption)
                     .fontWeight(.medium)
                     .lineLimit(2)
-                    .frame(width: 100, alignment: .leading)
 
                 HStack(spacing: 4) {
                     formatBadge
@@ -114,6 +113,7 @@ struct ContinueReadingCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(width: 100, height: 44, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title), \(Int(book.readingProgress * 100))% complete")

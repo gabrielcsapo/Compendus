@@ -22,7 +22,18 @@ function CodeBlock({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(children);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(children);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = children;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
