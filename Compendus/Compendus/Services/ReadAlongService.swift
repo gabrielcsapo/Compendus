@@ -125,6 +125,19 @@ class ReadAlongService {
     @ObservationIgnored private var ttsSentencePlaybackQueue: [Int] = []
     private let ttsMaxBuffersAhead = 3
     @ObservationIgnored private var ttsBackgrounded = false
+    /// Running RMS for consistent loudness across sentence buffers.
+    @ObservationIgnored private var ttsRunningRMS: Float = 0
+    @ObservationIgnored private var ttsRunningRMSCount: Int = 0
+    /// Target RMS level for normalization (~-20 dBFS).
+    private let ttsTargetRMS: Float = 0.1
+    /// Crossfade duration in samples (10ms at 24kHz).
+    private let ttsCrossfadeSamples: Int = 240
+    /// Silence threshold for trimming.
+    private let ttsSilenceThreshold: Float = 0.01
+    /// Inter-sentence silence padding in samples (~150ms at 24kHz).
+    private let ttsSilencePaddingSamples: Int = 3600
+    /// Tail samples from the previous buffer for crossfading.
+    @ObservationIgnored private var ttsPreviousBufferTail: [Float] = []
     @ObservationIgnored private var backgroundObservers: [Any] = []
 
     // MARK: - Book Matching
@@ -774,9 +787,11 @@ class ReadAlongService {
         // Engine is already loaded with voice — just set up audio and start
         do {
             try setupTTSAudioEngine()
+            logger.info("TTS audio engine ready, starting chapter generation...")
             startTTSForCurrentChapter()
         } catch {
             logger.error("TTS activation failed: \(error)")
+            print("[TTS] Audio engine setup failed: \(error)")
             state = .error("TTS setup failed: \(error.localizedDescription)")
         }
 
@@ -952,6 +967,7 @@ class ReadAlongService {
         ttsSentencePlaybackQueue = []
         ttsCurrentTime = 0
         ttsCurrentSpineIndex = engine.activeSpineIndex
+        resetAudioProcessingState()
 
         // Find the first sentence on or after the current page so TTS
         // starts from where the user is reading, not from page 1.
@@ -994,6 +1010,7 @@ class ReadAlongService {
         ttsSentencePlaybackQueue = []
         ttsCurrentTime = 0
         ttsCurrentSpineIndex = spineIndex
+        resetAudioProcessingState()
 
         let pageOffset = engine.currentPagePlainTextOffset ?? 0
         let startIndex = sentences.firstIndex {
@@ -1070,40 +1087,118 @@ class ReadAlongService {
     }
 
     /// Create a PCM buffer from raw audio samples (24kHz mono).
-    /// Normalizes audio to a peak of 0.8 if any sample exceeds [-1, 1]
-    /// to prevent iOS clipping.
+    /// Applies silence trimming, RMS-based loudness normalization,
+    /// crossfade with the previous buffer, and inter-sentence padding.
     private func makeEngineBuffer(from samples: [Float], engineFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard !samples.isEmpty else { return nil }
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: AVAudioFrameCount(samples.count)) else {
+
+        // 1. Trim leading/trailing silence
+        var trimmed = trimSilence(samples)
+        guard !trimmed.isEmpty else { return nil }
+
+        // 2. RMS-based loudness normalization
+        let rms = computeRMS(trimmed)
+        if rms > 0.001 {
+            // Update running average RMS
+            ttsRunningRMSCount += 1
+            ttsRunningRMS += (rms - ttsRunningRMS) / Float(ttsRunningRMSCount)
+
+            // Scale to target RMS, but limit gain to avoid amplifying noise
+            let gain = min(ttsTargetRMS / rms, 4.0)
+            for i in 0..<trimmed.count {
+                trimmed[i] = trimmed[i] * gain
+            }
+
+            // Soft-clip anything above 0.95 to prevent harsh clipping
+            for i in 0..<trimmed.count {
+                if trimmed[i] > 0.95 {
+                    trimmed[i] = 0.95 + 0.05 * tanhf((trimmed[i] - 0.95) / 0.05)
+                } else if trimmed[i] < -0.95 {
+                    trimmed[i] = -0.95 - 0.05 * tanhf((-trimmed[i] - 0.95) / 0.05)
+                }
+            }
+        }
+
+        // 3. Crossfade with previous buffer's tail
+        if !ttsPreviousBufferTail.isEmpty {
+            let fadeLen = min(ttsCrossfadeSamples, trimmed.count, ttsPreviousBufferTail.count)
+            for i in 0..<fadeLen {
+                let t = Float(i) / Float(fadeLen)
+                trimmed[i] = ttsPreviousBufferTail[i] * (1.0 - t) + trimmed[i] * t
+            }
+        }
+
+        // Save tail for next crossfade
+        let tailLen = min(ttsCrossfadeSamples, trimmed.count)
+        ttsPreviousBufferTail = Array(trimmed.suffix(tailLen))
+
+        // 4. Apply fade-out to last few ms (avoids click at sentence end)
+        let fadeOutLen = min(ttsCrossfadeSamples, trimmed.count)
+        for i in 0..<fadeOutLen {
+            let idx = trimmed.count - fadeOutLen + i
+            let t = Float(fadeOutLen - i) / Float(fadeOutLen)
+            trimmed[idx] = trimmed[idx] * t
+        }
+
+        // 5. Append inter-sentence silence padding
+        let padding = [Float](repeating: 0, count: ttsSilencePaddingSamples)
+        let finalSamples = trimmed + padding
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: AVAudioFrameCount(finalSamples.count)) else {
             return nil
         }
         buffer.frameLength = buffer.frameCapacity
 
-        // Find peak absolute value
-        var peak: Float = 0
-        for sample in samples {
-            let absVal = abs(sample)
-            if absVal > peak { peak = absVal }
-        }
-
         let channelData = buffer.floatChannelData![0]
-
-        if peak > 1.0 {
-            // Scale down so peak maps to 0.8 (leaving headroom)
-            let scale: Float = 0.8 / peak
-            for i in 0..<samples.count {
-                channelData[i] = samples[i] * scale
-            }
-        } else {
-            // Already in range — copy directly
-            samples.withUnsafeBufferPointer { srcPtr in
-                let byteCount = srcPtr.count * MemoryLayout<Float>.stride
-                UnsafeMutableRawPointer(channelData)
-                    .copyMemory(from: UnsafeRawPointer(srcPtr.baseAddress!), byteCount: byteCount)
-            }
+        finalSamples.withUnsafeBufferPointer { srcPtr in
+            let byteCount = srcPtr.count * MemoryLayout<Float>.stride
+            UnsafeMutableRawPointer(channelData)
+                .copyMemory(from: UnsafeRawPointer(srcPtr.baseAddress!), byteCount: byteCount)
         }
 
         return buffer
+    }
+
+    /// Trim leading and trailing silence below threshold.
+    private func trimSilence(_ samples: [Float]) -> [Float] {
+        let threshold = ttsSilenceThreshold
+        var start = 0
+        var end = samples.count - 1
+
+        // Find first sample above threshold
+        while start < samples.count && abs(samples[start]) < threshold {
+            start += 1
+        }
+        // Find last sample above threshold
+        while end > start && abs(samples[end]) < threshold {
+            end -= 1
+        }
+
+        guard start < end else { return [] }
+
+        // Keep a small margin (2ms = 48 samples at 24kHz) to avoid cutting transients
+        let margin = 48
+        start = max(0, start - margin)
+        end = min(samples.count - 1, end + margin)
+
+        return Array(samples[start...end])
+    }
+
+    /// Compute RMS of a sample buffer.
+    private func computeRMS(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        var sumSquares: Float = 0
+        for s in samples {
+            sumSquares += s * s
+        }
+        return sqrtf(sumSquares / Float(samples.count))
+    }
+
+    /// Reset audio processing state for a new chapter.
+    private func resetAudioProcessingState() {
+        ttsRunningRMS = 0
+        ttsRunningRMSCount = 0
+        ttsPreviousBufferTail = []
     }
 
     /// Producer pipeline: generates audio sentence by sentence, schedules onto player.

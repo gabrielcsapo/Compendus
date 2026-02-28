@@ -946,8 +946,8 @@ struct UnifiedReaderView: View {
             // Need to transcribe first — start transcription, then activate when done
             withAnimation {
                 showReadAlongPill = false
+                readAlongService.state = .loading
             }
-            readAlongService.state = .loading
             guard let fileURL = audiobook.fileURL else { return }
             let duration = audiobook.duration.map(Double.init) ?? 0
 
@@ -996,28 +996,37 @@ struct UnifiedReaderView: View {
     }
 
     private func activateTTSReadAloud() {
-        guard let nativeEngine = engine as? NativeEPUBEngine else { return }
-
-        withAnimation {
-            showReadAlongPill = false
+        guard let nativeEngine = engine as? NativeEPUBEngine else {
+            print("[TTS] Cannot start: engine is not NativeEPUBEngine (engine=\(String(describing: engine)))")
+            return
         }
 
-        // Show loading state immediately — model loading can take a moment
-        readAlongService.state = .loading
+        print("[TTS] Activating read aloud, voice=\(pocketTTSModelManager.selectedVoiceIndex)")
 
-        Task.detached(priority: .userInitiated) {
+        // Both changes must be in the same animation transaction so the pill
+        // transitions from "available" to "active/loading" without disappearing.
+        withAnimation {
+            showReadAlongPill = false
+            readAlongService.state = .loading
+        }
+
+        Task.detached(priority: .userInitiated) { [pocketTTSModelManager, readAlongService, book, ttsAudioCache] in
             do {
-                let context = try PocketTTSContext.createFromBundle(voiceIndex: pocketTTSModelManager.selectedVoiceIndex)
+                let voiceIndex = await pocketTTSModelManager.selectedVoiceIndex
+                print("[TTS] Loading model with voice \(voiceIndex)...")
+                let context = try PocketTTSContext.createFromBundle(voiceIndex: voiceIndex)
+                print("[TTS] Model loaded, activating service...")
                 await MainActor.run {
                     readAlongService.activateWithTTS(
                         ebook: book,
                         engine: nativeEngine,
                         ttsContext: context,
-                        voiceIndex: pocketTTSModelManager.selectedVoiceIndex,
+                        voiceIndex: voiceIndex,
                         audioCache: ttsAudioCache
                     )
                 }
             } catch {
+                print("[TTS] Failed to load model: \(error)")
                 await MainActor.run {
                     readAlongService.state = .error("Failed to load TTS model: \(error.localizedDescription)")
                 }

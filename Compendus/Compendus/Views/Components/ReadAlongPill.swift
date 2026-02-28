@@ -43,7 +43,6 @@ struct ReadAlongPill: View {
     @State private var showingSourcePicker = false
     @State private var showingOptionsSheet = false
     @State private var showingVoicePicker = false
-    @State private var showingSpeedPicker = false
 
     // MARK: - Computed
 
@@ -125,9 +124,6 @@ struct ReadAlongPill: View {
         }
         .sheet(isPresented: $showingVoicePicker) {
             voicePickerSheet
-        }
-        .sheet(isPresented: $showingSpeedPicker) {
-            speedPickerSheet
         }
     }
 
@@ -237,87 +233,68 @@ struct ReadAlongPill: View {
 
     private var activePill: some View {
         HStack(spacing: 10) {
-            // Progress ring or loading spinner
-            ZStack {
-                Circle()
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
-                    .frame(width: 32, height: 32)
-
-                if let tp = transcriptionProgress {
+            // Tappable info area — opens options sheet
+            HStack(spacing: 10) {
+                // Progress ring or loading spinner
+                ZStack {
                     Circle()
-                        .trim(from: 0, to: tp)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
                         .frame(width: 32, height: 32)
-                } else if !isLoading {
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 32, height: 32)
-                        .animation(.linear(duration: 0.3), value: progress)
+
+                    if let tp = transcriptionProgress {
+                        Circle()
+                            .trim(from: 0, to: tp)
+                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 32, height: 32)
+                    } else if !isLoading {
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .frame(width: 32, height: 32)
+                            .animation(.linear(duration: 0.3), value: progress)
+                    }
+
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: readAlong.isTTSMode ? "speaker.wave.2" : "headphones")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
                 }
+                .frame(width: 32, height: 32)
 
-                if isLoading {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                } else {
-                    Image(systemName: readAlong.isTTSMode ? "speaker.wave.2" : "headphones")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.primary)
-                }
-            }
-            .frame(width: 32, height: 32)
+                // Title + time + TTS info
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(readAlong.isTTSMode ? "Read Aloud" : "Read Along")
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(1)
 
-            // Title + time
-            VStack(alignment: .leading, spacing: 1) {
-                Text(readAlong.isTTSMode ? "Read Aloud" : "Read Along")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-
-                if !isLoading {
-                    Text("\(formatTime(currentTime)) / \(formatTime(duration))")
+                    if !isLoading {
+                        HStack(spacing: 4) {
+                            Text("\(formatTime(currentTime)) / \(formatTime(duration))")
+                                .monospacedDigit()
+                            if readAlong.isTTSMode {
+                                Text("·")
+                                Text(currentSpeedLabel)
+                                    .monospacedDigit()
+                                Text("·")
+                                Text(voiceManager.selectedVoice?.name ?? "Voice")
+                            }
+                        }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-            }
-
-            Spacer()
-
-            // Speed button (TTS only)
-            if readAlong.isTTSMode && !isLoading {
-                Button {
-                    showingSpeedPicker = true
-                } label: {
-                    Text(currentSpeedLabel)
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(Capsule())
-                }
-            }
-
-            // Voice picker button (TTS only)
-            if readAlong.isTTSMode && !isLoading {
-                Button {
-                    showingVoicePicker = true
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "person.wave.2")
-                            .font(.system(size: 12))
-                        Text(voiceManager.selectedVoice?.name ?? "Voice")
-                            .font(.caption2)
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.06))
-                    .clipShape(Capsule())
                 }
+
+                Spacer()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                showingOptionsSheet = true
             }
 
             // Play/pause
@@ -358,75 +335,77 @@ struct ReadAlongPill: View {
     private var optionsSheet: some View {
         NavigationStack {
             List {
-                // Start options
-                Section {
-                    if hasDualSources {
-                        Button {
-                            showingOptionsSheet = false
-                            onStartAudiobook()
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Read Along")
-                                    Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                // Start/switch options (hidden when already active with single source)
+                if !isActive || hasDualSources {
+                    Section {
+                        if hasDualSources {
+                            Button {
+                                showingOptionsSheet = false
+                                onStartAudiobook()
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Read Along")
+                                        Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "headphones")
                                 }
-                            } icon: {
-                                Image(systemName: "headphones")
                             }
-                        }
 
-                        Button {
-                            showingOptionsSheet = false
-                            onStartTTS()
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Read Aloud")
-                                    Text("On-device text-to-speech · \(voiceManager.selectedVoice?.name ?? "Default")")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            Button {
+                                showingOptionsSheet = false
+                                onStartTTS()
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Read Aloud")
+                                        Text("On-device text-to-speech · \(voiceManager.selectedVoice?.name ?? "Default")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "speaker.wave.2")
                                 }
-                            } icon: {
-                                Image(systemName: "speaker.wave.2")
+                            }
+                        } else if availableSources.contains(where: { if case .audiobook = $0 { return true }; return false }) {
+                            Button {
+                                showingOptionsSheet = false
+                                onStartAudiobook()
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Start Read Along")
+                                        Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "headphones")
+                                }
+                            }
+                        } else {
+                            Button {
+                                showingOptionsSheet = false
+                                onStartTTS()
+                            } label: {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Start Read Aloud")
+                                        Text("On-device text-to-speech")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "speaker.wave.2")
+                                }
                             }
                         }
-                    } else if availableSources.contains(where: { if case .audiobook = $0 { return true }; return false }) {
-                        Button {
-                            showingOptionsSheet = false
-                            onStartAudiobook()
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Start Read Along")
-                                    Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "headphones")
-                            }
-                        }
-                    } else {
-                        Button {
-                            showingOptionsSheet = false
-                            onStartTTS()
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Start Read Aloud")
-                                    Text("On-device text-to-speech")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "speaker.wave.2")
-                            }
-                        }
+                    } header: {
+                        Text("Listen")
                     }
-                } header: {
-                    Text("Listen")
                 }
 
                 // TTS settings
@@ -547,39 +526,6 @@ struct ReadAlongPill: View {
         .presentationDetents([.medium])
     }
 
-    // MARK: - Speed Picker Sheet
-
-    private var speedPickerSheet: some View {
-        NavigationStack {
-            List(Self.speedOptions, id: \.self) { speed in
-                Button {
-                    readAlong.setTTSPlaybackRate(speed)
-                    showingSpeedPicker = false
-                } label: {
-                    HStack {
-                        Text(speed == 1.0 ? "Normal (1x)" : (speed == floor(speed) ? "\(Int(speed))x" : "\(String(format: "%.2g", speed))x"))
-                            .font(.body)
-                        Spacer()
-                        if speed == readAlong.ttsPlaybackRate {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.accent)
-                        }
-                    }
-                }
-                .foregroundStyle(.primary)
-            }
-            .navigationTitle("Playback Speed")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        showingSpeedPicker = false
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
 
     // MARK: - Helpers
 

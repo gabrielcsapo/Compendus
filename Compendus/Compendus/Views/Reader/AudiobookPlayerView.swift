@@ -59,7 +59,7 @@ struct AudiobookPlayerView: View {
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .blur(radius: 60)
                         .opacity(0.3)
-                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
 
                 VStack(spacing: 0) {
@@ -357,9 +357,16 @@ struct AudiobookPlayerView: View {
     // MARK: - Transcription
 
     private func startLiveTranscription() {
-        guard let fileURL = book.fileURL else { return }
-        let duration = Double(book.duration ?? 0)
-        guard duration > 0 else { return }
+        guard let fileURL = book.fileURL else {
+            print("[Transcription] Cannot start: book has no fileURL")
+            return
+        }
+        // Prefer the player's loaded duration over stored metadata (may be nil/0)
+        let duration = player.duration > 0 ? player.duration : Double(book.duration ?? 0)
+        guard duration > 0 else {
+            print("[Transcription] Cannot start: book duration is 0 (stored=\(String(describing: book.duration)), player=\(player.duration))")
+            return
+        }
 
         let resumeTime = player.currentTime
         player.pause()
@@ -401,9 +408,15 @@ struct AudiobookPlayerView: View {
     }
 
     private func startFullTranscription() {
-        guard let fileURL = book.fileURL else { return }
-        let duration = Double(book.duration ?? 0)
-        guard duration > 0 else { return }
+        guard let fileURL = book.fileURL else {
+            print("[Transcription] Cannot start full: book has no fileURL")
+            return
+        }
+        let duration = player.duration > 0 ? player.duration : Double(book.duration ?? 0)
+        guard duration > 0 else {
+            print("[Transcription] Cannot start full: book duration is 0")
+            return
+        }
 
         transcriptionService.transcribe(
             fileURL: fileURL,
