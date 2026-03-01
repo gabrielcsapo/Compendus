@@ -34,6 +34,8 @@ class AudiobookPlayer: NSObject {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var sleepTimer: Timer?
     @ObservationIgnored private var progressSaveTimer: Timer?
+    @ObservationIgnored private var currentSession: ReadingSession?
+    @ObservationIgnored private var sessionContext: ModelContext?
 
     override init() {
         super.init()
@@ -48,6 +50,7 @@ class AudiobookPlayer: NSObject {
         // Save progress of current book if switching
         if let current = currentBook, current.id != book.id {
             saveProgress()
+            finalizeListeningSession()
             stopPlayback()
         }
 
@@ -69,10 +72,12 @@ class AudiobookPlayer: NSObject {
         )
 
         startProgressSaveTimer()
+        startListeningSession()
     }
 
     func stop() {
         saveProgress()
+        finalizeListeningSession()
         stopPlayback()
         currentBook = nil
         currentChapter = nil
@@ -304,8 +309,17 @@ class AudiobookPlayer: NSObject {
         progressSaveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.saveProgress()
+                self?.updateListeningSession()
             }
         }
+    }
+
+    private func updateListeningSession() {
+        guard let session = currentSession, let context = sessionContext else { return }
+
+        session.endedAt = Date()
+        session.audioPlaybackRate = playbackRate
+        try? context.save()
     }
 
     private func updateCurrentChapter() {
@@ -332,6 +346,41 @@ class AudiobookPlayer: NSObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    // MARK: - Listening Session Tracking
+
+    private func startListeningSession() {
+        guard let book = currentBook, let container = modelContainer else { return }
+        guard currentSession == nil else { return }
+
+        let context = ModelContext(container)
+        let session = ReadingSession(
+            bookId: book.id,
+            format: "audiobook",
+            audioPlaybackRate: playbackRate
+        )
+
+        context.insert(session)
+        try? context.save()
+        currentSession = session
+        sessionContext = context
+    }
+
+    private func finalizeListeningSession() {
+        guard let session = currentSession, let context = sessionContext else { return }
+
+        session.endedAt = Date()
+        session.audioPlaybackRate = playbackRate
+
+        // Discard sessions shorter than 10 seconds
+        if session.durationSeconds < 10 {
+            context.delete(session)
+        }
+
+        try? context.save()
+        currentSession = nil
+        sessionContext = nil
+    }
+
     private func stopPlayback() {
         player?.stop()
         player = nil
@@ -348,6 +397,7 @@ extension AudiobookPlayer: @preconcurrency AVAudioPlayerDelegate {
             self.isPlaying = false
             self.stopTimer()
             self.saveProgress()
+            self.finalizeListeningSession()
         }
     }
 }

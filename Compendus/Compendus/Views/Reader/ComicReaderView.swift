@@ -35,6 +35,9 @@ struct ComicReaderView: View {
     // Tutorial state
     @State private var showingTutorial = TapZoneOverlay.shouldShow
 
+    // Reading session tracking
+    @State private var currentSession: ReadingSession?
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -253,6 +256,17 @@ struct ComicReaderView: View {
         .task {
             await loadComic()
         }
+        .onChange(of: currentPage) { _, _ in
+            if let session = currentSession {
+                session.endedAt = Date()
+                session.endPage = currentPage
+                session.appendPageTurn(page: currentPage)
+                try? modelContext.save()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            saveProgress()
+        }
         .onDisappear {
             saveProgress()
         }
@@ -309,6 +323,7 @@ struct ComicReaderView: View {
 
             isOfflineMode = true
             isLoading = false
+            startReadingSession()
 
             // Load initial page
             await loadPage(currentPage)
@@ -343,6 +358,7 @@ struct ComicReaderView: View {
 
             isOfflineMode = false
             isLoading = false
+            startReadingSession()
 
             // Load initial page
             await loadPage(currentPage)
@@ -443,7 +459,34 @@ struct ComicReaderView: View {
     private func saveProgress() {
         book.lastPosition = String(currentPage)
         book.readingProgress = totalPages > 0 ? Double(currentPage + 1) / Double(totalPages) : 0
+
+        // Finalize reading session
+        if let session = currentSession {
+            session.endedAt = Date()
+            session.endPage = currentPage
+            if session.durationSeconds < 10 {
+                modelContext.delete(session)
+            }
+        }
+
         try? modelContext.save()
+    }
+
+    // MARK: - Reading Session Tracking
+
+    private func startReadingSession() {
+        guard currentSession == nil else { return }
+        let session = ReadingSession(
+            bookId: book.id,
+            format: "comic",
+            startPage: currentPage,
+            endPage: currentPage,
+            totalBookPages: totalPages
+        )
+        session.appendPageTurn(page: currentPage)
+        modelContext.insert(session)
+        try? modelContext.save()
+        currentSession = session
     }
 }
 

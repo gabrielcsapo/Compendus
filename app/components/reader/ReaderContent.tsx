@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PageContent, ReaderHighlight } from "@/lib/reader/types";
+import type { PageContent, ReaderHighlight, FullTextContentResponse } from "@/lib/reader/types";
 import type { ReaderSettings } from "@/lib/reader/settings";
 import { THEMES, FONTS } from "@/lib/reader/settings";
 import type { AudioChapter } from "@/lib/types";
@@ -126,6 +126,11 @@ interface ReaderContentProps {
   bookId?: string;
   hasTranscript?: boolean;
   formatOverride?: string;
+  // Client-side column pagination (reflowable text)
+  fullTextContent?: FullTextContentResponse | null;
+  textPageIndex?: number;
+  onTextTotalPagesChange?: (totalPages: number) => void;
+  onChapterChange?: (chapterTitle: string) => void;
   // Audio-specific props
   audioChapters?: AudioChapter[];
   audioDuration?: number;
@@ -162,6 +167,10 @@ export function ReaderContent({
   bookId,
   hasTranscript,
   formatOverride,
+  fullTextContent,
+  textPageIndex,
+  onTextTotalPagesChange,
+  onChapterChange,
   audioChapters,
   audioDuration,
   highlights,
@@ -172,7 +181,7 @@ export function ReaderContent({
   onNavigateToPosition,
   textContentRef,
 }: ReaderContentProps) {
-  if (!content) {
+  if (!content && !fullTextContent) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-pulse text-muted-foreground">Loading...</div>
@@ -181,35 +190,66 @@ export function ReaderContent({
   }
 
   const theme = THEMES[settings.theme];
+  const contentType = content?.type || (fullTextContent ? "text" : undefined);
 
-  switch (content.type) {
+  switch (contentType) {
     case "text":
-      return (
-        <TextContent
-          content={content}
-          rightContent={isSpreadMode ? rightContent : null}
-          isSpreadMode={isSpreadMode}
-          isJumpNavigation={isJumpNavigation}
-          settings={settings}
-          onPrevPage={onPrevPage}
-          onNextPage={onNextPage}
-          onCenterTap={onCenterTap}
-          bookId={bookId}
-          formatOverride={formatOverride}
-          highlights={highlights}
-          onAddHighlight={onAddHighlight}
-          onRemoveHighlight={onRemoveHighlight}
-          onUpdateHighlightColor={onUpdateHighlightColor}
-          onUpdateHighlightNote={onUpdateHighlightNote}
-          onNavigateToPosition={onNavigateToPosition}
-          theme={theme}
-          textContentRef={textContentRef}
-        />
-      );
+      // Use column pagination for reflowable text content
+      if (fullTextContent) {
+        return (
+          <ColumnPaginatedText
+            fullContent={fullTextContent}
+            pageIndex={textPageIndex || 0}
+            onTotalPagesChange={onTextTotalPagesChange}
+            onChapterChange={onChapterChange}
+            isJumpNavigation={isJumpNavigation}
+            settings={settings}
+            onPrevPage={onPrevPage}
+            onNextPage={onNextPage}
+            onCenterTap={onCenterTap}
+            bookId={bookId}
+            formatOverride={formatOverride}
+            highlights={highlights}
+            onAddHighlight={onAddHighlight}
+            onRemoveHighlight={onRemoveHighlight}
+            onUpdateHighlightColor={onUpdateHighlightColor}
+            onUpdateHighlightNote={onUpdateHighlightNote}
+            onNavigateToPosition={onNavigateToPosition}
+            theme={theme}
+            textContentRef={textContentRef}
+          />
+        );
+      }
+      // Fallback: FXL or legacy per-page rendering
+      if (content) {
+        return (
+          <TextContent
+            content={content}
+            rightContent={isSpreadMode ? rightContent : null}
+            isSpreadMode={isSpreadMode}
+            isJumpNavigation={isJumpNavigation}
+            settings={settings}
+            onPrevPage={onPrevPage}
+            onNextPage={onNextPage}
+            onCenterTap={onCenterTap}
+            bookId={bookId}
+            formatOverride={formatOverride}
+            highlights={highlights}
+            onAddHighlight={onAddHighlight}
+            onRemoveHighlight={onRemoveHighlight}
+            onUpdateHighlightColor={onUpdateHighlightColor}
+            onUpdateHighlightNote={onUpdateHighlightNote}
+            onNavigateToPosition={onNavigateToPosition}
+            theme={theme}
+            textContentRef={textContentRef}
+          />
+        );
+      }
+      return null;
     case "image":
       return (
         <ImageContent
-          content={content}
+          content={content!}
           rightContent={rightContent}
           settings={settings}
           isSpreadMode={isSpreadMode}
@@ -222,7 +262,7 @@ export function ReaderContent({
     case "audio":
       return (
         <AudioContent
-          content={content}
+          content={content!}
           settings={settings}
           chapters={audioChapters}
           totalDuration={audioDuration}
@@ -236,8 +276,487 @@ export function ReaderContent({
 }
 
 /**
- * Text content renderer (EPUB, MOBI)
- * Supports tap navigation, text highlighting, two-page spread, and page transitions.
+ * Column-paginated text renderer for reflowable EPUB/MOBI content.
+ * Uses CSS multi-column layout to constrain text to the viewport height
+ * and determine page breaks from actual rendered content.
+ */
+function ColumnPaginatedText({
+  fullContent,
+  pageIndex,
+  onTotalPagesChange,
+  onChapterChange,
+  isJumpNavigation,
+  settings,
+  onPrevPage,
+  onNextPage,
+  onCenterTap,
+  bookId,
+  formatOverride,
+  highlights,
+  onAddHighlight,
+  onRemoveHighlight,
+  onUpdateHighlightColor,
+  onUpdateHighlightNote,
+  onNavigateToPosition,
+  theme,
+  textContentRef,
+}: {
+  fullContent: FullTextContentResponse;
+  pageIndex: number;
+  onTotalPagesChange?: (totalPages: number) => void;
+  onChapterChange?: (chapterTitle: string) => void;
+  isJumpNavigation?: boolean;
+  settings: ReaderSettings;
+  onPrevPage?: () => void;
+  onNextPage?: () => void;
+  onCenterTap?: () => void;
+  bookId?: string;
+  formatOverride?: string;
+  highlights?: ReaderHighlight[];
+  onAddHighlight?: (startPosition: number, endPosition: number, text: string, note?: string, color?: string) => void;
+  onRemoveHighlight?: (highlightId: string) => void;
+  onUpdateHighlightColor?: (highlightId: string, color: string) => void;
+  onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
+  onNavigateToPosition?: (position: number) => void;
+  theme: { background: string; foreground: string; muted: string; accent: string; selection: string };
+  textContentRef?: React.RefObject<HTMLDivElement | null>;
+}) {
+  const font = FONTS[settings.fontFamily];
+  const outerRef = useRef<HTMLDivElement>(null);
+  const readingAreaRef = useRef<HTMLDivElement>(null);
+  const paginatorRef = useRef<HTMLDivElement>(null);
+  const internalContentRef = useRef<HTMLDivElement>(null);
+  const contentRef = textContentRef || internalContentRef;
+
+  // Reading area dimensions (measured via ResizeObserver)
+  const [readingArea, setReadingArea] = useState({ width: 0, height: 0 });
+  const [totalPages, setTotalPages] = useState(1);
+  const prevPageIndexRef = useRef(pageIndex);
+
+  // Highlight state
+  const [showToolbar, setShowToolbar] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState<{ x: number; y: number; above: boolean }>({ x: 0, y: 0, above: true });
+  const [currentSelection, setCurrentSelection] = useState<{ startPosition: number; endPosition: number; text: string } | null>(null);
+  const [showEditToolbar, setShowEditToolbar] = useState(false);
+  const [editToolbarPosition, setEditToolbarPosition] = useState<{ x: number; y: number; above: boolean }>({ x: 0, y: 0, above: true });
+  const [editingHighlight, setEditingHighlight] = useState<{ id: string; text: string; note?: string; color: string } | null>(null);
+  const [footnotePopover, setFootnotePopover] = useState<{ content: string; position: { x: number; y: number } } | null>(null);
+  const [tapFeedback, setTapFeedback] = useState<"left" | "right" | null>(null);
+  const [epubCss, setEpubCss] = useState("");
+
+  // Column layout calculations
+  const containerWidth = readingArea.width;
+  const readingWidth = containerWidth > 0
+    ? Math.min(containerWidth * (1 - 2 * settings.margins / 100), settings.maxWidth)
+    : 0;
+  const marginPx = containerWidth > 0 ? (containerWidth - readingWidth) / 2 : 0;
+  const columnGap = containerWidth > 0 ? containerWidth - readingWidth : 40;
+
+  // Measure reading area with ResizeObserver
+  useEffect(() => {
+    const el = readingAreaRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(([entry]) => {
+      setReadingArea({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Calculate total pages from actual rendered content
+  useEffect(() => {
+    if (!paginatorRef.current || containerWidth <= 0) return;
+    // Use double rAF to ensure layout is complete after HTML injection
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!paginatorRef.current) return;
+        const scrollW = paginatorRef.current.scrollWidth;
+        const pages = Math.max(1, Math.round(scrollW / containerWidth));
+        setTotalPages(pages);
+        onTotalPagesChange?.(pages);
+      });
+    });
+  }, [fullContent.html, containerWidth, readingArea.height, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.textAlign, settings.maxWidth, settings.margins, epubCss]);
+
+  // Detect current chapter from page position
+  useEffect(() => {
+    if (!onChapterChange || totalPages <= 0 || fullContent.totalCharacters <= 0) return;
+    const pageCharStart = (pageIndex / totalPages) * fullContent.totalCharacters;
+    const chapter = fullContent.chapters.find(
+      (ch) => ch.characterStart <= pageCharStart && ch.characterEnd > pageCharStart,
+    );
+    if (chapter) onChapterChange(chapter.title);
+  }, [pageIndex, totalPages, fullContent.chapters, fullContent.totalCharacters, onChapterChange]);
+
+  // Fetch and scope EPUB publisher CSS
+  useEffect(() => {
+    if (!settings.usePublisherStyles || !fullContent.cssUrls?.length) {
+      setEpubCss("");
+      return;
+    }
+    let cancelled = false;
+    Promise.all(fullContent.cssUrls.map((url) => fetch(url).then((r) => r.text()).catch(() => ""))).then((sheets) => {
+      if (!cancelled) {
+        setEpubCss(sheets.map((css) => scopeEpubCss(css, ".epub-content")).join("\n"));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [fullContent.cssUrls, settings.usePublisherStyles]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
+        e.preventDefault();
+        onNextPage?.();
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        onPrevPage?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onPrevPage, onNextPage]);
+
+  // Text selection for highlighting
+  useEffect(() => {
+    const handleSelectionEnd = () => {
+      setTimeout(() => {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !contentRef.current) return;
+        const range = selection.getRangeAt(0);
+        if (!contentRef.current.contains(range.commonAncestorContainer)) return;
+        // Full book is in DOM, so position range is [0, 1]
+        const positions = selectionToPositions(contentRef.current, 0, 1);
+        if (positions) {
+          setCurrentSelection(positions);
+          const selectionRect = range.getBoundingClientRect();
+          const containerRect = outerRef.current?.getBoundingClientRect();
+          if (containerRect) {
+            setToolbarPosition(calculateToolbarPosition(selectionRect, containerRect));
+          }
+          setShowToolbar(true);
+        }
+      }, 50);
+    };
+    document.addEventListener("mouseup", handleSelectionEnd);
+    document.addEventListener("touchend", handleSelectionEnd);
+    return () => {
+      document.removeEventListener("mouseup", handleSelectionEnd);
+      document.removeEventListener("touchend", handleSelectionEnd);
+    };
+  }, []);
+
+  // Click on existing highlights
+  useEffect(() => {
+    const handleHighlightClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const highlightMark = target.closest("[data-highlight-id]") as HTMLElement | null;
+      if (!highlightMark || !contentRef.current) return;
+      const highlightId = highlightMark.getAttribute("data-highlight-id");
+      if (!highlightId) return;
+      const highlight = highlights?.find((h) => h.id === highlightId);
+      if (!highlight) return;
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) return;
+      e.stopPropagation();
+      const markRect = highlightMark.getBoundingClientRect();
+      const containerRect = outerRef.current?.getBoundingClientRect();
+      if (containerRect) {
+        setEditToolbarPosition(calculateToolbarPosition(markRect, containerRect));
+      }
+      setEditingHighlight({ id: highlight.id, text: highlight.text, note: highlight.note, color: highlight.color });
+      setShowEditToolbar(true);
+      setShowToolbar(false);
+    };
+    const el = contentRef.current;
+    if (el) {
+      el.addEventListener("click", handleHighlightClick);
+      return () => el.removeEventListener("click", handleHighlightClick);
+    }
+  }, [highlights]);
+
+  // Intercept EPUB link clicks: footnotes and internal navigation
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || !bookId) return;
+    const handleLinkClick = async (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const link = target.closest("a") as HTMLAnchorElement | null;
+      if (!link) return;
+      if (link.hasAttribute("data-footnote-ref")) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = link.getAttribute("href");
+        if (href) {
+          const text = await getFootnoteContent(bookId, href, formatOverride);
+          if (text) {
+            const rect = link.getBoundingClientRect();
+            const containerRect = outerRef.current?.getBoundingClientRect();
+            if (containerRect) {
+              setFootnotePopover({
+                content: text,
+                position: { x: Math.min(rect.left - containerRect.left, containerRect.width - 320), y: rect.bottom - containerRect.top + 8 },
+              });
+            }
+            return;
+          }
+        }
+      }
+      const href = link.getAttribute("href");
+      if (href && !href.startsWith("http://") && !href.startsWith("https://") && !href.startsWith("mailto:")) {
+        e.preventDefault();
+        e.stopPropagation();
+        let epubPath = href;
+        if (href.includes("/api/reader/") && href.includes("/resource/")) {
+          epubPath = decodeURIComponent(href.split("/resource/")[1] || "");
+        }
+        if (epubPath && onNavigateToPosition) {
+          const result = await resolveInternalLink(bookId, epubPath, formatOverride);
+          if (result) onNavigateToPosition(result.position);
+        }
+      }
+    };
+    el.addEventListener("click", handleLinkClick);
+    return () => el.removeEventListener("click", handleLinkClick);
+  }, [bookId, formatOverride, onNavigateToPosition]);
+
+  // Apply saved highlights to DOM after content renders
+  useEffect(() => {
+    if (!highlights?.length || !contentRef.current) return;
+    requestAnimationFrame(() => {
+      if (contentRef.current) {
+        applyHighlightsToDOM(contentRef.current, highlights, 0, 1);
+      }
+    });
+  }, [fullContent.html, highlights]);
+
+  // Tap navigation with 1/3 zones
+  const handleContentClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("a, button, input, select, textarea, [data-highlight-id]")) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const relativeX = clickX / rect.width;
+      if (relativeX < 0.33) {
+        setTapFeedback("left");
+        setTimeout(() => setTapFeedback(null), 150);
+        onPrevPage?.();
+      } else if (relativeX > 0.67) {
+        setTapFeedback("right");
+        setTimeout(() => setTapFeedback(null), 150);
+        onNextPage?.();
+      } else {
+        onCenterTap?.();
+      }
+    },
+    [onPrevPage, onNextPage, onCenterTap],
+  );
+
+  const handleHighlight = useCallback(
+    (color: string, note?: string) => {
+      if (currentSelection && onAddHighlight) {
+        onAddHighlight(currentSelection.startPosition, currentSelection.endPosition, currentSelection.text, note, color);
+      }
+      window.getSelection()?.removeAllRanges();
+      setShowToolbar(false);
+      setCurrentSelection(null);
+    },
+    [currentSelection, onAddHighlight],
+  );
+
+  // Determine if this page turn is a jump (for disabling transition)
+  const isJump = isJumpNavigation || Math.abs(pageIndex - prevPageIndexRef.current) > 1;
+  prevPageIndexRef.current = pageIndex;
+
+  const textStyles = {
+    fontFamily: font.value,
+    fontSize: `${settings.fontSize}px`,
+    lineHeight: settings.lineHeight,
+    textAlign: settings.textAlign,
+    "--tw-prose-body": theme.foreground,
+    "--tw-prose-headings": theme.foreground,
+    "--tw-prose-links": theme.accent,
+    "--tw-prose-bold": theme.foreground,
+    "--tw-prose-counters": theme.muted,
+    "--tw-prose-bullets": theme.muted,
+    "--tw-prose-hr": theme.muted,
+    "--tw-prose-quotes": theme.foreground,
+    "--tw-prose-quote-borders": theme.muted,
+    "--tw-prose-captions": theme.muted,
+    "--tw-prose-code": theme.foreground,
+    "--tw-prose-pre-code": theme.foreground,
+    "--tw-prose-pre-bg": theme.background,
+    "--tw-prose-th-borders": theme.muted,
+    "--tw-prose-td-borders": theme.muted,
+    "--reader-selection-color": theme.selection,
+  } as React.CSSProperties;
+
+  return (
+    <div
+      ref={outerRef}
+      className="h-full overflow-hidden relative"
+      style={{ backgroundColor: theme.background, color: theme.foreground }}
+    >
+      {/* Padding wrapper for toolbar space */}
+      <div className="h-full flex flex-col">
+        {/* Reading area - measured by ResizeObserver */}
+        <div
+          ref={readingAreaRef}
+          className="flex-1 overflow-hidden"
+          onClick={handleContentClick}
+        >
+          {readingArea.width > 0 && readingArea.height > 0 && (
+            <div
+              ref={paginatorRef}
+              style={{
+                height: `${readingArea.height}px`,
+                columnWidth: `${readingWidth}px`,
+                columnGap: `${columnGap}px`,
+                columnFill: "auto" as const,
+                paddingLeft: `${marginPx}px`,
+                paddingRight: `${marginPx}px`,
+                transform: `translateX(-${pageIndex * containerWidth}px)`,
+                transition: isJump ? "none" : "transform 0.3s ease",
+                willChange: "transform",
+              }}
+            >
+              <div
+                ref={contentRef}
+                className="epub-content prose max-w-none"
+                style={textStyles}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
+                dangerouslySetInnerHTML={{ __html: fullContent.html }}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Image constraint CSS for column pagination */}
+      <style>{`
+        .epub-content img,
+        .epub-content svg,
+        .epub-content video {
+          max-width: 100%;
+          max-height: ${readingArea.height}px;
+          height: auto;
+          object-fit: contain;
+          break-inside: avoid;
+          box-sizing: border-box;
+        }
+        .epub-content figure,
+        .epub-content .image-container,
+        .epub-content div:has(> img) {
+          break-inside: avoid;
+          max-width: 100%;
+          overflow: hidden;
+        }
+        .epub-content table {
+          max-width: 100%;
+          overflow-x: auto;
+          display: block;
+          break-inside: avoid;
+        }
+      `}</style>
+
+      {/* EPUB publisher CSS */}
+      {epubCss && (
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: CSS is scoped and sanitized
+        <style dangerouslySetInnerHTML={{ __html: epubCss }} />
+      )}
+
+      {/* Tap feedback overlays */}
+      {tapFeedback && (
+        <div
+          className="absolute inset-y-0 pointer-events-none flex items-center justify-center"
+          style={{
+            left: tapFeedback === "left" ? 0 : undefined,
+            right: tapFeedback === "right" ? 0 : undefined,
+            width: "33%",
+            backgroundColor: `${theme.foreground}06`,
+            animation: "tapFlash 150ms ease-out forwards",
+          }}
+        >
+          <svg className="w-8 h-8" fill="none" stroke={`${theme.foreground}30`} viewBox="0 0 24 24" strokeWidth={2}>
+            {tapFeedback === "left" ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            )}
+          </svg>
+        </div>
+      )}
+
+      {/* Highlight toolbar (new selection) */}
+      {showToolbar && currentSelection && (
+        <HighlightToolbar
+          position={toolbarPosition}
+          selectedText={currentSelection.text}
+          onHighlight={handleHighlight}
+          onDismiss={() => { setShowToolbar(false); window.getSelection()?.removeAllRanges(); }}
+          theme={theme}
+        />
+      )}
+
+      {/* Edit toolbar (existing highlight) */}
+      {showEditToolbar && editingHighlight && (
+        <HighlightEditToolbar
+          position={editToolbarPosition}
+          highlight={editingHighlight}
+          onChangeColor={(highlightId, color) => {
+            onUpdateHighlightColor?.(highlightId, color);
+            setEditingHighlight((prev) => prev ? { ...prev, color } : null);
+          }}
+          onSaveNote={(highlightId, note) => {
+            onUpdateHighlightNote?.(highlightId, note);
+            setEditingHighlight((prev) => prev ? { ...prev, note: note ?? undefined } : null);
+          }}
+          onCopy={(text) => {
+            if (navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(text);
+            }
+          }}
+          onDelete={(highlightId) => { onRemoveHighlight?.(highlightId); }}
+          onDismiss={() => { setShowEditToolbar(false); setEditingHighlight(null); }}
+          theme={theme}
+        />
+      )}
+
+      {/* Footnote popover */}
+      {footnotePopover && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setFootnotePopover(null)} />
+          <div
+            className="absolute z-50 max-w-xs p-4 rounded-lg shadow-xl border"
+            style={{
+              left: Math.max(8, footnotePopover.position.x),
+              top: footnotePopover.position.y,
+              backgroundColor: theme.background,
+              borderColor: `${theme.foreground}20`,
+              color: theme.foreground,
+              maxHeight: "200px",
+              overflowY: "auto",
+            }}
+          >
+            <p className="text-sm leading-relaxed">{footnotePopover.content}</p>
+          </div>
+        </>
+      )}
+
+      <style>{`@keyframes tapFlash { 0% { opacity: 1; } 100% { opacity: 0; } }`}</style>
+    </div>
+  );
+}
+
+/**
+ * Text content renderer (EPUB, MOBI) - legacy per-page mode.
+ * Used for FXL EPUBs and fallback when full content is not available.
  */
 function TextContent({
   content,
@@ -673,7 +1192,7 @@ function TextContent({
   return (
     <div
       ref={containerRef}
-      className="h-full overflow-auto px-4 md:px-8 pt-14 md:pt-16 pb-4 md:pb-8 relative"
+      className="h-full overflow-auto px-4 md:px-8 py-4 md:py-8 relative"
       style={{
         backgroundColor: theme.background,
         color: theme.foreground,
@@ -1027,16 +1546,18 @@ function ImageContent({
     }
   };
 
-  // Common image styles
+  // Common image styles for spread view — must fit within half the container
   const imageStyle = {
-    objectFit: settings.comicFitMode === "contain" ? ("contain" as const) : undefined,
-    height: "100%",
+    objectFit: "contain" as const,
+    maxWidth: "100%",
     maxHeight: "100%",
+    width: "auto" as const,
+    height: "auto" as const,
   };
 
   return (
     <div
-      className="h-full flex items-center justify-center overflow-auto cursor-pointer relative"
+      className="h-full overflow-hidden cursor-pointer relative"
       style={{ backgroundColor: theme.background }}
       onClick={handleClick}
     >
@@ -1052,9 +1573,9 @@ function ImageContent({
       >
         {showSpread ? (
           // Two-page spread view
-          <div className="h-full flex items-center justify-center gap-1">
+          <div className="h-full w-full flex items-center justify-center gap-1">
             {content.imageUrl && (
-              <div className="relative h-full flex items-center justify-center">
+              <div className="relative flex-1 h-full flex items-center justify-center overflow-hidden">
                 {!leftLoaded && <ImageLoadingPlaceholder />}
                 <img
                   ref={leftImgRef}
@@ -1070,7 +1591,7 @@ function ImageContent({
               </div>
             )}
             {rightContent?.imageUrl && (
-              <div className="relative h-full flex items-center justify-center">
+              <div className="relative flex-1 h-full flex items-center justify-center overflow-hidden">
                 {!rightLoaded && <ImageLoadingPlaceholder />}
                 <img
                   ref={rightImgRef}
@@ -1089,15 +1610,16 @@ function ImageContent({
         ) : (
           // Single page view
           content.imageUrl && (
-            <div className="relative h-full flex items-center justify-center">
+            <div className="relative h-full w-full flex items-center justify-center overflow-hidden">
               {!leftLoaded && <ImageLoadingPlaceholder />}
               <img
                 ref={leftImgRef}
                 src={content.imageUrl}
                 alt={content.chapterTitle || "Page"}
-                className="max-h-full"
                 style={{
-                  objectFit: settings.comicFitMode === "contain" ? "contain" : undefined,
+                  objectFit: "contain",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
                   width: settings.comicFitMode === "width" ? "100%" : "auto",
                   height: settings.comicFitMode === "height" ? "100%" : "auto",
                   opacity: leftLoaded ? 1 : 0,

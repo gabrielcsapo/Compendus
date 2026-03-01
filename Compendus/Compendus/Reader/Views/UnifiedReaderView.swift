@@ -78,6 +78,9 @@ struct UnifiedReaderView: View {
     @State private var pendingLinkURL: URL?
     @State private var pendingLinkIsExternal = false
 
+    // Reading session tracking
+    @State private var currentSession: ReadingSession?
+
     enum ReaderState {
         case loading
         case ready
@@ -127,6 +130,12 @@ struct UnifiedReaderView: View {
         }
         #endif
         .task { await initializeEngine() }
+        .onChange(of: engine?.currentLocation?.totalProgression) { _, _ in
+            updateReadingSession()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            saveProgress()
+        }
         .onDisappear {
             saveProgress()
             readAlongService.deactivate()
@@ -273,20 +282,25 @@ struct UnifiedReaderView: View {
                             Task { await engine.go(toProgression: progression) }
                         }
                     )
-                    .presentationDetents([.medium])
+                    .presentationDetents([.height(240)])
+                    .presentationDragIndicator(.hidden)
                     .readerThemed(readerSettings)
                 } else if let nativeEngine = engine as? NativeEPUBEngine {
                     PageJumpView(
                         totalPages: nativeEngine.totalPositions,
                         currentPage: nativeEngine.globalPageIndex + 1,
                         chapterTitle: engine.currentLocation?.title,
+                        chapterTitleForPage: { page in
+                            nativeEngine.chapterTitle(forGlobalPage: page)
+                        },
                         onJump: { progression in
                             Task {
                                 await nativeEngine.go(toProgression: progression)
                             }
                         }
                     )
-                    .presentationDetents([.medium])
+                    .presentationDetents([.height(240)])
+                    .presentationDragIndicator(.hidden)
                     .readerThemed(readerSettings)
                 }
             }
@@ -828,6 +842,7 @@ struct UnifiedReaderView: View {
         nativeEngine.applySettings(readerSettings)
 
         readerState = .ready
+        startReadingSession(engine: nativeEngine)
 
         // Load TOC in background — not needed until user opens TOC panel
         Task {
@@ -872,6 +887,7 @@ struct UnifiedReaderView: View {
         }
 
         readerState = .ready
+        startReadingSession(engine: pdfEngine)
         showHighlightSetupIfNeeded()
     }
 
@@ -953,6 +969,74 @@ struct UnifiedReaderView: View {
 
         if let progression = engine.currentLocation?.totalProgression {
             book.readingProgress = progression
+        }
+
+        // Finalize reading session
+        if let session = currentSession {
+            session.endedAt = Date()
+            if let nativeEngine = engine as? NativeEPUBEngine {
+                session.endPage = nativeEngine.globalPageIndex
+                session.endCharacterOffset = nativeEngine.currentPagePlainTextOffset
+            } else if let pdfEngine = engine as? PDFEngine {
+                session.endPage = pdfEngine.currentPage
+            }
+            // Discard sessions shorter than 10 seconds (accidental opens)
+            if session.durationSeconds < 10 {
+                modelContext.delete(session)
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    // MARK: - Reading Session Tracking
+
+    private func startReadingSession(engine: any ReaderEngine) {
+        guard currentSession == nil else { return }
+
+        let page: Int
+        let charOffset: Int?
+
+        if let nativeEngine = engine as? NativeEPUBEngine {
+            page = nativeEngine.globalPageIndex
+            charOffset = nativeEngine.currentPagePlainTextOffset
+        } else if let pdfEngine = engine as? PDFEngine {
+            page = pdfEngine.currentPage
+            charOffset = nil
+        } else {
+            return
+        }
+
+        let session = ReadingSession(
+            bookId: book.id,
+            format: engine.isPDF ? "pdf" : "epub",
+            startPage: page,
+            endPage: page,
+            totalBookPages: engine.totalPositions,
+            startCharacterOffset: charOffset,
+            endCharacterOffset: charOffset
+        )
+        session.appendPageTurn(page: page, characterOffset: charOffset)
+        modelContext.insert(session)
+        try? modelContext.save()
+        currentSession = session
+    }
+
+    private func updateReadingSession() {
+        guard let session = currentSession, let engine = engine else { return }
+
+        session.endedAt = Date()
+
+        if let nativeEngine = engine as? NativeEPUBEngine {
+            let page = nativeEngine.globalPageIndex
+            let charOffset = nativeEngine.currentPagePlainTextOffset
+            session.endPage = page
+            session.endCharacterOffset = charOffset
+            session.appendPageTurn(page: page, characterOffset: charOffset)
+        } else if let pdfEngine = engine as? PDFEngine {
+            let page = pdfEngine.currentPage
+            session.endPage = page
+            session.appendPageTurn(page: page)
         }
 
         try? modelContext.save()

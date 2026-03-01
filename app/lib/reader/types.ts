@@ -109,6 +109,20 @@ export interface PageContent {
   isFixedLayout?: boolean;
 }
 
+// Full text content for client-side CSS column pagination
+export interface FullTextContentResponse {
+  html: string;
+  cssUrls: string[];
+  chapters: Array<{
+    title: string;
+    characterStart: number;
+    characterEnd: number;
+  }>;
+  totalCharacters: number;
+  isFixedLayout?: boolean;
+  chapterHrefMap?: Record<string, number>;
+}
+
 // API response types
 export interface ReaderInfoResponse {
   id: string;

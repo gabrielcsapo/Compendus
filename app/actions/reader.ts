@@ -12,6 +12,7 @@ import type {
   ReaderPageResponse,
   ReaderBookmark,
   ReaderHighlight,
+  FullTextContentResponse,
 } from "../lib/reader/types";
 import type { BookFormat } from "../lib/types";
 
@@ -344,6 +345,56 @@ export async function getReaderPageForPosition(
     pageNum,
     content: pageContent,
     position: pageContent.position,
+  };
+}
+
+// ============================================
+// FULL TEXT CONTENT (for client-side CSS column pagination)
+// ============================================
+
+/**
+ * Get full text content for client-side pagination.
+ * Returns all chapter HTML concatenated with chapter boundary markers.
+ * The client uses CSS multi-column layout to paginate based on actual rendered text.
+ */
+export async function getFullTextContent(
+  bookId: string,
+  formatOverride?: string,
+): Promise<FullTextContentResponse | null> {
+  const content = await getContent(bookId, formatOverride);
+  if (!content || content.type !== "text") return null;
+
+  // FXL EPUBs use per-page server rendering, not column pagination
+  if (content.isFixedLayout) return null;
+
+  const htmlParts: string[] = [];
+  const chapters: FullTextContentResponse["chapters"] = [];
+  const cssUrlSet = new Set<string>();
+
+  for (const chapter of content.chapters) {
+    // Wrap each chapter with data attributes for position tracking
+    htmlParts.push(
+      `<div data-chapter-id="${chapter.id}" data-char-start="${chapter.characterStart}" data-char-end="${chapter.characterEnd}">${chapter.html}</div>`,
+    );
+    chapters.push({
+      title: chapter.title,
+      characterStart: chapter.characterStart,
+      characterEnd: chapter.characterEnd,
+    });
+    if (chapter.cssFiles) {
+      for (const f of chapter.cssFiles) {
+        cssUrlSet.add(`/api/reader/${bookId}/resource/${encodeURIComponent(f)}`);
+      }
+    }
+  }
+
+  return {
+    html: htmlParts.join("\n"),
+    cssUrls: Array.from(cssUrlSet),
+    chapters,
+    totalCharacters: content.totalCharacters,
+    isFixedLayout: content.isFixedLayout,
+    chapterHrefMap: content.chapterHrefMap,
   };
 }
 
