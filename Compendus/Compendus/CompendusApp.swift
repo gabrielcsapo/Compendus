@@ -19,6 +19,7 @@ struct CompendusApp: App {
             BookHighlight.self,
             PendingDownload.self,
             PendingBookEdit.self,
+            ReadingSession.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

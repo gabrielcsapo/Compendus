@@ -6,7 +6,9 @@ import { getCollectionsForBook } from "../actions/collections";
 import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
+import { RematchButton } from "../components/RematchButton";
 import { AuthorLinks } from "../components/AuthorLink";
+import type { BookFormat } from "../lib/types";
 import { ConvertToEpubButton, ReconvertEpubButton } from "../components/ConvertToEpubButton";
 import { TranscribeButton } from "../components/TranscribeButton";
 
@@ -179,6 +181,14 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 {book.title}
               </h1>
               <div className="flex items-center gap-2 shrink-0 pt-1">
+                <RematchButton
+                  bookId={book.id}
+                  bookTitle={book.title}
+                  bookAuthors={authors}
+                  bookFormat={book.format as BookFormat}
+                  hasCover={!!book.coverPath}
+                  coverUrl={book.coverPath ? `/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : undefined}
+                />
                 <EditBookButton
                   book={book}
                   tags={tags}

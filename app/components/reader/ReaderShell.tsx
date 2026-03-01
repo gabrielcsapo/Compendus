@@ -8,6 +8,7 @@ import { ReaderToolbar } from "./ReaderToolbar";
 import { ReaderSidebar } from "./ReaderSidebar";
 import { ReaderSettings } from "./ReaderSettings";
 import { ReadAloudBar } from "./ReadAloudBar";
+import { PageJumpSlider } from "./PageJumpSlider";
 import { THEMES } from "@/lib/reader/settings";
 
 interface ReaderShellProps {
@@ -44,16 +45,19 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
 
   const theme = THEMES[reader.settings.theme];
 
+  // Track if mouse is in toolbar/slider zone
+  const mouseInOverlayZoneRef = useRef(false);
+
   // Auto-hide overlay timer
   const resetOverlayTimer = useCallback(() => {
     if (overlayTimerRef.current) {
       clearTimeout(overlayTimerRef.current);
     }
     overlayTimerRef.current = setTimeout(() => {
-      if (!sidebarOpen && !settingsOpen) {
+      if (!sidebarOpen && !settingsOpen && !mouseInOverlayZoneRef.current) {
         setShowOverlay(false);
       }
-    }, 10000);
+    }, 5000);
   }, [sidebarOpen, settingsOpen]);
 
   // Start timer when overlay becomes visible
@@ -78,25 +82,38 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
     }
   }, [sidebarOpen, settingsOpen]);
 
-  // Show overlay on mouse movement (desktop)
+  // Show overlay when mouse enters toolbar/slider zones (desktop)
   useEffect(() => {
-    let moveTimeout: ReturnType<typeof setTimeout>;
-    const handleMouseMove = () => {
-      if (!showOverlay) {
-        setShowOverlay(true);
-      }
-      clearTimeout(moveTimeout);
-      moveTimeout = setTimeout(() => {
+    const TOOLBAR_ZONE = 64; // top px
+    const SLIDER_ZONE = 48; // bottom px
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const inTopZone = e.clientY <= TOOLBAR_ZONE;
+      const inBottomZone = e.clientY >= window.innerHeight - SLIDER_ZONE;
+      const inOverlayZone = inTopZone || inBottomZone;
+
+      mouseInOverlayZoneRef.current = inOverlayZone;
+
+      if (inOverlayZone) {
+        // Mouse in toolbar/slider zone — show and keep visible
+        if (!showOverlay) {
+          setShowOverlay(true);
+        }
+        // Clear any pending hide timer while in the zone
+        if (overlayTimerRef.current) {
+          clearTimeout(overlayTimerRef.current);
+        }
+      } else if (showOverlay && !sidebarOpen && !settingsOpen) {
+        // Mouse left the zone — start auto-hide timer
         resetOverlayTimer();
-      }, 100);
+      }
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
-      clearTimeout(moveTimeout);
     };
-  }, [showOverlay, resetOverlayTimer]);
+  }, [showOverlay, resetOverlayTimer, sidebarOpen, settingsOpen]);
 
   // Center tap toggles overlay
   const handleCenterTap = useCallback(() => {
@@ -204,13 +221,37 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
     }
   }, []);
 
+  // Floating page indicator on page turn
+  const [showPageIndicator, setShowPageIndicator] = useState(false);
+  const pageIndicatorTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const flashPageIndicator = useCallback(() => {
+    setShowPageIndicator(true);
+    if (pageIndicatorTimerRef.current) {
+      clearTimeout(pageIndicatorTimerRef.current);
+    }
+    pageIndicatorTimerRef.current = setTimeout(() => {
+      setShowPageIndicator(false);
+    }, 1500);
+  }, []);
+
+  const handlePrevPage = useCallback(() => {
+    reader.prevPage();
+    if (!showOverlay) flashPageIndicator();
+  }, [reader, showOverlay, flashPageIndicator]);
+
+  const handleNextPage = useCallback(() => {
+    reader.nextPage();
+    if (!showOverlay) flashPageIndicator();
+  }, [reader, showOverlay, flashPageIndicator]);
+
   const isTextContent = reader.pageContent?.type === "text";
 
   // Loading state
   if (reader.loading) {
     return (
       <div
-        className="h-screen flex items-center justify-center"
+        className="fixed inset-0 z-50 flex items-center justify-center"
         style={{ backgroundColor: theme.background, color: theme.foreground }}
       >
         <div className="text-center">
@@ -229,7 +270,7 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
 
     return (
       <div
-        className="h-screen flex items-center justify-center p-4"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ backgroundColor: theme.background, color: theme.foreground }}
       >
         <div className="text-center max-w-md">
@@ -279,7 +320,7 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
 
   return (
     <div
-      className="h-screen flex flex-col relative"
+      className="fixed inset-0 z-50 flex flex-col"
       style={{ backgroundColor: theme.background, color: theme.foreground }}
     >
       {/* Toolbar - slides up when hidden */}
@@ -308,8 +349,8 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
         />
       </div>
 
-      {/* Main content area - takes full height */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main content area - padded for toolbar/slider zones */}
+      <div className="flex-1 flex overflow-hidden pt-14 pb-12">
         {/* Sidebar */}
         <ReaderSidebar
           isOpen={sidebarOpen}
@@ -343,11 +384,17 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
             settings={reader.settings}
             isSpreadMode={reader.isSpreadMode}
             isJumpNavigation={reader.isJumpNavigation}
-            onPrevPage={reader.prevPage}
-            onNextPage={reader.nextPage}
+            onPrevPage={handlePrevPage}
+            onNextPage={handleNextPage}
             onCenterTap={handleCenterTap}
             bookId={reader.bookInfo?.id}
             hasTranscript={reader.bookInfo?.hasTranscript}
+            formatOverride={formatOverride}
+            fullTextContent={reader.fullTextContent}
+            textPageIndex={reader.textPageIndex}
+            onTextTotalPagesChange={reader.setClientTotalPages}
+            onChapterChange={reader.setChapterTitle}
+            onNavigateToPosition={(pos) => reader.goToPosition(pos)}
             audioChapters={reader.bookInfo?.chapters}
             audioDuration={reader.bookInfo?.duration}
             highlights={reader.highlights}
@@ -381,21 +428,52 @@ export function ReaderShell({ bookId, initialPosition = 0, returnUrl = "/", form
         />
       </div>
 
-      {/* Footer progress bar - always visible, thinner when overlay hidden */}
+      {/* Page jump slider (interactive, when overlay visible) */}
+      <PageJumpSlider
+        currentPage={reader.currentPage}
+        totalPages={reader.totalPages}
+        chapterTitle={reader.pageContent?.chapterTitle}
+        onJump={(page) => reader.goToPage(page)}
+        theme={theme}
+        visible={showOverlay}
+      />
+
+      {/* Thin progress bar when overlay is hidden */}
+      {!showOverlay && (
+        <div
+          className="absolute bottom-0 left-0 right-0 z-30"
+          style={{
+            height: "2px",
+            backgroundColor: `${theme.foreground}10`,
+          }}
+        >
+          <div
+            className="h-full transition-all duration-300"
+            style={{
+              width: `${reader.position * 100}%`,
+              backgroundColor: theme.accent,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Floating page indicator on page turn */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-30 transition-all duration-300"
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none transition-opacity duration-300"
         style={{
-          height: showOverlay ? "4px" : "2px",
-          backgroundColor: `${theme.foreground}10`,
+          opacity: showPageIndicator && !showOverlay ? 1 : 0,
         }}
       >
         <div
-          className="h-full transition-all duration-300"
+          className="px-4 py-1.5 rounded-full text-sm font-medium"
           style={{
-            width: `${reader.position * 100}%`,
-            backgroundColor: theme.accent,
+            backgroundColor: `${theme.foreground}18`,
+            color: theme.foreground,
+            backdropFilter: "blur(8px)",
           }}
-        />
+        >
+          {reader.currentPage} / {reader.totalPages}
+        </div>
       </div>
     </div>
   );

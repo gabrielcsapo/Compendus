@@ -20,14 +20,14 @@ function stripHtml(html: string): string {
  * Sanitize HTML for safe rendering
  * Removes scripts, event handlers, and dangerous elements
  * Rewrites image src URLs to point to the EPUB resource API
+ * Preserves inline <style> blocks for publisher CSS
+ * Marks footnote references with data attributes
  */
 function sanitizeHtml(html: string, bookId: string): string {
   return (
     html
       // Remove script tags and their content
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      // Remove style tags and their content (we apply our own styles)
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
       // Remove event handlers
       .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
       .replace(/\s+on\w+\s*=\s*[^\s>]*/gi, "")
@@ -35,6 +35,15 @@ function sanitizeHtml(html: string, bookId: string): string {
       .replace(/href\s*=\s*["']javascript:[^"']*["']/gi, "")
       // Remove data: URLs in src (potential XSS)
       .replace(/src\s*=\s*["']data:[^"']*["']/gi, "")
+      // Mark footnote reference links for client-side detection
+      .replace(
+        /(<a\s)([^>]*epub:type\s*=\s*["']noteref["'][^>]*>)/gi,
+        '$1data-footnote-ref="true" $2',
+      )
+      .replace(
+        /(<a\s)([^>]*role\s*=\s*["']doc-noteref["'][^>]*>)/gi,
+        '$1data-footnote-ref="true" $2',
+      )
       // Rewrite image src URLs to use the EPUB resource API
       .replace(
         /(<img[^>]*\s+src\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
@@ -54,6 +63,25 @@ function sanitizeHtml(html: string, bookId: string): string {
             return `${before}/mobi-images/${bookId}/${filename}${after}`;
           }
           // For relative EPUB internal paths, use the resource API
+          const encodedPath = encodeURIComponent(src);
+          return `${before}/api/reader/${bookId}/resource/${encodedPath}${after}`;
+        },
+      )
+      // Rewrite video/audio/source src URLs for inline media
+      .replace(
+        /(<(?:video|audio|source)[^>]*\s+src\s*=\s*["'])([^"']+)(["'][^>]*>)/gi,
+        (match, before, src, after) => {
+          if (
+            src.startsWith("http://") ||
+            src.startsWith("https://") ||
+            src.startsWith("data:")
+          ) {
+            return match;
+          }
+          if (src.startsWith("/") && src.includes("/images/")) {
+            const filename = src.split("/").pop() || src;
+            return `${before}/mobi-images/${bookId}/${filename}${after}`;
+          }
           const encodedPath = encodeURIComponent(src);
           return `${before}/api/reader/${bookId}/resource/${encodedPath}${after}`;
         },
@@ -112,6 +140,15 @@ export async function parseEpub(
     return createEmptyContent(bookId);
   }
 
+  // Check for fixed layout (pre-paginated) EPUB
+  let isFixedLayout = false;
+  try {
+    const metadata = epub.getMetadata();
+    isFixedLayout = metadata.metas?.["rendition:layout"] === "pre-paginated";
+  } catch {
+    // metadata extraction is non-fatal
+  }
+
   const chapters: NormalizedChapter[] = [];
   let totalCharacters = 0;
 
@@ -126,6 +163,16 @@ export async function parseEpub(
       const tocEntry = toc.find((t) => t.href.includes(spineItem.href));
       const title = tocEntry?.label || `Chapter ${i + 1}`;
 
+      // Collect CSS file paths (EPUB-internal paths for the resource API)
+      const cssFiles: string[] = [];
+      if (chapterContent.css) {
+        for (const cssRef of chapterContent.css) {
+          if (cssRef.epubPath) {
+            cssFiles.push(cssRef.epubPath);
+          }
+        }
+      }
+
       chapters.push({
         id: spineItem.id,
         title,
@@ -133,6 +180,8 @@ export async function parseEpub(
         text,
         characterStart: totalCharacters,
         characterEnd: totalCharacters + text.length,
+        cssFiles: cssFiles.length > 0 ? cssFiles : undefined,
+        href: spineItem.href,
       });
 
       totalCharacters += text.length;
@@ -146,6 +195,21 @@ export async function parseEpub(
     }
   }
 
+  // Build chapter href map for internal link resolution
+  const chapterHrefMap: Record<string, number> = {};
+  for (const chapter of chapters) {
+    const position = chapter.characterStart / Math.max(1, totalCharacters);
+    if (chapter.href) {
+      chapterHrefMap[chapter.href] = position;
+      // Also map by filename without directory prefix
+      const filename = chapter.href.split("/").pop();
+      if (filename) {
+        chapterHrefMap[filename] = position;
+      }
+    }
+    chapterHrefMap[chapter.id] = position;
+  }
+
   // Build TOC with normalized positions
   const normalizedToc = buildToc(toc, chapters, totalCharacters);
 
@@ -156,6 +220,8 @@ export async function parseEpub(
     chapters,
     totalCharacters,
     toc: normalizedToc,
+    isFixedLayout: isFixedLayout || undefined,
+    chapterHrefMap,
   };
 }
 

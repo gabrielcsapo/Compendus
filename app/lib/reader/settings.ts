@@ -39,15 +39,30 @@ export const FONTS = {
     value: '"Merriweather", "Georgia", "Times New Roman", serif',
     description: "Classic book typography",
   },
+  literata: {
+    name: "Literata",
+    value: '"Literata", "Georgia", serif',
+    description: "Designed for ebooks",
+  },
   sansSerif: {
     name: "Sans Serif",
     value: '"Inter", system-ui, -apple-system, sans-serif',
     description: "Clean modern appearance",
   },
+  sourceSans: {
+    name: "Source Sans",
+    value: '"Source Sans 3", "Helvetica Neue", sans-serif',
+    description: "Readable sans-serif",
+  },
   mono: {
     name: "Monospace",
     value: '"JetBrains Mono", "Fira Code", monospace',
     description: "Fixed-width for code",
+  },
+  ibmPlex: {
+    name: "IBM Plex Mono",
+    value: '"IBM Plex Mono", monospace',
+    description: "Clean fixed-width",
   },
   dyslexic: {
     name: "OpenDyslexic",
@@ -125,6 +140,12 @@ export interface ReaderSettings {
   // Audio-specific
   audioPlaybackSpeed: PlaybackSpeed;
   audioVolume: number; // 0-1
+
+  // EPUB-specific
+  usePublisherStyles: boolean; // Apply EPUB's own CSS stylesheets
+
+  // Per-book highlight colors (overrides default palette when set)
+  customHighlightColors?: string[];
 }
 
 // Default settings
@@ -142,6 +163,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   comicRtl: false,
   audioPlaybackSpeed: 1,
   audioVolume: 1,
+  usePublisherStyles: true,
 };
 
 // Settings constraints
@@ -225,6 +247,10 @@ export function validateSettings(settings: Partial<ReaderSettings>): ReaderSetti
 
   if (settings.audioVolume !== undefined) {
     validated.audioVolume = Math.max(0, Math.min(1, settings.audioVolume));
+  }
+
+  if (settings.usePublisherStyles !== undefined) {
+    validated.usePublisherStyles = Boolean(settings.usePublisherStyles);
   }
 
   return validated;

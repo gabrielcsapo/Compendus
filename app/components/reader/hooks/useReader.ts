@@ -8,11 +8,13 @@ import type {
   PageContent,
   ReaderBookmark,
   ReaderHighlight,
+  FullTextContentResponse,
 } from "@/lib/reader/types";
 import {
   getReaderInfo,
   getReaderPage,
   getReaderPageForPosition,
+  getFullTextContent,
   getBookmarks,
   getHighlights,
   addBookmark as addBookmarkAction,
@@ -90,6 +92,12 @@ interface UseReaderReturn {
   // Navigation mode
   isJumpNavigation: boolean;
 
+  // Client-side column pagination for reflowable text
+  fullTextContent: FullTextContentResponse | null;
+  textPageIndex: number;
+  setClientTotalPages: (total: number) => void;
+  setChapterTitle: (title: string) => void;
+
   // Progress
   saveProgress: () => Promise<void>;
 }
@@ -123,6 +131,12 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
   >([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
+
+  // Client-side column pagination state for reflowable text
+  const [fullTextContent, setFullTextContent] = useState<FullTextContentResponse | null>(null);
+  const [clientTotalPages, setClientTotalPages] = useState<number | null>(null);
+  const [chapterTitle, setChapterTitle] = useState<string>("");
+  const isColumnPaginated = fullTextContent !== null;
 
   // Navigation mode tracking
   const isJumpNavigationRef = useRef(false);
@@ -211,9 +225,29 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     formatOverride,
   ]);
 
-  // Fetch page content when page changes
+  // Fetch full text content for client-side column pagination
   useEffect(() => {
-    if (!bookInfo || viewport.width === 0) return;
+    if (!bookInfo) return;
+    const fetchFullText = async () => {
+      try {
+        const data = await getFullTextContent(bookId, formatOverride);
+        setFullTextContent(data); // null for non-text or FXL content
+        if (data && !initialPositionApplied.current && initialPosition > 0) {
+          // For column-paginated text, initial position will be applied once
+          // the client reports totalPages (via setClientTotalPages)
+          initialPositionApplied.current = true;
+        }
+      } catch (err) {
+        console.error("Failed to fetch full text content:", err);
+        setFullTextContent(null);
+      }
+    };
+    fetchFullText();
+  }, [bookId, formatOverride, bookInfo]);
+
+  // Fetch page content when page changes (only for non-column-paginated content)
+  useEffect(() => {
+    if (!bookInfo || viewport.width === 0 || isColumnPaginated) return;
 
     const fetchPages = async () => {
       try {
@@ -250,12 +284,13 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     settings.lineHeight,
     bookInfo,
     isSpreadMode,
+    isColumnPaginated,
     formatOverride,
   ]);
 
-  // Prefetch upcoming pages in the background
+  // Prefetch upcoming pages in the background (only for non-column-paginated content)
   useEffect(() => {
-    if (!bookInfo || viewport.width === 0) return;
+    if (!bookInfo || viewport.width === 0 || isColumnPaginated) return;
 
     const prefetchPages = async () => {
       const totalPages = bookInfo.totalPages;
@@ -319,17 +354,36 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     fetchAnnotations();
   }, [bookId]);
 
+  // The effective total pages (client-reported for column pagination, server for others)
+  const effectiveTotalPages = isColumnPaginated && clientTotalPages !== null
+    ? clientTotalPages
+    : bookInfo?.totalPages || 0;
+
+  // Callback for client to report total pages from CSS column measurement
+  const setClientTotalPagesCallback = useCallback(
+    (total: number) => {
+      setClientTotalPages(total);
+      // Apply initial position once we know the real page count
+      if (initialPosition > 0 && total > 1) {
+        const targetPage = Math.max(1, Math.round(initialPosition * total));
+        setCurrentPage(targetPage);
+      }
+    },
+    [initialPosition],
+  );
+
   // Navigation functions
   const goToPage = useCallback(
     (page: number) => {
-      if (!bookInfo) return;
-      const clampedPage = Math.max(1, Math.min(page, bookInfo.totalPages));
+      const maxPages = effectiveTotalPages;
+      if (maxPages <= 0) return;
+      const clampedPage = Math.max(1, Math.min(page, maxPages));
       const isJump = Math.abs(clampedPage - currentPage) > 2;
       isJumpNavigationRef.current = isJump;
       setIsJumpNavigation(isJump);
       setCurrentPage(clampedPage);
     },
-    [bookInfo, currentPage],
+    [effectiveTotalPages, currentPage],
   );
 
   const goToPosition = useCallback(
@@ -337,8 +391,15 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
       try {
         isJumpNavigationRef.current = true;
         setIsJumpNavigation(true);
-        const data = await getReaderPageForPosition(bookId, position, viewportConfig, formatOverride);
 
+        if (isColumnPaginated && effectiveTotalPages > 0) {
+          // For column pagination, map position directly to page
+          const targetPage = Math.max(1, Math.round(position * effectiveTotalPages));
+          setCurrentPage(targetPage);
+          return;
+        }
+
+        const data = await getReaderPageForPosition(bookId, position, viewportConfig, formatOverride);
         if (data) {
           setCurrentPage(data.pageNum);
           setPageContent(data.content);
@@ -347,7 +408,7 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
         console.error("Failed to go to position:", err);
       }
     },
-    [bookId, viewport.width, viewport.height, settings.fontSize, settings.lineHeight],
+    [bookId, viewport.width, viewport.height, settings.fontSize, settings.lineHeight, isColumnPaginated, effectiveTotalPages],
   );
 
   // In spread mode, move by 2 pages
@@ -481,37 +542,43 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     [bookId, viewport.width, viewport.height, settings.fontSize, settings.lineHeight, formatOverride],
   );
 
+  // Compute position for column-paginated content
+  const columnPosition = isColumnPaginated && effectiveTotalPages > 0
+    ? (currentPage - 1) / effectiveTotalPages
+    : null;
+
   // Save progress
   const saveProgress = useCallback(async () => {
-    if (!pageContent) return;
+    const position = columnPosition ?? pageContent?.position;
+    if (position === undefined && position === null) return;
 
     try {
-      await saveReadingProgress(bookId, pageContent.position, currentPage);
+      await saveReadingProgress(bookId, position ?? 0, currentPage);
     } catch (err) {
       console.error("Failed to save progress:", err);
     }
-  }, [bookId, currentPage, pageContent]);
+  }, [bookId, currentPage, pageContent, columnPosition]);
 
   // Auto-save progress when page changes
   useEffect(() => {
-    if (!pageContent) return;
+    if (!pageContent && !isColumnPaginated) return;
 
     const timer = setTimeout(() => {
       saveProgress();
     }, 2000); // Debounce 2 seconds
 
     return () => clearTimeout(timer);
-  }, [currentPage, pageContent, saveProgress]);
+  }, [currentPage, pageContent, saveProgress, isColumnPaginated]);
 
   return {
     bookInfo,
     loading,
     error,
     currentPage,
-    totalPages: bookInfo?.totalPages || 0,
-    pageContent,
+    totalPages: effectiveTotalPages,
+    pageContent: isColumnPaginated ? { type: "text" as const, position: columnPosition ?? 0, endPosition: effectiveTotalPages > 0 ? currentPage / effectiveTotalPages : 1, chapterTitle } : pageContent,
     rightPageContent,
-    position: pageContent?.position || 0,
+    position: columnPosition ?? pageContent?.position ?? 0,
     isSpreadMode,
     goToPage,
     goToPosition,
@@ -534,6 +601,10 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     searching,
     searchBook,
     isJumpNavigation,
+    fullTextContent,
+    textPageIndex: currentPage - 1, // 0-indexed for the component
+    setClientTotalPages: setClientTotalPagesCallback,
+    setChapterTitle,
     saveProgress,
   };
 }

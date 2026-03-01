@@ -16,6 +16,10 @@ export interface NormalizedChapter {
   text: string;
   characterStart: number;
   characterEnd: number;
+  // EPUB CSS file paths (EPUB-internal paths for the resource API)
+  cssFiles?: string[];
+  // Original spine href for internal link resolution
+  href?: string;
 }
 
 // Base normalized content structure
@@ -32,6 +36,10 @@ export interface TextContent extends BaseNormalizedContent {
   toc: TocEntry[];
   // Error message if parsing failed
   error?: string;
+  // Fixed layout EPUB (pre-paginated)
+  isFixedLayout?: boolean;
+  // Map of chapter href → 0-1 position for internal link resolution
+  chapterHrefMap?: Record<string, number>;
 }
 
 // PDF content (native pages)
@@ -94,6 +102,25 @@ export interface PageContent {
   chapterTitle?: string;
   position: number; // Start position of this page (0-1)
   endPosition: number; // End position of this page (0-1)
+
+  // EPUB CSS URLs to load publisher stylesheets
+  cssUrls?: string[];
+  // Fixed layout page (renders as viewport, not reflowed)
+  isFixedLayout?: boolean;
+}
+
+// Full text content for client-side CSS column pagination
+export interface FullTextContentResponse {
+  html: string;
+  cssUrls: string[];
+  chapters: Array<{
+    title: string;
+    characterStart: number;
+    characterEnd: number;
+  }>;
+  totalCharacters: number;
+  isFixedLayout?: boolean;
+  chapterHrefMap?: Record<string, number>;
 }
 
 // API response types

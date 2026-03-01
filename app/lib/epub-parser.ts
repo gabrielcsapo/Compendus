@@ -35,7 +35,7 @@ export interface EpubMetadata {
 
 export interface EpubChapter {
   html: string;
-  css?: { id: string; href: string }[];
+  css?: { id: string; href: string; epubPath: string }[];
 }
 
 export interface EpubParser {
@@ -515,7 +515,7 @@ class EpubFileParser implements EpubParser {
     bodyHtml = this.rewriteResourceUrls(bodyHtml, htmlDir);
 
     // Extract CSS links
-    const css: { id: string; href: string }[] = [];
+    const css: { id: string; href: string; epubPath: string }[] = [];
     const headMatch = rawHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
     if (headMatch) {
       const linkRe = /<link[^>]*href\s*=\s*["']([^"']+\.css)["'][^>]*\/?>/gi;
@@ -541,7 +541,7 @@ class EpubFileParser implements EpubParser {
         } catch {
           // CSS rewriting is non-fatal
         }
-        css.push({ id: cssName, href: cssPath });
+        css.push({ id: cssName, href: cssPath, epubPath: cssHref });
       }
     }
 

@@ -57,13 +57,12 @@ export function ReadAloudBar({
     return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
   }, []);
 
-  // Extract sentences from HTML content
+  // Extract sentences from HTML content using improved splitting
   useEffect(() => {
     const div = document.createElement("div");
     div.innerHTML = htmlContent;
     const text = div.textContent || "";
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-    sentencesRef.current = sentences.map((s) => s.trim()).filter(Boolean);
+    sentencesRef.current = splitIntoSentences(text);
     setCurrentSentenceIndex(0);
   }, [htmlContent]);
 
@@ -78,7 +77,7 @@ export function ReadAloudBar({
     }
   }, [selectedVoiceURI]);
 
-  // Highlight current sentence in DOM
+  // Highlight current sentence in DOM and scroll into view
   useEffect(() => {
     if (!contentRef.current) return;
 
@@ -88,6 +87,12 @@ export function ReadAloudBar({
     if (isPlaying && currentSentenceIndex < sentencesRef.current.length) {
       const sentence = sentencesRef.current[currentSentenceIndex];
       highlightSentenceInDOM(contentRef.current, sentence, theme.accent);
+
+      // Scroll the highlighted element into view
+      const highlight = contentRef.current.querySelector(".tts-highlight");
+      if (highlight) {
+        highlight.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
     }
   }, [currentSentenceIndex, isPlaying, theme.accent]);
 
@@ -235,6 +240,16 @@ export function ReadAloudBar({
         </select>
       )}
 
+      {/* Sentence progress */}
+      {sentencesRef.current.length > 1 && (
+        <span
+          className="text-xs tabular-nums whitespace-nowrap"
+          style={{ color: theme.muted }}
+        >
+          {currentSentenceIndex + 1}/{sentencesRef.current.length}
+        </span>
+      )}
+
       {/* Close */}
       <button
         onClick={handleClose}
@@ -252,6 +267,54 @@ export function ReadAloudBar({
       </button>
     </div>
   );
+}
+
+/**
+ * Split text into sentences with better handling of abbreviations and edge cases.
+ */
+function splitIntoSentences(text: string): string[] {
+  const sentences: string[] = [];
+  let current = "";
+  // Common abbreviations that don't end a sentence
+  const abbrevs = new Set(["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "inc", "ltd", "corp", "vol", "dept", "est", "approx", "fig", "no"]);
+
+  for (let i = 0; i < text.length; i++) {
+    current += text[i];
+
+    if (/[.!?]/.test(text[i])) {
+      // Check if this is actually a sentence end
+      const next = text[i + 1];
+      const nextNext = text[i + 2];
+
+      // Not end if followed by lowercase letter (abbreviation like "Dr. Smith")
+      if (next && /[a-z]/.test(next)) continue;
+
+      // Not end if the word before the period is a common abbreviation
+      if (text[i] === ".") {
+        const wordBefore = current.trim().split(/\s+/).pop()?.replace(/\.$/, "").toLowerCase();
+        if (wordBefore && abbrevs.has(wordBefore)) continue;
+        // Not end if it's a number decimal (e.g., "3.14")
+        if (/\d$/.test(current.slice(0, -1)) && next && /\d/.test(next)) continue;
+      }
+
+      // Not end if inside quotes that continue (e.g., "Hello!" she said)
+      if (next === '"' || next === "'") {
+        if (nextNext && /[a-z,]/.test(nextNext)) continue;
+      }
+
+      // This looks like a real sentence end
+      if (!next || /[\s\n\r]/.test(next)) {
+        const trimmed = current.trim();
+        if (trimmed.length > 0) sentences.push(trimmed);
+        current = "";
+      }
+    }
+  }
+
+  const trimmed = current.trim();
+  if (trimmed.length > 0) sentences.push(trimmed);
+
+  return sentences.filter(Boolean);
 }
 
 function removeTTSHighlights(container: HTMLElement) {

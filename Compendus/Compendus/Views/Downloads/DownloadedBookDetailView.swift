@@ -29,6 +29,12 @@ struct DownloadedBookDetailView: View {
     @State private var selectedRelatedBook: Book?
     @State private var showingManagementSheet = false
 
+    // Reading stats
+    @State private var totalReadingTime: Int = 0      // Wall-clock seconds
+    @State private var totalContentTime: Int = 0      // Speed-adjusted seconds (audiobooks)
+    @State private var sessionCount: Int = 0
+    @State private var showingReadingHistory = false
+
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -43,6 +49,12 @@ struct DownloadedBookDetailView: View {
                 actionSection
                     .padding(.top, 16)
                     .padding(.horizontal, 20)
+
+                if totalReadingTime > 0 {
+                    readingStatsSection
+                        .padding(.top, 16)
+                        .padding(.horizontal, 20)
+                }
 
                 if let description = book.bookDescription, !description.isEmpty {
                     descriptionSection(description)
@@ -64,6 +76,7 @@ struct DownloadedBookDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .task {
+            loadReadingStats()
             await loadRelatedBooks()
         }
         .toolbar {
@@ -79,6 +92,9 @@ struct DownloadedBookDetailView: View {
             BookManagementSheet(book: book) {
                 deleteBook()
             }
+        }
+        .sheet(isPresented: $showingReadingHistory) {
+            BookReadingHistoryView(book: book)
         }
         .fullScreenCover(item: $bookToRead) { bookToOpen in
             ReaderContainerView(book: bookToOpen)
@@ -323,6 +339,83 @@ struct DownloadedBookDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Reading Stats
+
+    @ViewBuilder
+    private var readingStatsSection: some View {
+        Button {
+            showingReadingHistory = true
+        } label: {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(book.isAudiobook ? "Time Listened" : "Time Spent", systemImage: book.isAudiobook ? "headphones" : "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if book.isAudiobook && totalContentTime != totalReadingTime {
+                        Text(formatReadingTime(totalContentTime))
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("\(formatReadingTime(totalReadingTime)) real time")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(formatReadingTime(totalReadingTime))
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                    }
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Sessions")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(sessionCount)")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.separator, lineWidth: 0.5)
+                    }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func loadReadingStats() {
+        let bookId = book.id
+        let descriptor = FetchDescriptor<ReadingSession>(
+            predicate: #Predicate { $0.bookId == bookId }
+        )
+        if let sessions = try? modelContext.fetch(descriptor) {
+            totalReadingTime = sessions.reduce(0) { $0 + $1.durationSeconds }
+            totalContentTime = sessions.reduce(0) { $0 + $1.contentDurationSeconds }
+            sessionCount = sessions.count
+        }
+    }
+
+    private func formatReadingTime(_ totalSeconds: Int) -> String {
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m"
+        }
+        return "<1m"
     }
 
     // MARK: - Details Card

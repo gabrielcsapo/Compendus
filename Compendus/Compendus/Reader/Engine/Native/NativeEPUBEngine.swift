@@ -1546,6 +1546,21 @@ class NativeEPUBEngine: ReaderEngine {
         return search(parser.package.tocItems)
     }
 
+    /// Returns the chapter title for a given 1-based global page number.
+    func chapterTitle(forGlobalPage page: Int) -> String? {
+        guard let parser = parser else { return nil }
+        let targetPage = page - 1 // convert to 0-based
+        var accumulated = 0
+        for (index, count) in spinePageCounts.enumerated() {
+            if accumulated + count > targetPage {
+                let item = parser.manifestItem(forSpineIndex: index)
+                return findChapterTitle(for: item?.href)
+            }
+            accumulated += count
+        }
+        return nil
+    }
+
     // MARK: - ReaderEngine Protocol
 
     func makeViewController() -> UIViewController {

@@ -12,6 +12,7 @@ import type {
   ReaderPageResponse,
   ReaderBookmark,
   ReaderHighlight,
+  FullTextContentResponse,
 } from "../lib/reader/types";
 import type { BookFormat } from "../lib/types";
 
@@ -345,5 +346,167 @@ export async function getReaderPageForPosition(
     content: pageContent,
     position: pageContent.position,
   };
+}
+
+// ============================================
+// FULL TEXT CONTENT (for client-side CSS column pagination)
+// ============================================
+
+/**
+ * Get full text content for client-side pagination.
+ * Returns all chapter HTML concatenated with chapter boundary markers.
+ * The client uses CSS multi-column layout to paginate based on actual rendered text.
+ */
+export async function getFullTextContent(
+  bookId: string,
+  formatOverride?: string,
+): Promise<FullTextContentResponse | null> {
+  const content = await getContent(bookId, formatOverride);
+  if (!content || content.type !== "text") return null;
+
+  // FXL EPUBs use per-page server rendering, not column pagination
+  if (content.isFixedLayout) return null;
+
+  const htmlParts: string[] = [];
+  const chapters: FullTextContentResponse["chapters"] = [];
+  const cssUrlSet = new Set<string>();
+
+  for (const chapter of content.chapters) {
+    // Wrap each chapter with data attributes for position tracking
+    htmlParts.push(
+      `<div data-chapter-id="${chapter.id}" data-char-start="${chapter.characterStart}" data-char-end="${chapter.characterEnd}">${chapter.html}</div>`,
+    );
+    chapters.push({
+      title: chapter.title,
+      characterStart: chapter.characterStart,
+      characterEnd: chapter.characterEnd,
+    });
+    if (chapter.cssFiles) {
+      for (const f of chapter.cssFiles) {
+        cssUrlSet.add(`/api/reader/${bookId}/resource/${encodeURIComponent(f)}`);
+      }
+    }
+  }
+
+  return {
+    html: htmlParts.join("\n"),
+    cssUrls: Array.from(cssUrlSet),
+    chapters,
+    totalCharacters: content.totalCharacters,
+    isFixedLayout: content.isFixedLayout,
+    chapterHrefMap: content.chapterHrefMap,
+  };
+}
+
+// ============================================
+// INTERNAL LINK RESOLUTION
+// ============================================
+
+/**
+ * Resolve an internal EPUB link (cross-chapter or same-chapter fragment)
+ * to a normalized 0-1 position within the book.
+ */
+export async function resolveInternalLink(
+  bookId: string,
+  href: string,
+  formatOverride?: string,
+): Promise<{ position: number } | null> {
+  const content = await getContent(bookId, formatOverride);
+  if (!content || content.type !== "text") return null;
+
+  const textContent = content;
+  if (!textContent.chapterHrefMap) return null;
+
+  // Extract the file part and fragment from the href
+  const [filePart, fragment] = href.split("#");
+
+  // Try direct match in the href map
+  if (filePart && textContent.chapterHrefMap[filePart] !== undefined) {
+    return { position: textContent.chapterHrefMap[filePart] };
+  }
+
+  // Try matching by filename only
+  const filename = filePart?.split("/").pop();
+  if (filename && textContent.chapterHrefMap[filename] !== undefined) {
+    return { position: textContent.chapterHrefMap[filename] };
+  }
+
+  // Try partial matching against chapter hrefs
+  for (const chapter of textContent.chapters) {
+    if (
+      chapter.href &&
+      filePart &&
+      (chapter.href.includes(filePart) || filePart.includes(chapter.href))
+    ) {
+      const position =
+        chapter.characterStart / Math.max(1, textContent.totalCharacters);
+      return { position };
+    }
+  }
+
+  // If only a fragment (same-chapter anchor), we can't resolve without knowing the current chapter
+  if (!filePart && fragment) {
+    return null;
+  }
+
+  return null;
+}
+
+// ============================================
+// FOOTNOTE CONTENT
+// ============================================
+
+/**
+ * Fetch the text content of a footnote by resolving the href fragment.
+ */
+export async function getFootnoteContent(
+  bookId: string,
+  href: string,
+  formatOverride?: string,
+): Promise<string | null> {
+  const content = await getContent(bookId, formatOverride);
+  if (!content || content.type !== "text") return null;
+
+  const [filePart, fragment] = href.split("#");
+  if (!fragment) return null;
+
+  // Find the chapter containing the footnote target
+  const textContent = content;
+  let targetChapter = null;
+
+  if (filePart) {
+    targetChapter = textContent.chapters.find(
+      (ch) =>
+        ch.id === filePart ||
+        ch.href === filePart ||
+        (ch.href && filePart.includes(ch.href)) ||
+        (ch.href && ch.href.includes(filePart)),
+    );
+  }
+
+  // If no file part, search all chapters
+  const chaptersToSearch = targetChapter
+    ? [targetChapter]
+    : textContent.chapters;
+
+  for (const chapter of chaptersToSearch) {
+    // Look for element with matching id attribute
+    const escapedFragment = fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const idPattern = new RegExp(
+      `id\\s*=\\s*["']${escapedFragment}["'][^>]*>([\\s\\S]*?)(?=<\\/(?:aside|div|p|section|li|dd|td|span|note))`,
+      "i",
+    );
+    const match = chapter.html.match(idPattern);
+    if (match) {
+      // Strip HTML tags to get plain text
+      const text = match[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) return text;
+    }
+  }
+
+  return null;
 }
 

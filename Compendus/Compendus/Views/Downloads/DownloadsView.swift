@@ -288,6 +288,13 @@ struct DownloadsView: View {
                 .padding(.bottom, 8)
             }
 
+            // Reading streak
+            if searchText.isEmpty && selectedFilter == .all {
+                ReadingStreakView()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+            }
+
             // Active downloads section
             if hasActiveDownloads {
                 activeDownloadsSection

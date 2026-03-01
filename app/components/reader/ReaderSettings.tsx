@@ -206,6 +206,38 @@ export function ReaderSettings({
             </div>
           </SettingSection>
 
+          {/* Publisher Styles */}
+          <SettingSection title="Publisher Styles">
+            <button
+              onClick={() => onUpdateSetting("usePublisherStyles", !settings.usePublisherStyles)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-md border transition-colors"
+              style={{
+                borderColor: settings.usePublisherStyles ? theme.accent : `${theme.foreground}20`,
+                backgroundColor: settings.usePublisherStyles ? `${theme.accent}10` : "transparent",
+              }}
+            >
+              <div className="text-left">
+                <div className="font-medium">Use EPUB Styles</div>
+                <div className="text-xs" style={{ color: theme.muted }}>
+                  Apply the book's own CSS formatting
+                </div>
+              </div>
+              <div
+                className="w-10 h-6 rounded-full relative transition-colors"
+                style={{
+                  backgroundColor: settings.usePublisherStyles ? theme.accent : `${theme.foreground}30`,
+                }}
+              >
+                <div
+                  className="w-4 h-4 rounded-full bg-white absolute top-1 transition-all"
+                  style={{
+                    left: settings.usePublisherStyles ? "22px" : "4px",
+                  }}
+                />
+              </div>
+            </button>
+          </SettingSection>
+
           {/* Page Layout */}
           <SettingSection title="Page Layout">
             <div className="space-y-2">

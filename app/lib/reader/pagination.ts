@@ -1,6 +1,7 @@
 import type {
   ViewportConfig,
   NormalizedContent,
+  NormalizedChapter,
   TextContent,
   PdfContent,
   ComicContent,
@@ -41,8 +42,14 @@ class PaginationEngine {
   /**
    * Calculate text pages based on estimated characters per page
    * For image-based content (0 characters), use one page per chapter
+   * For FXL EPUBs, one page per spine item
    */
   private calculateTextPages(content: TextContent, viewport: ViewportConfig): number {
+    // For FXL EPUBs, each spine item is one page
+    if (content.isFixedLayout) {
+      return Math.max(1, content.chapters.length);
+    }
+
     // For image-based content with no text, use one page per chapter
     if (content.totalCharacters === 0 && content.chapters.length > 0) {
       return content.chapters.length;
@@ -95,7 +102,7 @@ class PaginationEngine {
       case "audio":
         return this.getAudioPage(content, clampedPage, totalPages, bookId);
       case "text":
-        return this.getTextPage(content, clampedPage, totalPages, viewport);
+        return this.getTextPage(content, clampedPage, totalPages, viewport, bookId);
       default:
         throw new Error(`Unknown content type`);
     }
@@ -178,7 +185,26 @@ class PaginationEngine {
     pageNum: number,
     _totalPages: number,
     viewport: ViewportConfig,
+    bookId: string,
   ): PageContent {
+    // For FXL EPUBs, each chapter is one page
+    if (content.isFixedLayout) {
+      const chapterIndex = Math.min(pageNum - 1, content.chapters.length - 1);
+      const chapter = content.chapters[chapterIndex];
+      const position = chapterIndex / Math.max(1, content.chapters.length);
+      const endPosition = (chapterIndex + 1) / Math.max(1, content.chapters.length);
+
+      return {
+        type: "text",
+        html: chapter?.html || "",
+        position,
+        endPosition,
+        chapterTitle: chapter?.title,
+        isFixedLayout: true,
+        cssUrls: this.collectCssUrls([chapter], bookId),
+      };
+    }
+
     // For image-based content (0 characters), each page is one chapter
     if (content.totalCharacters === 0 && content.chapters.length > 0) {
       const chapterIndex = Math.min(pageNum - 1, content.chapters.length - 1);
@@ -192,6 +218,7 @@ class PaginationEngine {
         position,
         endPosition,
         chapterTitle: chapter?.title,
+        cssUrls: this.collectCssUrls([chapter], bookId),
       };
     }
 
@@ -200,7 +227,7 @@ class PaginationEngine {
     const endChar = startChar + charsPerPage;
 
     // Find which chapters this page spans
-    const { html, chapterTitle } = this.extractTextRange(content, startChar, endChar);
+    const { html, chapterTitle, overlappingChapters } = this.extractTextRange(content, startChar, endChar);
 
     const position = startChar / content.totalCharacters;
     const endPosition = Math.min(1, endChar / content.totalCharacters);
@@ -211,7 +238,28 @@ class PaginationEngine {
       position,
       endPosition,
       chapterTitle,
+      cssUrls: this.collectCssUrls(overlappingChapters, bookId),
     };
+  }
+
+  /**
+   * Collect unique CSS URLs from overlapping chapters for the resource API
+   */
+  private collectCssUrls(chapters: (NormalizedChapter | undefined)[], bookId: string): string[] | undefined {
+    const seen = new Set<string>();
+    const urls: string[] = [];
+
+    for (const chapter of chapters) {
+      if (!chapter?.cssFiles) continue;
+      for (const cssFile of chapter.cssFiles) {
+        if (!seen.has(cssFile)) {
+          seen.add(cssFile);
+          urls.push(`/api/reader/${bookId}/resource/${encodeURIComponent(cssFile)}`);
+        }
+      }
+    }
+
+    return urls.length > 0 ? urls : undefined;
   }
 
   /**
@@ -221,14 +269,17 @@ class PaginationEngine {
     content: TextContent,
     startChar: number,
     endChar: number,
-  ): { html: string; chapterTitle?: string } {
+  ): { html: string; chapterTitle?: string; overlappingChapters: NormalizedChapter[] } {
     const htmlParts: string[] = [];
+    const overlappingChapters: NormalizedChapter[] = [];
     let chapterTitle: string | undefined;
 
     for (const chapter of content.chapters) {
       // Check if this chapter overlaps with our range
       if (chapter.characterEnd < startChar) continue;
       if (chapter.characterStart > endChar) break;
+
+      overlappingChapters.push(chapter);
 
       // Set chapter title from first overlapping chapter
       if (!chapterTitle) {
@@ -254,6 +305,7 @@ class PaginationEngine {
     return {
       html: htmlParts.join("\n"),
       chapterTitle,
+      overlappingChapters,
     };
   }
 

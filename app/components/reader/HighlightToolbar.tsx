@@ -24,6 +24,7 @@ interface HighlightToolbarProps {
     foreground: string;
     muted: string;
   };
+  customColors?: string[];
 }
 
 export function HighlightToolbar({
@@ -32,6 +33,7 @@ export function HighlightToolbar({
   onHighlight,
   onDismiss,
   theme,
+  customColors,
 }: HighlightToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -102,7 +104,10 @@ export function HighlightToolbar({
       {!showNoteInput ? (
         /* Default toolbar: Colors | Note | Copy */
         <div className="flex items-center gap-2 px-3 py-2">
-          {HIGHLIGHT_COLORS.map((color) => (
+          {(customColors
+            ? customColors.map((c) => ({ name: c, value: c }))
+            : HIGHLIGHT_COLORS
+          ).map((color) => (
             <button
               key={color.value}
               onClick={(e) => {
