@@ -88,7 +88,13 @@ class ComicEngine: ReaderEngine {
         }
 
         do {
-            totalPositions = try comicExtractor.getPageCount(from: fileURL, format: book.format)
+            // Run ZIP extraction off the main thread to avoid UI freeze
+            let extractor = comicExtractor
+            let format = book.format
+            let count = try await Task.detached(priority: .userInitiated) {
+                try extractor.getPageCount(from: fileURL, format: format)
+            }.value
+            totalPositions = count
             if totalPositions == 0 {
                 errorMessage = "Comic has no pages"
                 return
@@ -141,7 +147,12 @@ class ComicEngine: ReaderEngine {
 
         if canExtractLocally && hasLocalFile, let fileURL = book.fileURL {
             do {
-                let data = try comicExtractor.extractPage(from: fileURL, format: book.format, pageIndex: page)
+                // Run page extraction off the main thread to avoid UI freeze
+                let extractor = comicExtractor
+                let format = book.format
+                let data = try await Task.detached(priority: .userInitiated) {
+                    try extractor.extractPage(from: fileURL, format: format, pageIndex: page)
+                }.value
                 if let image = UIImage(data: data) {
                     pageImageCache.setObject(image, forKey: NSNumber(value: page))
                     try? storageManager.cacheComicPage(bookId: book.id, page: page, data: data)

@@ -46,8 +46,8 @@ struct RelatedBooksSection: View {
                 CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
                     .aspectRatio(bookAspectRatio, contentMode: .fit)
                     .frame(width: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.medium))
+                    .shadow(Shadow.light)
 
                 Text(book.title)
                     .font(.caption)

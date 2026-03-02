@@ -67,19 +67,21 @@ struct ReaderShell<Content: View>: View {
 struct ReaderContainerView: View {
     let book: DownloadedBook
     var preferEpub: Bool = false
+    /// Optional position to open at (e.g. from a highlight). Overrides lastPosition.
+    var initialPosition: String? = nil
 
     var body: some View {
         switch book.format.lowercased() {
         case "pdf", "epub":
             ReaderShell(book: book, showsDismissButton: false) {
-                UnifiedReaderView(book: book, preferEpub: preferEpub)
+                UnifiedReaderView(book: book, preferEpub: preferEpub, initialPosition: initialPosition)
             }
         case "mobi", "azw", "azw3":
             // MOBI books are converted to EPUB on download. This case handles
             // books downloaded before conversion support was added.
             if book.hasEpubVersion {
                 ReaderShell(book: book, showsDismissButton: false) {
-                    UnifiedReaderView(book: book, preferEpub: true)
+                    UnifiedReaderView(book: book, preferEpub: true, initialPosition: initialPosition)
                 }
             } else {
                 ReaderShell(book: book, showsDismissButton: false) {
@@ -88,7 +90,7 @@ struct ReaderContainerView: View {
             }
         case "cbr", "cbz":
             ReaderShell(book: book, showsDismissButton: false) {
-                UnifiedReaderView(book: book)
+                UnifiedReaderView(book: book, initialPosition: initialPosition)
             }
         case "m4b", "mp3", "m4a":
             ReaderShell(book: book, showsDismissButton: true) {

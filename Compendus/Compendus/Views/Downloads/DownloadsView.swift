@@ -199,6 +199,12 @@ struct DownloadsView: View {
                 }
                 .task {
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
+                    // Clean up stale failed download entries on launch
+                    downloadManager.cleanupStaleFailedDownloads()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                    // Retry failed downloads when app returns to foreground (network may have recovered)
+                    downloadManager.retryFailedDownloads(modelContext: modelContext)
                 }
         }
     }

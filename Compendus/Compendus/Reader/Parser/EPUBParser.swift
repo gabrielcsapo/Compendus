@@ -49,60 +49,64 @@ class EPUBParser {
         try? FileManager.default.removeItem(at: extractedURL)
     }
 
-    /// Parse an EPUB file, extracting it to a temporary directory
+    /// Parse an EPUB file, extracting it to a temporary directory.
+    /// All heavy I/O (ZIP extraction, XML parsing) runs on a background thread.
     static func parse(epubURL: URL) async throws -> EPUBParser {
         guard FileManager.default.fileExists(atPath: epubURL.path) else {
             throw EPUBParserError.fileNotFound
         }
 
-        // 1. Create extraction directory
-        let extractDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("epub-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+        // Run all heavy I/O on a background thread to guarantee we never block the main thread
+        return try await Task.detached(priority: .userInitiated) {
+            // 1. Create extraction directory
+            let extractDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("epub-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
 
-        do {
-            // 2. Unzip EPUB
-            try FileManager.default.unzipItem(at: epubURL, to: extractDir)
+            do {
+                // 2. Unzip EPUB
+                try FileManager.default.unzipItem(at: epubURL, to: extractDir)
 
-            // 3. Parse container.xml to find OPF path
-            let containerURL = extractDir
-                .appendingPathComponent("META-INF")
-                .appendingPathComponent("container.xml")
-            guard FileManager.default.fileExists(atPath: containerURL.path) else {
-                throw EPUBParserError.invalidEPUB("Missing META-INF/container.xml")
+                // 3. Parse container.xml to find OPF path
+                let containerURL = extractDir
+                    .appendingPathComponent("META-INF")
+                    .appendingPathComponent("container.xml")
+                guard FileManager.default.fileExists(atPath: containerURL.path) else {
+                    throw EPUBParserError.invalidEPUB("Missing META-INF/container.xml")
+                }
+                let containerData = try Data(contentsOf: containerURL)
+                let opfPath = try parseContainerXML(containerData)
+
+                // 4. Parse OPF file
+                let opfURL = extractDir.appendingPathComponent(opfPath)
+                guard FileManager.default.fileExists(atPath: opfURL.path) else {
+                    throw EPUBParserError.invalidEPUB("OPF file not found at \(opfPath)")
+                }
+                let opfData = try Data(contentsOf: opfURL)
+                let rootDir = (opfPath as NSString).deletingLastPathComponent
+                let (metadata, manifest, spine) = try parseOPF(opfData)
+
+                // 5. Parse TOC
+                let tocItems = parseTOC(manifest: manifest, rootDir: rootDir, extractDir: extractDir)
+
+                let package = EPUBPackage(
+                    metadata: metadata,
+                    manifest: manifest,
+                    spine: spine,
+                    rootDirectoryPath: rootDir,
+                    tocItems: tocItems
+                )
+
+                return EPUBParser(extractedURL: extractDir, package: package)
+
+            } catch let error as EPUBParserError {
+                try? FileManager.default.removeItem(at: extractDir)
+                throw error
+            } catch {
+                try? FileManager.default.removeItem(at: extractDir)
+                throw EPUBParserError.parsingFailed(error.localizedDescription)
             }
-            let containerData = try Data(contentsOf: containerURL)
-            let opfPath = try parseContainerXML(containerData)
-
-            // 4. Parse OPF file
-            let opfURL = extractDir.appendingPathComponent(opfPath)
-            guard FileManager.default.fileExists(atPath: opfURL.path) else {
-                throw EPUBParserError.invalidEPUB("OPF file not found at \(opfPath)")
-            }
-            let opfData = try Data(contentsOf: opfURL)
-            let rootDir = (opfPath as NSString).deletingLastPathComponent
-            let (metadata, manifest, spine) = try parseOPF(opfData)
-
-            // 5. Parse TOC
-            let tocItems = parseTOC(manifest: manifest, rootDir: rootDir, extractDir: extractDir)
-
-            let package = EPUBPackage(
-                metadata: metadata,
-                manifest: manifest,
-                spine: spine,
-                rootDirectoryPath: rootDir,
-                tocItems: tocItems
-            )
-
-            return EPUBParser(extractedURL: extractDir, package: package)
-
-        } catch let error as EPUBParserError {
-            try? FileManager.default.removeItem(at: extractDir)
-            throw error
-        } catch {
-            try? FileManager.default.removeItem(at: extractDir)
-            throw EPUBParserError.parsingFailed(error.localizedDescription)
-        }
+        }.value
     }
 
     /// Resolve a manifest item's href to a full file URL

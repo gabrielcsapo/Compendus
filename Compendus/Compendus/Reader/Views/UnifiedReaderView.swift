@@ -13,6 +13,8 @@ import SwiftData
 struct UnifiedReaderView: View {
     let book: DownloadedBook
     var preferEpub: Bool = false
+    /// Optional position to open at (e.g. from a highlight). Overrides book.lastPosition.
+    var initialPosition: String? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -1188,7 +1190,7 @@ struct UnifiedReaderView: View {
     private func initializeEPUBEngine(fileURL: URL) async {
         let nativeEngine = NativeEPUBEngine(bookURL: fileURL)
         configureEngineCallbacks(nativeEngine)
-        await nativeEngine.load(initialPosition: book.lastPosition)
+        await nativeEngine.load(initialPosition: initialPosition ?? book.lastPosition)
 
         if let error = nativeEngine.errorMessage {
             readerState = .error(error)
@@ -1228,7 +1230,7 @@ struct UnifiedReaderView: View {
         let pdfEngine = PDFEngine(bookURL: fileURL)
         configureEngineCallbacks(pdfEngine)
 
-        let initialPage = book.lastPosition.flatMap { Int($0) }
+        let initialPage = (initialPosition ?? book.lastPosition).flatMap { Int($0) }
         pdfEngine.load(initialPage: initialPage)
 
         if let error = pdfEngine.errorMessage {
@@ -1261,7 +1263,7 @@ struct UnifiedReaderView: View {
         )
         configureEngineCallbacks(comicEngine)
 
-        let initialPage = book.lastPosition.flatMap { Int($0) }
+        let initialPage = (initialPosition ?? book.lastPosition).flatMap { Int($0) }
         await comicEngine.load(initialPage: initialPage)
 
         if let error = comicEngine.errorMessage {
@@ -1301,11 +1303,26 @@ struct UnifiedReaderView: View {
             }
         }
 
-        // PDF: center tap to toggle overlay
+        // PDF: tap zones for page navigation + center tap to toggle overlay
         if let pdfEngine = engine as? PDFEngine {
-            pdfEngine.onCenterTap = { [self] in
+            pdfEngine.onTapZone = { [self] zone in
                 pauseReadAlongIfActive()
-                toggleOverlay()
+                switch zone {
+                case "left":
+                    hideOverlayIfShowing()
+                    showingFloatingToolbar = false
+                    dismissPillIfAvailable()
+                    Task { await self.engine?.goBackward() }
+                case "right":
+                    hideOverlayIfShowing()
+                    showingFloatingToolbar = false
+                    dismissPillIfAvailable()
+                    Task { await self.engine?.goForward() }
+                case "center":
+                    toggleOverlay()
+                default:
+                    break
+                }
             }
         }
 

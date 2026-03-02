@@ -59,10 +59,10 @@ struct ReadingStreakView: View {
 
                 Spacer()
             }
-            .padding()
+            .padding(Spacing.lg)
             .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+            .shadow(Shadow.subtle)
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showingStats) {

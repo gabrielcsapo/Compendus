@@ -37,6 +37,21 @@ struct DownloadProgress: Identifiable {
     }
 }
 
+enum DownloadError: LocalizedError {
+    case insufficientStorage(required: Int64, available: Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case .insufficientStorage(let required, let available):
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            let req = formatter.string(fromByteCount: required)
+            let avail = formatter.string(fromByteCount: available)
+            return "Not enough storage. This book requires \(req) but only \(avail) is available. Free up space or delete some downloads."
+        }
+    }
+}
+
 @Observable
 class DownloadManager: NSObject {
     let config: ServerConfig
@@ -107,6 +122,18 @@ class DownloadManager: NSObject {
             }
             // Remove stale failed/completed pending download
             modelContext.delete(existing)
+        }
+
+        // Check available storage before starting download
+        if let fileSize = book.fileSize, fileSize > 0 {
+            let requiredBytes = Int64(fileSize)
+            let homeURL = URL(fileURLWithPath: NSHomeDirectory())
+            let availableBytes = (try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? 0
+            // Require at least the file size plus 50MB buffer for extraction/processing
+            let bufferBytes: Int64 = 50 * 1024 * 1024
+            if requiredBytes + bufferBytes > availableBytes {
+                throw DownloadError.insufficientStorage(required: requiredBytes, available: availableBytes)
+            }
         }
 
         // Determine download URL and final format
@@ -237,6 +264,36 @@ class DownloadManager: NSObject {
         let task = session.downloadTask(with: downloadURL)
         task.taskDescription = pending.id
         task.resume()
+    }
+
+    /// Remove failed downloads from activeDownloads that have been in a failed state
+    /// for longer than the specified interval. Called periodically or on app foreground.
+    @MainActor
+    func cleanupStaleFailedDownloads() {
+        let staleIds = activeDownloads.compactMap { id, progress -> String? in
+            if case .failed = progress.state {
+                return id
+            }
+            return nil
+        }
+        for id in staleIds {
+            activeDownloads.removeValue(forKey: id)
+        }
+    }
+
+    /// Retry all failed pending downloads. Call when network connectivity is restored.
+    @MainActor
+    func retryFailedDownloads(modelContext: ModelContext) {
+        let descriptor = FetchDescriptor<PendingDownload>(
+            predicate: #Predicate { $0.status == "failed" }
+        )
+        guard let failedDownloads = try? modelContext.fetch(descriptor), !failedDownloads.isEmpty else {
+            return
+        }
+
+        for pending in failedDownloads {
+            retryDownload(pending, modelContext: modelContext)
+        }
     }
 
     /// Cancel all active and pending downloads

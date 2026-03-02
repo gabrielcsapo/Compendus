@@ -21,6 +21,7 @@ class PDFEngine: ReaderEngine {
     var onSelectionChanged: ((ReaderSelection?) -> Void)?
     var onHighlightTapped: ((String) -> Void)?
     var onCenterTap: (() -> Void)?
+    var onTapZone: ((String) -> Void)?
 
     private(set) var pdfDocument: PDFDocument?
     private var pdfView: PDFView?
@@ -410,23 +411,35 @@ class PDFViewHostController: UIViewController, UIGestureRecognizerDelegate {
 
     @objc private func handleAnnotationTap(_ gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: pdfView)
-        guard let page = pdfView.page(for: location, nearest: false) else {
-            engine.onCenterTap?()
-            return
-        }
-        let pagePoint = pdfView.convert(location, to: page)
 
-        for annotation in page.annotations where annotation.type == "Highlight" {
-            let hitBounds = annotation.bounds.insetBy(dx: 0, dy: -8)
-            if hitBounds.contains(pagePoint),
-               let highlightId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? String {
-                engine.onHighlightTapped?(highlightId)
-                return
+        // Check for highlight annotation taps
+        if let page = pdfView.page(for: location, nearest: false) {
+            let pagePoint = pdfView.convert(location, to: page)
+            for annotation in page.annotations where annotation.type == "Highlight" {
+                let hitBounds = annotation.bounds.insetBy(dx: 0, dy: -8)
+                if hitBounds.contains(pagePoint),
+                   let highlightId = annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "highlightId")) as? String {
+                    engine.onHighlightTapped?(highlightId)
+                    return
+                }
             }
         }
 
-        // No annotation hit — toggle overlay
-        engine.onCenterTap?()
+        // Tap zone detection — left/right sides navigate, center toggles toolbar
+        let width = view.bounds.width
+        let height = view.bounds.height
+        let point = gesture.location(in: view)
+        let isEdgeVertical = point.y < height * 0.12 || point.y > height * 0.88
+
+        if isEdgeVertical {
+            engine.onTapZone?("center")
+        } else if point.x < width * 0.25 {
+            engine.onTapZone?("left")
+        } else if point.x > width * 0.75 {
+            engine.onTapZone?("right")
+        } else {
+            engine.onTapZone?("center")
+        }
     }
 
     @objc private func pageChanged(_ notification: Notification) {

@@ -259,6 +259,7 @@ class NativeEPUBEngine: ReaderEngine {
     }
 
     /// Release resources when the reader is dismissed.
+    /// IMPORTANT: Must be called from onDisappear — @MainActor prevents deinit cleanup.
     func cleanup() {
         chapterLoadTask?.cancel()
         chapterLoadTask = nil

@@ -15,11 +15,14 @@ struct ContentView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(\.modelContext) private var modelContext
     @Environment(\.deepLinkBookId) private var deepLinkBookId
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var deepLinkedBook: DownloadedBook?
 
     var body: some View {
         Group {
-            if serverConfig.isConfigured {
+            if !hasCompletedOnboarding {
+                OnboardingView()
+            } else if serverConfig.isConfigured {
                 @Bindable var nav = appNavigation
                 @Bindable var player = audiobookPlayer
                 VStack(spacing: 0) {

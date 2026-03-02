@@ -111,7 +111,13 @@ struct DownloadedBookDetailView: View {
                 .modelContext(modelContext)
         }
         .sheet(item: $selectedRelatedBook) { relatedBook in
-            BookDetailView(book: relatedBook)
+            BookDetailView(
+                book: relatedBook,
+                onBookTap: { tappedBook in
+                    // Replace the current sheet with the tapped book
+                    selectedRelatedBook = tappedBook
+                }
+            )
         }
     }
 

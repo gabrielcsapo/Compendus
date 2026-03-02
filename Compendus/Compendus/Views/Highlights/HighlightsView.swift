@@ -15,8 +15,12 @@ struct HighlightsView: View {
 
     @State private var searchText = ""
 
-    /// Books with highlights, sorted by most recent highlight first
+    /// Cached grouped highlights to avoid recomputing on every render
     private var groupedHighlights: [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {
+        computeGroupedHighlights()
+    }
+
+    private func computeGroupedHighlights() -> [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {
         let filtered = searchText.isEmpty ? allHighlights : allHighlights.filter { highlight in
             highlight.text.localizedCaseInsensitiveContains(searchText) ||
             (highlight.note?.localizedCaseInsensitiveContains(searchText) ?? false) ||
@@ -25,8 +29,11 @@ struct HighlightsView: View {
 
         let grouped = Dictionary(grouping: filtered) { $0.bookId }
 
+        // Build a lookup dictionary for O(1) book lookups instead of O(n) per group
+        let bookLookup = Dictionary(uniqueKeysWithValues: allBooks.map { ($0.id, $0) })
+
         return grouped.map { bookId, highlights in
-            let book = allBooks.first { $0.id == bookId }
+            let book = bookLookup[bookId]
             return (book: book, bookId: bookId, highlights: highlights)
         }
         .sorted { a, b in
@@ -40,13 +47,13 @@ struct HighlightsView: View {
         NavigationStack {
             Group {
                 if allHighlights.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Highlights", systemImage: "highlighter")
-                    } description: {
-                        Text("Highlights you create while reading will appear here.")
-                    }
+                    EmptyStateView(
+                        icon: "highlighter",
+                        title: "No Highlights",
+                        description: "Highlights you create while reading will appear here."
+                    )
                 } else if groupedHighlights.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
+                    SearchEmptyStateView(query: searchText)
                 } else {
                     List {
                         ForEach(groupedHighlights, id: \.bookId) { group in
@@ -167,6 +174,7 @@ private struct BookHighlightsDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(ReaderSettings.self) private var readerSettings
     @State private var bookToOpen: DownloadedBook?
+    @State private var highlightPosition: String?
     @State private var editingHighlight: BookHighlight?
 
     var body: some View {
@@ -176,6 +184,7 @@ private struct BookHighlightsDetailView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if let book {
+                            highlightPosition = highlight.locatorJSON
                             bookToOpen = book
                         }
                     }
@@ -211,8 +220,13 @@ private struct BookHighlightsDetailView: View {
             }
         }
         .fullScreenCover(item: $bookToOpen) { book in
-            ReaderContainerView(book: book)
+            ReaderContainerView(book: book, initialPosition: highlightPosition)
                 .environment(readerSettings)
+        }
+        .onChange(of: bookToOpen) { _, newValue in
+            if newValue == nil {
+                highlightPosition = nil
+            }
         }
         .sheet(item: $editingHighlight) { highlight in
             EditNoteSheet(highlight: highlight) {
