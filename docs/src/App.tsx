@@ -12,6 +12,7 @@ import IOSContent from "@content/ios.mdx";
 import Landing from "./pages/Landing";
 import ApiReference from "./pages/ApiReference";
 import Formats from "./pages/Formats";
+import AudioSpeech from "./pages/AudioSpeech";
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="ios" element={<MdxPage Component={IOSContent} />} />
         <Route path="api" element={<ApiReference />} />
         <Route path="formats" element={<Formats />} />
+        <Route path="audio-speech" element={<AudioSpeech />} />
       </Route>
     </Routes>
   );

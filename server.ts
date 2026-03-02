@@ -5,7 +5,10 @@ import { app as apiApp } from "./server/index.js";
 import { startJobProcessor } from "./app/lib/queue.js";
 
 async function main() {
-  const flightApp = await createServer({ buildDir: "./dist" });
+  const flightApp = await createServer({
+    buildDir: "./dist",
+    workers: { size: 1 },
+  });
 
   // Create the unified server: API routes first, then flight router for pages
   const app = new Hono();

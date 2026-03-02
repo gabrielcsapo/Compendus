@@ -13,6 +13,7 @@ const navItems = [
     links: [
       { to: "/docs/api", label: "API Reference" },
       { to: "/docs/formats", label: "Supported Formats" },
+      { to: "/docs/audio-speech", label: "Audio & Speech" },
     ],
   },
   {

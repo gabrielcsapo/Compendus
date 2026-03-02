@@ -327,5 +327,30 @@
       "Conversion Support"
     ],
     "content": "EPUB PDF MOBI AZW3 CBZ CBR M4B M4A MP3 ebook comic audiobook formats. EPUB is the standard ebook format with full reading support. PDF rendered as page images. MOBI and AZW3 auto-convert to EPUB. CBZ comic ZIP archive. CBR auto-converts to CBZ. M4B Apple audiobook format. Cover images extracted automatically. Conversion support: PDF to EPUB, MOBI to EPUB, AZW3 to EPUB, CBR to CBZ."
+  },
+  {
+    "title": "Audio & Speech",
+    "slug": "audio-speech",
+    "path": "/docs/audio-speech",
+    "section": "Reference",
+    "headings": [
+      "Audiobook Transcription",
+      "Server-Side Transcription",
+      "On-Device Transcription",
+      "Transcript API",
+      "Transcript Data Model",
+      "Karaoke Lyrics",
+      "Text-to-Speech",
+      "Web Read Aloud",
+      "iOS PocketTTS Engine",
+      "Audio Caching",
+      "Pre-Generation & Read-Along",
+      "Audiobook Playback",
+      "Player Features",
+      "Player Interface",
+      "Audio File Processing",
+      "Chapter Data Model"
+    ],
+    "content": "Audio speech transcription text-to-speech TTS audiobook playback whisper.cpp PocketTTS read aloud karaoke lyrics word-level highlighting sentence timing AVAudioPlayer Web Speech API on-device background processing BGProcessingTask chapter navigation sleep timer speed control transcript API endpoint M4B M4A MP3 EPUB read-along pre-generation audio caching Now Playing widget"
   }
 ]
