@@ -8,6 +8,7 @@
 //
 
 import UIKit
+import CoreText
 import SwiftSoup
 import os.log
 
@@ -95,6 +96,9 @@ class NativeEPUBEngine: ReaderEngine {
 
     // CSS stylesheet loaded once per book
     private var bookStylesheet: CSSStylesheet?
+
+    /// Fonts registered from EPUB @font-face rules (unregistered on cleanup)
+    private var registeredFonts: [CGFont] = []
 
     // Media attachments for current chapter (for video/audio tap handling)
     private var currentMediaAttachments: [MediaAttachment] = []
@@ -266,6 +270,11 @@ class NativeEPUBEngine: ReaderEngine {
         fullPaginationTask?.cancel()
         fullPaginationTask = nil
         EPUBImageCache.shared.endSession()
+        // Unregister embedded fonts
+        for cgFont in registeredFonts {
+            CTFontManagerUnregisterGraphicsFont(cgFont, nil)
+        }
+        registeredFonts = []
     }
 
     // MARK: - Loading
@@ -529,7 +538,10 @@ class NativeEPUBEngine: ReaderEngine {
             cssURLs.append(parser.resolveURL(for: item))
         }
 
-        let combined = await Task.detached {
+        let extractedURL = parser.extractedURL
+        let rootDir = parser.package.rootDirectoryPath
+
+        let (combined, fonts) = await Task.detached { () -> (CSSStylesheet, [CGFont]) in
             var stylesheet = CSSStylesheet()
             for cssURL in cssURLs {
                 guard let cssData = try? Data(contentsOf: cssURL),
@@ -537,9 +549,37 @@ class NativeEPUBEngine: ReaderEngine {
                 let parsed = CSSParser.parse(cssText)
                 stylesheet.merge(with: parsed)
             }
-            return stylesheet
+
+            // Register @font-face fonts from EPUB
+            var registeredFonts: [CGFont] = []
+            for fontFace in stylesheet.fontFaces {
+                for src in fontFace.sources {
+                    // Skip WOFF/WOFF2 (not supported by CGFont)
+                    let lower = src.lowercased()
+                    if lower.hasSuffix(".woff") || lower.hasSuffix(".woff2") { continue }
+
+                    let fontPath = rootDir.isEmpty ? src : rootDir + "/" + src
+                    let fontURL = extractedURL.appendingPathComponent(fontPath).standardizedFileURL
+
+                    guard let fontData = try? Data(contentsOf: fontURL) as CFData,
+                          let provider = CGDataProvider(data: fontData),
+                          let cgFont = CGFont(provider) else { continue }
+
+                    var error: Unmanaged<CFError>?
+                    if CTFontManagerRegisterGraphicsFont(cgFont, &error) {
+                        registeredFonts.append(cgFont)
+                    }
+                    break // Stop after first successful source for this font-face
+                }
+            }
+
+            return (stylesheet, registeredFonts)
         }.value
         self.bookStylesheet = combined
+        self.registeredFonts = fonts
+        if !fonts.isEmpty {
+            logger.info("Registered \(fonts.count) embedded fonts from EPUB")
+        }
         logger.info("Loaded CSS stylesheets from manifest")
     }
 
@@ -1342,67 +1382,111 @@ class NativeEPUBEngine: ReaderEngine {
         paginatedChapterCount = navDocIndices.count
         paginationProgress = totalToProcess > 0 ? Double(paginatedChapterCount) / Double(totalChapterCount) : 0
 
-        // Process chapters individually with progress reporting and yielding
-        for (chapterIndex, (index, chapterURL)) in chapterURLs.enumerated() {
-            guard !Task.isCancelled else { break }
+        // Process chapters in parallel with bounded concurrency
+        let maxConcurrent = 4
+        var completedCount = navDocIndices.count
 
-            let result: ChapterBuildResult? = await Task.detached {
-                guard let data = try? Data(contentsOf: chapterURL) else { return nil }
+        await withTaskGroup(of: (Int, ChapterBuildResult?).self) { group in
+            var urlIterator = chapterURLs.makeIterator()
 
-                let baseURL = chapterURL.deletingLastPathComponent()
-                let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
-                let nodes = contentParser.parse()
+            // Seed initial batch of tasks
+            for _ in 0..<min(maxConcurrent, chapterURLs.count) {
+                guard let (index, chapterURL) = urlIterator.next() else { break }
+                group.addTask {
+                    guard let data = try? Data(contentsOf: chapterURL) else { return (index, nil) }
 
-                guard !Task.isCancelled else { return nil }
+                    let baseURL = chapterURL.deletingLastPathComponent()
+                    let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                    let nodes = contentParser.parse()
 
-                let builder = AttributedStringBuilder(
-                    settings: settings,
-                    contentWidth: max(1, contentWidth),
-                    contentHeight: max(1, contentHeight)
-                )
-                let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+                    guard !Task.isCancelled else { return (index, nil) }
 
-                guard !Task.isCancelled else { return nil }
+                    let builder = AttributedStringBuilder(
+                        settings: settings,
+                        contentWidth: max(1, contentWidth),
+                        contentHeight: max(1, contentHeight)
+                    )
+                    let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
 
-                let pages = NativePaginationEngine.paginate(
-                    attributedString: attrString,
-                    viewportSize: pageViewportSize,
-                    contentInsets: insets
-                )
+                    guard !Task.isCancelled else { return (index, nil) }
 
-                return ChapterBuildResult(
-                    nodes: nodes,
-                    attrString: attrString,
-                    offsetMap: offsetMap,
-                    plainTextMap: plainTextMap,
-                    pages: pages,
-                    mediaAttachments: builder.mediaAttachments,
-                    floatingElements: builder.floatingElements
-                )
-            }.value
+                    let pages = NativePaginationEngine.paginate(
+                        attributedString: attrString,
+                        viewportSize: pageViewportSize,
+                        contentInsets: insets
+                    )
 
-            // Apply result on MainActor
-            if let result {
-                parsedChapters[index] = result.nodes
-                chapterStrings[index] = result.attrString
-                chapterOffsetMaps[index] = result.offsetMap
-                chapterPlainTextMaps[index] = result.plainTextMap
-                chapterPages[index] = result.pages
-                chapterMediaAttachments[index] = result.mediaAttachments
-                chapterFloatingElements[index] = result.floatingElements
-                if index < spinePageCounts.count {
-                    spinePageCounts[index] = result.pages.count
+                    return (index, ChapterBuildResult(
+                        nodes: nodes,
+                        attrString: attrString,
+                        offsetMap: offsetMap,
+                        plainTextMap: plainTextMap,
+                        pages: pages,
+                        mediaAttachments: builder.mediaAttachments,
+                        floatingElements: builder.floatingElements
+                    ))
                 }
             }
 
-            // Update progress
-            paginatedChapterCount = navDocIndices.count + chapterIndex + 1
-            paginationProgress = Double(paginatedChapterCount) / Double(totalChapterCount)
-            totalPositions = spinePageCounts.reduce(0, +)
+            // Process completed tasks and submit new ones (sliding window)
+            for await (index, result) in group {
+                guard !Task.isCancelled else { break }
 
-            // Yield to let the main thread breathe every few chapters
-            if chapterIndex % 3 == 2 {
-                await Task.yield()
+                if let result {
+                    parsedChapters[index] = result.nodes
+                    chapterStrings[index] = result.attrString
+                    chapterOffsetMaps[index] = result.offsetMap
+                    chapterPlainTextMaps[index] = result.plainTextMap
+                    chapterPages[index] = result.pages
+                    chapterMediaAttachments[index] = result.mediaAttachments
+                    chapterFloatingElements[index] = result.floatingElements
+                    if index < spinePageCounts.count {
+                        spinePageCounts[index] = result.pages.count
+                    }
+                }
+
+                completedCount += 1
+                paginatedChapterCount = completedCount
+                paginationProgress = Double(completedCount) / Double(totalChapterCount)
+                totalPositions = spinePageCounts.reduce(0, +)
+
+                // Submit next chapter if available
+                if let (nextIndex, nextURL) = urlIterator.next() {
+                    group.addTask {
+                        guard let data = try? Data(contentsOf: nextURL) else { return (nextIndex, nil) }
+
+                        let baseURL = nextURL.deletingLastPathComponent()
+                        let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
+                        let nodes = contentParser.parse()
+
+                        guard !Task.isCancelled else { return (nextIndex, nil) }
+
+                        let builder = AttributedStringBuilder(
+                            settings: settings,
+                            contentWidth: max(1, contentWidth),
+                            contentHeight: max(1, contentHeight)
+                        )
+                        let (attrString, offsetMap, plainTextMap) = builder.build(from: nodes)
+
+                        guard !Task.isCancelled else { return (nextIndex, nil) }
+
+                        let pages = NativePaginationEngine.paginate(
+                            attributedString: attrString,
+                            viewportSize: pageViewportSize,
+                            contentInsets: insets
+                        )
+
+                        return (nextIndex, ChapterBuildResult(
+                            nodes: nodes,
+                            attrString: attrString,
+                            offsetMap: offsetMap,
+                            plainTextMap: plainTextMap,
+                            pages: pages,
+                            mediaAttachments: builder.mediaAttachments,
+                            floatingElements: builder.floatingElements
+                        ))
+                    }
+                }
             }
         }
 

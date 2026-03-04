@@ -40,6 +40,7 @@ enum CSSTextDecoration: Equatable { case underline, lineThrough }
 enum CSSDisplay: Equatable { case none, block, inline }
 enum CSSListStyleType: Equatable { case disc, circle, square, decimal, lowerAlpha, lowerRoman, none }
 enum CSSFloat: Equatable { case left, right, none }
+enum CSSDirection: Equatable { case ltr, rtl }
 
 // MARK: - CSS Properties
 
@@ -62,6 +63,15 @@ struct CSSProperties: Equatable {
     var cssFloat: CSSFloat?
     var width: CSSLength?
     var height: CSSLength?
+    var color: UIColor?
+    var backgroundColor: UIColor?
+    var direction: CSSDirection?
+    var paddingTop: CSSLength?
+    var paddingBottom: CSSLength?
+    var paddingLeft: CSSLength?
+    var paddingRight: CSSLength?
+    var borderWidth: CSSLength?
+    var fontFamily: String?
 
     static let empty = CSSProperties()
 
@@ -84,6 +94,15 @@ struct CSSProperties: Equatable {
         if let v = other.cssFloat { result.cssFloat = v }
         if let v = other.width { result.width = v }
         if let v = other.height { result.height = v }
+        if let v = other.color { result.color = v }
+        if let v = other.backgroundColor { result.backgroundColor = v }
+        if let v = other.direction { result.direction = v }
+        if let v = other.paddingTop { result.paddingTop = v }
+        if let v = other.paddingBottom { result.paddingBottom = v }
+        if let v = other.paddingLeft { result.paddingLeft = v }
+        if let v = other.paddingRight { result.paddingRight = v }
+        if let v = other.borderWidth { result.borderWidth = v }
+        if let v = other.fontFamily { result.fontFamily = v }
         return result
     }
 }
@@ -113,6 +132,16 @@ private struct CSSRule {
     }
 }
 
+// MARK: - Font Face
+
+/// A parsed @font-face rule from CSS.
+struct CSSFontFace: Equatable {
+    let family: String       // font-family name
+    let sources: [String]    // src URLs (relative paths)
+    let weight: CSSFontWeight?
+    let style: CSSFontStyle?
+}
+
 // MARK: - CSS Stylesheet
 
 /// A parsed CSS stylesheet with fast class-based lookup.
@@ -121,6 +150,8 @@ struct CSSStylesheet {
     private var classRules: [String: CSSProperties] = [:]
     private var elementClassRules: [String: CSSProperties] = [:] // "element.class" key
     private var idRules: [String: CSSProperties] = [:]
+    /// Parsed @font-face rules.
+    fileprivate(set) var fontFaces: [CSSFontFace] = []
 
     /// Resolve styles for an element given its tag name, CSS classes, and optional ID.
     func resolve(element: String, classes: [String], id: String? = nil) -> CSSProperties {
@@ -168,6 +199,7 @@ struct CSSStylesheet {
         for (key, props) in other.idRules {
             idRules[key] = (idRules[key] ?? .empty).merging(with: props)
         }
+        fontFaces.append(contentsOf: other.fontFaces)
     }
 
     fileprivate mutating func addRule(_ rule: CSSRule) {
@@ -193,13 +225,19 @@ enum CSSParser {
     static func parse(_ css: String) -> CSSStylesheet {
         var stylesheet = CSSStylesheet()
         let cleaned = stripComments(css)
-        let rules = extractRules(from: cleaned)
+        let extracted = extractRules(from: cleaned)
 
-        for (selectorText, declarationText) in rules {
+        for (selectorText, declarationText) in extracted.rules {
             let properties = parseDeclarations(declarationText)
             let selectors = parseSelectors(selectorText)
             for selector in selectors {
                 stylesheet.addRule(CSSRule(selector: selector, properties: properties))
+            }
+        }
+
+        for fontFaceDecl in extracted.fontFaces {
+            if let fontFace = parseFontFace(fontFaceDecl) {
+                stylesheet.fontFaces.append(fontFace)
             }
         }
 
@@ -236,9 +274,14 @@ enum CSSParser {
 
     // MARK: - Rule Extraction
 
-    /// Extract (selector, declarations) pairs, skipping @-blocks.
-    private static func extractRules(from css: String) -> [(String, String)] {
+    private struct ExtractedRules {
         var rules: [(String, String)] = []
+        var fontFaces: [String] = []
+    }
+
+    /// Extract (selector, declarations) pairs. Intercepts @font-face; skips other @-blocks.
+    private static func extractRules(from css: String) -> ExtractedRules {
+        var extracted = ExtractedRules()
         var i = css.startIndex
         var selectorBuffer = ""
 
@@ -246,7 +289,31 @@ enum CSSParser {
             let ch = css[i]
 
             if ch == "@" {
-                // Skip @-block by counting braces
+                // Check for @font-face
+                let remaining = css[i...]
+                if remaining.lowercased().hasPrefix("@font-face") {
+                    // Advance past "@font-face"
+                    i = css.index(i, offsetBy: 10, limitedBy: css.endIndex) ?? css.endIndex
+                    // Find opening brace
+                    while i < css.endIndex && css[i] != "{" { i = css.index(after: i) }
+                    if i < css.endIndex {
+                        i = css.index(after: i) // skip {
+                        var braceDepth = 1
+                        var declarationBuffer = ""
+                        while i < css.endIndex && braceDepth > 0 {
+                            let c = css[i]
+                            if c == "{" { braceDepth += 1 }
+                            else if c == "}" { braceDepth -= 1 }
+                            if braceDepth > 0 { declarationBuffer.append(c) }
+                            i = css.index(after: i)
+                        }
+                        extracted.fontFaces.append(declarationBuffer)
+                    }
+                    selectorBuffer = ""
+                    continue
+                }
+
+                // Skip other @-blocks by counting braces
                 var braceDepth = 0
                 var foundBrace = false
                 while i < css.endIndex {
@@ -288,7 +355,7 @@ enum CSSParser {
 
                 let selector = selectorBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !selector.isEmpty {
-                    rules.append((selector, declarationBuffer))
+                    extracted.rules.append((selector, declarationBuffer))
                 }
                 selectorBuffer = ""
                 continue
@@ -298,7 +365,7 @@ enum CSSParser {
             i = css.index(after: i)
         }
 
-        return rules
+        return extracted
     }
 
     // MARK: - Selector Parsing
@@ -449,6 +516,42 @@ enum CSSParser {
             case "height":
                 if let length = parseLength(value) { props.height = length }
 
+            case "color":
+                if let c = parseColor(value) { props.color = c }
+
+            case "background-color":
+                if let c = parseColor(value) { props.backgroundColor = c }
+
+            case "background":
+                parseBackgroundShorthand(value, into: &props)
+
+            case "direction":
+                if value == "rtl" { props.direction = .rtl }
+                else if value == "ltr" { props.direction = .ltr }
+
+            case "padding-top":
+                if let length = parseLength(value) { props.paddingTop = length }
+            case "padding-bottom":
+                if let length = parseLength(value) { props.paddingBottom = length }
+            case "padding-left":
+                if let length = parseLength(value) { props.paddingLeft = length }
+            case "padding-right":
+                if let length = parseLength(value) { props.paddingRight = length }
+            case "padding":
+                parsePaddingShorthand(value, into: &props)
+
+            case "border":
+                parseBorderShorthand(value, into: &props)
+            case "border-width":
+                if let length = parseLength(value) { props.borderWidth = length }
+
+            case "font-family":
+                let family = value.split(separator: ",").first?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "'", with: "")
+                    .replacingOccurrences(of: "\"", with: "")
+                if let family, !family.isEmpty { props.fontFamily = family }
+
             default:
                 break
             }
@@ -526,4 +629,306 @@ enum CSSParser {
             break
         }
     }
+
+    // MARK: - Padding Shorthand
+
+    /// Parse `padding` shorthand into individual padding properties.
+    private static func parsePaddingShorthand(_ value: String, into props: inout CSSProperties) {
+        let parts = value.split(whereSeparator: { $0.isWhitespace })
+            .map { String($0) }
+            .compactMap { parseLength($0) }
+
+        switch parts.count {
+        case 1:
+            props.paddingTop = parts[0]; props.paddingRight = parts[0]
+            props.paddingBottom = parts[0]; props.paddingLeft = parts[0]
+        case 2:
+            props.paddingTop = parts[0]; props.paddingBottom = parts[0]
+            props.paddingRight = parts[1]; props.paddingLeft = parts[1]
+        case 3:
+            props.paddingTop = parts[0]; props.paddingRight = parts[1]
+            props.paddingLeft = parts[1]; props.paddingBottom = parts[2]
+        case 4:
+            props.paddingTop = parts[0]; props.paddingRight = parts[1]
+            props.paddingBottom = parts[2]; props.paddingLeft = parts[3]
+        default: break
+        }
+    }
+
+    // MARK: - Border Shorthand
+
+    /// Extract border-width from `border` shorthand (e.g. "1px solid black").
+    private static func parseBorderShorthand(_ value: String, into props: inout CSSProperties) {
+        let parts = value.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        for part in parts {
+            if let length = parseLength(part) {
+                props.borderWidth = length
+                return
+            }
+        }
+    }
+
+    // MARK: - Background Shorthand
+
+    /// Extract background-color from `background` shorthand.
+    private static func parseBackgroundShorthand(_ value: String, into props: inout CSSProperties) {
+        // Try the whole value as a color first (most common case: "background: #fff")
+        if let c = parseColor(value) {
+            props.backgroundColor = c
+            return
+        }
+        // Try each token
+        let parts = value.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        for part in parts {
+            if let c = parseColor(part) {
+                props.backgroundColor = c
+                return
+            }
+        }
+    }
+
+    // MARK: - Font Face Parsing
+
+    /// Parse a @font-face declaration block into a CSSFontFace.
+    private static func parseFontFace(_ declarations: String) -> CSSFontFace? {
+        var family: String?
+        var sources: [String] = []
+        var weight: CSSFontWeight?
+        var style: CSSFontStyle?
+
+        let decls = declarations.split(separator: ";")
+        for decl in decls {
+            guard let colonIndex = decl.firstIndex(of: ":") else { continue }
+            let property = decl[decl.startIndex..<colonIndex]
+                .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = decl[decl.index(after: colonIndex)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            switch property {
+            case "font-family":
+                family = value.replacingOccurrences(of: "'", with: "")
+                    .replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            case "src":
+                // Extract url() values
+                var searchStart = value.startIndex
+                while let urlRange = value.range(of: "url(", range: searchStart..<value.endIndex) {
+                    let afterUrl = urlRange.upperBound
+                    if let closeRange = value.range(of: ")", range: afterUrl..<value.endIndex) {
+                        var urlStr = String(value[afterUrl..<closeRange.lowerBound])
+                        urlStr = urlStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .replacingOccurrences(of: "'", with: "")
+                            .replacingOccurrences(of: "\"", with: "")
+                        if !urlStr.isEmpty { sources.append(urlStr) }
+                        searchStart = closeRange.upperBound
+                    } else { break }
+                }
+            case "font-weight":
+                let v = value.lowercased()
+                if v == "bold" || v == "bolder" || (Int(v) ?? 0) >= 600 { weight = .bold }
+                else { weight = .normal }
+            case "font-style":
+                let v = value.lowercased()
+                if v == "italic" || v == "oblique" { style = .italic }
+                else { style = .normal }
+            default: break
+            }
+        }
+
+        guard let family, !sources.isEmpty else { return nil }
+        return CSSFontFace(family: family, sources: sources, weight: weight, style: style)
+    }
+
+    // MARK: - CSS Color Parsing
+
+    /// Parse a CSS color value into a UIColor.
+    static func parseColor(_ value: String) -> UIColor? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed.isEmpty || trimmed == "inherit" || trimmed == "currentcolor" || trimmed == "initial" { return nil }
+        if trimmed == "transparent" { return .clear }
+
+        // Hex colors
+        if trimmed.hasPrefix("#") {
+            return parseHexColor(String(trimmed.dropFirst()))
+        }
+
+        // rgb() / rgba()
+        if trimmed.hasPrefix("rgb") {
+            return parseRGBFunction(trimmed)
+        }
+
+        // Named colors
+        return namedColors[trimmed]
+    }
+
+    private static func parseHexColor(_ hex: String) -> UIColor? {
+        let chars = Array(hex)
+        let r, g, b, a: CGFloat
+
+        switch chars.count {
+        case 3: // #RGB
+            guard let rv = hexVal(chars[0]), let gv = hexVal(chars[1]), let bv = hexVal(chars[2]) else { return nil }
+            r = CGFloat(rv * 17) / 255; g = CGFloat(gv * 17) / 255; b = CGFloat(bv * 17) / 255; a = 1
+        case 4: // #RGBA
+            guard let rv = hexVal(chars[0]), let gv = hexVal(chars[1]),
+                  let bv = hexVal(chars[2]), let av = hexVal(chars[3]) else { return nil }
+            r = CGFloat(rv * 17) / 255; g = CGFloat(gv * 17) / 255; b = CGFloat(bv * 17) / 255; a = CGFloat(av * 17) / 255
+        case 6: // #RRGGBB
+            guard let rv = hexByte(chars[0], chars[1]), let gv = hexByte(chars[2], chars[3]),
+                  let bv = hexByte(chars[4], chars[5]) else { return nil }
+            r = CGFloat(rv) / 255; g = CGFloat(gv) / 255; b = CGFloat(bv) / 255; a = 1
+        case 8: // #RRGGBBAA
+            guard let rv = hexByte(chars[0], chars[1]), let gv = hexByte(chars[2], chars[3]),
+                  let bv = hexByte(chars[4], chars[5]), let av = hexByte(chars[6], chars[7]) else { return nil }
+            r = CGFloat(rv) / 255; g = CGFloat(gv) / 255; b = CGFloat(bv) / 255; a = CGFloat(av) / 255
+        default: return nil
+        }
+        return UIColor(red: r, green: g, blue: b, alpha: a)
+    }
+
+    private static func hexVal(_ c: Character) -> Int? {
+        if let v = c.hexDigitValue { return v }
+        return nil
+    }
+
+    private static func hexByte(_ c1: Character, _ c2: Character) -> Int? {
+        guard let v1 = c1.hexDigitValue, let v2 = c2.hexDigitValue else { return nil }
+        return v1 * 16 + v2
+    }
+
+    private static func parseRGBFunction(_ value: String) -> UIColor? {
+        // Extract content between parentheses
+        guard let openParen = value.firstIndex(of: "("),
+              let closeParen = value.lastIndex(of: ")") else { return nil }
+        let inner = value[value.index(after: openParen)..<closeParen]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Split on comma or whitespace (modern syntax uses spaces)
+        let separator: Character = inner.contains(",") ? "," : " "
+        let parts = inner.split(separator: separator)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "/" }
+
+        guard parts.count >= 3 else { return nil }
+
+        func parseComponent(_ s: String) -> CGFloat? {
+            if s.hasSuffix("%") {
+                guard let v = Double(s.dropLast()) else { return nil }
+                return CGFloat(v) / 100.0
+            }
+            guard let v = Double(s) else { return nil }
+            return CGFloat(v) / 255.0
+        }
+
+        guard let r = parseComponent(parts[0]),
+              let g = parseComponent(parts[1]),
+              let b = parseComponent(parts[2]) else { return nil }
+
+        var a: CGFloat = 1
+        if parts.count >= 4 {
+            let alphaStr = parts[3]
+            if alphaStr.hasSuffix("%") {
+                if let v = Double(alphaStr.dropLast()) { a = CGFloat(v) / 100.0 }
+            } else if let v = Double(alphaStr) {
+                a = v > 1 ? CGFloat(v) / 255.0 : CGFloat(v)
+            }
+        }
+
+        return UIColor(red: min(1, max(0, r)), green: min(1, max(0, g)),
+                       blue: min(1, max(0, b)), alpha: min(1, max(0, a)))
+    }
+
+    // MARK: - Named Colors
+
+    private static let namedColors: [String: UIColor] = {
+        func c(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> UIColor {
+            UIColor(red: CGFloat(r)/255, green: CGFloat(g)/255, blue: CGFloat(b)/255, alpha: 1)
+        }
+        return [
+            // Basic
+            "black": c(0,0,0), "white": c(255,255,255), "red": c(255,0,0),
+            "green": c(0,128,0), "blue": c(0,0,255), "yellow": c(255,255,0),
+            "cyan": c(0,255,255), "magenta": c(255,0,255), "aqua": c(0,255,255),
+            "fuchsia": c(255,0,255), "lime": c(0,255,0), "maroon": c(128,0,0),
+            "navy": c(0,0,128), "olive": c(128,128,0), "purple": c(128,0,128),
+            "teal": c(0,128,128), "silver": c(192,192,192), "gray": c(128,128,128),
+            "grey": c(128,128,128),
+            // Extended - Reds
+            "indianred": c(205,92,92), "lightcoral": c(240,128,128),
+            "salmon": c(250,128,114), "darksalmon": c(233,150,122),
+            "lightsalmon": c(255,160,122), "crimson": c(220,20,60),
+            "firebrick": c(178,34,34), "darkred": c(139,0,0),
+            // Extended - Pinks
+            "pink": c(255,192,203), "lightpink": c(255,182,193),
+            "hotpink": c(255,105,180), "deeppink": c(255,20,147),
+            "mediumvioletred": c(199,21,133), "palevioletred": c(219,112,147),
+            // Extended - Oranges
+            "orange": c(255,165,0), "darkorange": c(255,140,0),
+            "orangered": c(255,69,0), "tomato": c(255,99,71), "coral": c(255,127,80),
+            // Extended - Yellows
+            "gold": c(255,215,0), "khaki": c(240,230,140), "darkkhaki": c(189,183,107),
+            "peachpuff": c(255,218,185), "moccasin": c(255,228,181),
+            "papayawhip": c(255,239,213), "lemonchiffon": c(255,250,205),
+            "lightyellow": c(255,255,224), "wheat": c(245,222,179),
+            "cornsilk": c(255,248,220),
+            // Extended - Greens
+            "limegreen": c(50,205,50), "lightgreen": c(144,238,144),
+            "palegreen": c(152,251,152), "darkgreen": c(0,100,0),
+            "forestgreen": c(34,139,34), "seagreen": c(46,139,87),
+            "mediumseagreen": c(60,179,113), "springgreen": c(0,255,127),
+            "mediumspringgreen": c(0,250,154), "mediumaquamarine": c(102,205,170),
+            "darkseagreen": c(143,188,143), "yellowgreen": c(154,205,50),
+            "olivedrab": c(107,142,35), "darkolivegreen": c(85,107,47),
+            "greenyellow": c(173,255,47), "chartreuse": c(127,255,0),
+            "lawngreen": c(124,252,0),
+            // Extended - Cyans
+            "lightcyan": c(224,255,255), "darkturquoise": c(0,206,209),
+            "turquoise": c(64,224,208), "mediumturquoise": c(72,209,204),
+            "paleturquoise": c(175,238,238), "aquamarine": c(127,255,212),
+            "darkcyan": c(0,139,139), "cadetblue": c(95,158,160),
+            "lightseagreen": c(32,178,170),
+            // Extended - Blues
+            "lightblue": c(173,216,230), "skyblue": c(135,206,235),
+            "lightskyblue": c(135,206,250), "deepskyblue": c(0,191,255),
+            "steelblue": c(70,130,180), "lightsteelblue": c(176,196,222),
+            "dodgerblue": c(30,144,255), "cornflowerblue": c(100,149,237),
+            "royalblue": c(65,105,225), "mediumblue": c(0,0,205),
+            "darkblue": c(0,0,139), "midnightblue": c(25,25,112),
+            "powderblue": c(176,224,230), "aliceblue": c(240,248,255),
+            // Extended - Purples
+            "lavender": c(230,230,250), "thistle": c(216,191,216),
+            "plum": c(221,160,221), "violet": c(238,130,238),
+            "orchid": c(218,112,214), "mediumorchid": c(186,85,211),
+            "mediumpurple": c(147,112,219), "blueviolet": c(138,43,226),
+            "darkviolet": c(148,0,211), "darkorchid": c(153,50,204),
+            "darkmagenta": c(139,0,139), "rebeccapurple": c(102,51,153),
+            "indigo": c(75,0,130), "slateblue": c(106,90,205),
+            "mediumslateblue": c(123,104,238), "darkslateblue": c(72,61,139),
+            // Extended - Browns
+            "brown": c(165,42,42), "saddlebrown": c(139,69,19),
+            "sienna": c(160,82,45), "chocolate": c(210,105,30),
+            "peru": c(205,133,63), "sandybrown": c(244,164,96),
+            "goldenrod": c(218,165,32), "darkgoldenrod": c(184,134,11),
+            "burlywood": c(222,184,135), "tan": c(210,180,140),
+            "rosybrown": c(188,143,143), "bisque": c(255,228,196),
+            "blanchedalmond": c(255,235,205), "navajowhite": c(255,222,173),
+            "antiquewhite": c(250,235,215),
+            // Extended - Grays
+            "lightgray": c(211,211,211), "lightgrey": c(211,211,211),
+            "darkgray": c(169,169,169), "darkgrey": c(169,169,169),
+            "dimgray": c(105,105,105), "dimgrey": c(105,105,105),
+            "gainsboro": c(220,220,220), "whitesmoke": c(245,245,245),
+            "slategray": c(112,128,144), "slategrey": c(112,128,144),
+            "lightslategray": c(119,136,153), "lightslategrey": c(119,136,153),
+            "darkslategray": c(47,79,79), "darkslategrey": c(47,79,79),
+            // Extended - Whites
+            "snow": c(255,250,250), "honeydew": c(240,255,240),
+            "mintcream": c(245,255,250), "azure": c(240,255,255),
+            "ghostwhite": c(248,248,255), "floralwhite": c(255,250,240),
+            "ivory": c(255,255,240), "beige": c(245,245,220),
+            "linen": c(250,240,230), "oldlace": c(253,245,230),
+            "seashell": c(255,245,238), "mistyrose": c(255,228,225),
+            "lavenderblush": c(255,240,245),
+        ]
+    }()
 }

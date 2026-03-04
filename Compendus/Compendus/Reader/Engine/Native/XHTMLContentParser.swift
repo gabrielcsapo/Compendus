@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import UIKit
 import SwiftSoup
 import os.log
 
@@ -17,6 +18,7 @@ class XHTMLContentParser {
     private let data: Data
     private let baseURL: URL
     private let stylesheet: CSSStylesheet?
+    private var defaultWritingDirection: NSWritingDirection?
 
     // Block-level tag names
     private static let blockTags: Set<String> = [
@@ -72,6 +74,24 @@ class XHTMLContentParser {
                 body = document
             }
 
+            // Detect default writing direction from <html> or <body> dir attribute
+            if let htmlEl = try? document.select("html").first(),
+               let dir = try? htmlEl.attr("dir"), !dir.isEmpty {
+                switch dir.lowercased() {
+                case "rtl": defaultWritingDirection = .rightToLeft
+                case "ltr": defaultWritingDirection = .leftToRight
+                default: break
+                }
+            }
+            if defaultWritingDirection == nil,
+               let dir = try? body.attr("dir"), !dir.isEmpty {
+                switch dir.lowercased() {
+                case "rtl": defaultWritingDirection = .rightToLeft
+                case "ltr": defaultWritingDirection = .leftToRight
+                default: break
+                }
+            }
+
             let nodes = processChildren(of: body)
             parserLogger.info("Parsed XHTML: \(nodes.count) top-level nodes from \(self.data.count) bytes")
             if nodes.isEmpty {
@@ -125,9 +145,10 @@ class XHTMLContentParser {
                         nodes.append(node)
                     }
                 } else {
-                    // Inline element — resolve its own styles/link, then collect children
-                    let (styles, link) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
-                    let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link)
+                    // Inline element — resolve its own styles/link/color, then collect children
+                    let (styles, link, color, family) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
+                    let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link,
+                                                 inheritedColor: color, inheritedFontFamily: family)
                     pendingRuns.append(contentsOf: runs)
                 }
             }
@@ -258,8 +279,10 @@ class XHTMLContentParser {
     // MARK: - Inline Content Collection
 
     /// Resolve an inline element's tag-based and CSS-based styles and link.
-    /// Returns the merged styles and link to pass to child content.
-    private func resolveInlineStyles(for el: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?) -> (styles: Set<TextStyle>, link: URL?) {
+    /// Returns the merged styles, link, textColor, and fontFamily to pass to child content.
+    private func resolveInlineStyles(for el: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?,
+                                     inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil)
+        -> (styles: Set<TextStyle>, link: URL?, textColor: UIColor?, fontFamily: String?) {
         let tag = el.tagName().lowercased()
         var styles = inheritedStyles
         var link = inheritedLink
@@ -293,6 +316,10 @@ class XHTMLContentParser {
         if cssProps.textDecoration == .underline { styles.insert(.underline) }
         if cssProps.textDecoration == .lineThrough { styles.insert(.strikethrough) }
 
+        // Color inheritance: CSS override > inherited
+        let textColor = cssProps.color ?? inheritedColor
+        let fontFamily = cssProps.fontFamily ?? inheritedFontFamily
+
         // Link handling
         if tag == "a" {
             if let href = try? el.attr("href"), !href.isEmpty {
@@ -308,12 +335,13 @@ class XHTMLContentParser {
             }
         }
 
-        return (styles, link)
+        return (styles, link, textColor, fontFamily)
     }
 
     /// Recursively collect TextRuns from an element's inline content.
     /// If a block element is encountered inside inline context, it gets collected separately.
-    private func collectInlineRuns(from element: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?) -> [TextRun] {
+    private func collectInlineRuns(from element: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?,
+                                   inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil) -> [TextRun] {
         var runs: [TextRun] = []
 
         for child in element.getChildNodes() {
@@ -321,7 +349,8 @@ class XHTMLContentParser {
                 let isPreformatted = isPreformattedContext(element)
                 let text = isPreformatted ? textNode.getWholeText() : collapseWhitespace(textNode.getWholeText())
                 if !text.isEmpty {
-                    runs.append(TextRun(text: text, styles: inheritedStyles, link: inheritedLink))
+                    runs.append(TextRun(text: text, styles: inheritedStyles, link: inheritedLink,
+                                        textColor: inheritedColor, fontFamily: inheritedFontFamily))
                 }
             } else if let el = child as? Element {
                 let tag = el.tagName().lowercased()
@@ -335,7 +364,8 @@ class XHTMLContentParser {
 
                 // Handle <br> as newline
                 if tag == "br" {
-                    runs.append(TextRun(text: "\n", styles: inheritedStyles, link: inheritedLink))
+                    runs.append(TextRun(text: "\n", styles: inheritedStyles, link: inheritedLink,
+                                        textColor: inheritedColor, fontFamily: inheritedFontFamily))
                     continue
                 }
 
@@ -343,20 +373,24 @@ class XHTMLContentParser {
                 if tag == "img" || tag == "image" {
                     let alt = try? el.attr("alt")
                     if let alt, !alt.isEmpty {
-                        runs.append(TextRun(text: "[\(alt)]", styles: inheritedStyles, link: inheritedLink))
+                        runs.append(TextRun(text: "[\(alt)]", styles: inheritedStyles, link: inheritedLink,
+                                            textColor: inheritedColor, fontFamily: inheritedFontFamily))
                     }
                     continue
                 }
 
                 // If it's a block tag inside inline context, extract inline content
                 if isBlockTag(tag) && !Self.inlineTags.contains(tag) {
-                    let blockRuns = collectInlineRuns(from: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink)
+                    let blockRuns = collectInlineRuns(from: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink,
+                                                     inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily)
                     runs.append(contentsOf: blockRuns)
                     continue
                 }
 
-                // Inline element — resolve styles and link
-                let (newStyles, newLink) = resolveInlineStyles(for: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink)
+                // Inline element — resolve styles, link, color, fontFamily
+                let (newStyles, newLink, newColor, newFontFamily) = resolveInlineStyles(
+                    for: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink,
+                    inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily)
 
                 // CSS display: none check
                 let cssProps = resolveCSSProperties(for: el)
@@ -364,7 +398,8 @@ class XHTMLContentParser {
                     continue
                 }
 
-                let childRuns = collectInlineRuns(from: el, inheritedStyles: newStyles, inheritedLink: newLink)
+                let childRuns = collectInlineRuns(from: el, inheritedStyles: newStyles, inheritedLink: newLink,
+                                                  inheritedColor: newColor, inheritedFontFamily: newFontFamily)
                 runs.append(contentsOf: childRuns)
             }
         }
@@ -440,9 +475,10 @@ class XHTMLContentParser {
                         nodes.append(node)
                     }
                 } else {
-                    // Resolve inline element's own styles/link before recursing
-                    let (styles, link) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
-                    let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link)
+                    // Resolve inline element's own styles/link/color before recursing
+                    let (styles, link, color, family) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
+                    let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link,
+                                                 inheritedColor: color, inheritedFontFamily: family)
                     pendingRuns.append(contentsOf: runs)
                 }
             }
@@ -520,7 +556,9 @@ class XHTMLContentParser {
             let tag = td.tagName().lowercased()
             if tag == "td" || tag == "th" {
                 let runs = collectInlineRuns(from: td, inheritedStyles: tag == "th" ? [.bold] : [], inheritedLink: nil)
-                cells.append(TableCell(isHeader: tag == "th", runs: runs))
+                let colspan = max(1, Int((try? td.attr("colspan")) ?? "1") ?? 1)
+                let rowspan = max(1, Int((try? td.attr("rowspan")) ?? "1") ?? 1)
+                cells.append(TableCell(isHeader: tag == "th", runs: runs, colspan: colspan, rowspan: rowspan))
             }
         }
 
@@ -749,10 +787,29 @@ class XHTMLContentParser {
         if let mr = cssProps.marginRight { blockStyle.marginRight = mr }
         if let d = cssProps.display { blockStyle.display = d }
         if let lst = cssProps.listStyleType { blockStyle.listStyleType = lst }
+        if let bg = cssProps.backgroundColor { blockStyle.backgroundColor = bg }
+        if let pt = cssProps.paddingTop { blockStyle.paddingTop = pt }
+        if let pb = cssProps.paddingBottom { blockStyle.paddingBottom = pb }
+        if let pl = cssProps.paddingLeft { blockStyle.paddingLeft = pl }
+        if let pr = cssProps.paddingRight { blockStyle.paddingRight = pr }
+
+        // Writing direction: HTML dir attribute takes priority over CSS
+        if let dirAttr = try? element.attr("dir"), !dirAttr.isEmpty {
+            switch dirAttr.lowercased() {
+            case "rtl": blockStyle.writingDirection = .rightToLeft
+            case "ltr": blockStyle.writingDirection = .leftToRight
+            default: break
+            }
+        } else if let dir = cssProps.direction {
+            blockStyle.writingDirection = dir == .rtl ? .rightToLeft : .leftToRight
+        } else if let defaultDir = defaultWritingDirection {
+            blockStyle.writingDirection = defaultDir
+        }
+
         return blockStyle
     }
 
-    /// Apply CSS inline styles (bold, italic, etc.) from a block element to its runs.
+    /// Apply CSS inline styles (bold, italic, color, etc.) from a block element to its runs.
     private func applyBlockCSSInlineStyles(_ el: Element, to runs: inout [TextRun]) {
         let cssProps = resolveCSSProperties(for: el)
         var additionalStyles: Set<TextStyle> = []
@@ -761,10 +818,15 @@ class XHTMLContentParser {
         if cssProps.fontVariant == .smallCaps { additionalStyles.insert(.smallCaps) }
         if cssProps.textTransform == .uppercase { additionalStyles.insert(.uppercase) }
 
-        if !additionalStyles.isEmpty {
+        let blockColor = cssProps.color
+        let blockFontFamily = cssProps.fontFamily
+
+        if !additionalStyles.isEmpty || blockColor != nil || blockFontFamily != nil {
             runs = runs.map { run in
                 var newRun = run
                 newRun.styles = newRun.styles.union(additionalStyles)
+                if newRun.textColor == nil, let c = blockColor { newRun.textColor = c }
+                if newRun.fontFamily == nil, let f = blockFontFamily { newRun.fontFamily = f }
                 return newRun
             }
         }
@@ -826,22 +888,24 @@ class XHTMLContentParser {
         var result = runs
 
         // Trim leading whitespace from first run
-        if let first = result.first {
+        if var first = result.first {
             let trimmed = first.text.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
             if trimmed.isEmpty {
                 result.removeFirst()
             } else if trimmed != first.text {
-                result[0] = TextRun(text: trimmed, styles: first.styles, link: first.link)
+                first.text = trimmed
+                result[0] = first
             }
         }
 
         // Trim trailing whitespace from last run
-        if let last = result.last {
+        if var last = result.last {
             let trimmed = last.text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
             if trimmed.isEmpty {
                 result.removeLast()
             } else if trimmed != last.text {
-                result[result.count - 1] = TextRun(text: trimmed, styles: last.styles, link: last.link)
+                last.text = trimmed
+                result[result.count - 1] = last
             }
         }
 

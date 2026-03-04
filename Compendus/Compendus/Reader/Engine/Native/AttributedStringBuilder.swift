@@ -267,6 +267,21 @@ class AttributedStringBuilder {
         let paraStyle = makeParagraphStyle()
 
         // Apply CSS block styles
+        applyBlockStyleToParaStyle(blockStyle, paraStyle: paraStyle, depth: depth)
+
+        let startIndex = result.length
+        appendRuns(runs, to: result, baseFont: font, paragraphStyle: paraStyle)
+        result.append(NSAttributedString(string: "\n"))
+
+        // Apply block background color
+        if let bg = blockStyle.backgroundColor {
+            let range = NSRange(location: startIndex, length: result.length - startIndex)
+            result.addAttribute(.backgroundColor, value: bg, range: range)
+        }
+    }
+
+    /// Apply common block style properties (alignment, margins, padding, direction) to a paragraph style.
+    private func applyBlockStyleToParaStyle(_ blockStyle: BlockStyle, paraStyle: NSMutableParagraphStyle, depth: Int = 0) {
         if let align = blockStyle.textAlign {
             switch align {
             case .center: paraStyle.alignment = .center
@@ -292,7 +307,6 @@ class AttributedStringBuilder {
         if let marginLeft = blockStyle.marginLeft {
             let leftIndent = max(0, marginLeft.resolve(relativeTo: fontSize))
             paraStyle.headIndent = leftIndent
-            // Offset firstLineHeadIndent by the left margin if text-indent was also set
             if let indent = blockStyle.textIndent {
                 paraStyle.firstLineHeadIndent = max(0, leftIndent + indent.resolve(relativeTo: fontSize))
             } else if depth == 0 {
@@ -300,8 +314,26 @@ class AttributedStringBuilder {
             }
         }
 
-        appendRuns(runs, to: result, baseFont: font, paragraphStyle: paraStyle)
-        result.append(NSAttributedString(string: "\n"))
+        // CSS padding (approximated as additional spacing/indent)
+        if let pl = blockStyle.paddingLeft {
+            let padding = pl.resolve(relativeTo: fontSize)
+            paraStyle.headIndent += padding
+            paraStyle.firstLineHeadIndent += padding
+        }
+        if let pr = blockStyle.paddingRight {
+            paraStyle.tailIndent = -pr.resolve(relativeTo: fontSize)
+        }
+        if let pt = blockStyle.paddingTop {
+            paraStyle.paragraphSpacingBefore += pt.resolve(relativeTo: fontSize)
+        }
+        if let pb = blockStyle.paddingBottom {
+            paraStyle.paragraphSpacing += pb.resolve(relativeTo: fontSize)
+        }
+
+        // Writing direction
+        if let dir = blockStyle.writingDirection {
+            paraStyle.baseWritingDirection = dir
+        }
     }
 
     // MARK: - Headings
@@ -324,8 +356,9 @@ class AttributedStringBuilder {
         paraStyle.paragraphSpacingBefore = headingSize * 0.6
         paraStyle.paragraphSpacing = headingSize * 0.5
         paraStyle.hyphenationFactor = 0
+        paraStyle.alignment = .natural
 
-        // Apply CSS alignment (e.g. centered chapter titles)
+        // Apply CSS overrides (alignment, margins, padding, direction)
         if let align = blockStyle.textAlign {
             switch align {
             case .center: paraStyle.alignment = .center
@@ -333,19 +366,35 @@ class AttributedStringBuilder {
             case .left: paraStyle.alignment = .left
             case .justify: paraStyle.alignment = .justified
             }
-        } else {
-            paraStyle.alignment = .natural
         }
-
         if let marginTop = blockStyle.marginTop {
             paraStyle.paragraphSpacingBefore = max(0, marginTop.resolve(relativeTo: fontSize))
         }
         if let marginBottom = blockStyle.marginBottom {
             paraStyle.paragraphSpacing = max(0, marginBottom.resolve(relativeTo: fontSize))
         }
+        if let dir = blockStyle.writingDirection {
+            paraStyle.baseWritingDirection = dir
+        }
+        if let pl = blockStyle.paddingLeft {
+            paraStyle.headIndent += pl.resolve(relativeTo: fontSize)
+            paraStyle.firstLineHeadIndent += pl.resolve(relativeTo: fontSize)
+        }
+        if let pt = blockStyle.paddingTop {
+            paraStyle.paragraphSpacingBefore += pt.resolve(relativeTo: fontSize)
+        }
+        if let pb = blockStyle.paddingBottom {
+            paraStyle.paragraphSpacing += pb.resolve(relativeTo: fontSize)
+        }
 
+        let startIndex = result.length
         appendRuns(runs, to: result, baseFont: headingFont, paragraphStyle: paraStyle)
         result.append(NSAttributedString(string: "\n"))
+
+        if let bg = blockStyle.backgroundColor {
+            let range = NSRange(location: startIndex, length: result.length - startIndex)
+            result.addAttribute(.backgroundColor, value: bg, range: range)
+        }
     }
 
     // MARK: - Images
@@ -803,6 +852,9 @@ class AttributedStringBuilder {
                     case .justify: paraStyle.alignment = .justified
                     }
                 }
+                if let dir = blockStyle.writingDirection {
+                    paraStyle.baseWritingDirection = dir
+                }
 
                 // Blockquote text is italic
                 let italicRuns = runs.map { run -> TextRun in
@@ -859,6 +911,22 @@ class AttributedStringBuilder {
     // MARK: - Tables
 
     private func appendTable(rows: [TableRow], to result: NSMutableAttributedString) {
+        guard !rows.isEmpty else { return }
+
+        // Check for complex spanning — fall back to simple rendering
+        let hasSpans = rows.contains { row in
+            row.cells.contains { $0.colspan > 1 || $0.rowspan > 1 }
+        }
+        if hasSpans {
+            appendTableSimple(rows: rows, to: result)
+            return
+        }
+
+        appendTableGrid(rows: rows, to: result)
+    }
+
+    /// Simple tab-separated table rendering (fallback for complex tables with spans).
+    private func appendTableSimple(rows: [TableRow], to result: NSMutableAttributedString) {
         let paraStyle = NSMutableParagraphStyle()
         paraStyle.lineHeightMultiple = lineHeight
         paraStyle.paragraphSpacing = fontSize * 0.25
@@ -867,20 +935,127 @@ class AttributedStringBuilder {
             let cellTexts = row.cells.map { cell -> String in
                 cell.runs.map(\.text).joined()
             }
-
             let rowFont = row.cells.first?.isHeader == true ? boldFont : font
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: rowFont,
                 .foregroundColor: textColor,
                 .paragraphStyle: paraStyle
             ]
-
             let rowText = cellTexts.joined(separator: "\t|\t")
             result.append(NSAttributedString(string: rowText + "\n", attributes: attrs))
         }
-
-        // Add a separator after the table
         result.append(NSAttributedString(string: "\n"))
+    }
+
+    /// Grid-based table rendering with column width calculation and tab stops.
+    private func appendTableGrid(rows: [TableRow], to result: NSMutableAttributedString) {
+        let columnCount = rows.map { $0.cells.count }.max() ?? 0
+        guard columnCount > 0 else { return }
+
+        // Measure natural width of each column
+        let cellPadding: CGFloat = fontSize * 0.8
+        let maxCellWidth = max(fontSize * 3, (contentWidth - cellPadding * CGFloat(columnCount - 1)) / CGFloat(columnCount))
+        var columnWidths = Array(repeating: CGFloat(0), count: columnCount)
+
+        for row in rows {
+            for (col, cell) in row.cells.enumerated() where col < columnCount {
+                let text = cell.runs.map(\.text).joined()
+                let cellFont = cell.isHeader ? boldFont : font
+                let size = (text as NSString).size(withAttributes: [.font: cellFont])
+                columnWidths[col] = min(max(columnWidths[col], size.width + cellPadding), maxCellWidth)
+            }
+        }
+
+        // Ensure minimum column width
+        let minColWidth = fontSize * 2
+        columnWidths = columnWidths.map { max($0, minColWidth) }
+
+        // Scale if total exceeds content width
+        let totalWidth = columnWidths.reduce(0, +)
+        if totalWidth > contentWidth && totalWidth > 0 {
+            let scale = contentWidth / totalWidth
+            columnWidths = columnWidths.map { $0 * scale }
+        }
+
+        // Build tab stops from cumulative column positions
+        var tabStops: [NSTextTab] = []
+        var cumulative: CGFloat = 0
+        for width in columnWidths {
+            cumulative += width
+            tabStops.append(NSTextTab(textAlignment: .left, location: cumulative))
+        }
+
+        // Render each row
+        for (rowIndex, row) in rows.enumerated() {
+            let isHeaderRow = row.cells.first?.isHeader == true
+
+            let paraStyle = NSMutableParagraphStyle()
+            paraStyle.lineHeightMultiple = lineHeight
+            paraStyle.tabStops = tabStops
+            paraStyle.defaultTabInterval = maxCellWidth
+            paraStyle.paragraphSpacing = fontSize * 0.15
+            paraStyle.paragraphSpacingBefore = rowIndex == 0 ? fontSize * 0.3 : 0
+
+            // Build the row text with tab separators
+            let rowStr = NSMutableAttributedString()
+            for (col, cell) in row.cells.enumerated() {
+                if col > 0 {
+                    rowStr.append(NSAttributedString(string: "\t", attributes: [
+                        .font: font, .foregroundColor: textColor, .paragraphStyle: paraStyle
+                    ]))
+                }
+                // Render cell content with proper styles
+                let cellFont = cell.isHeader ? boldFont : font
+                for run in cell.runs {
+                    let runFont = fontForRun(run, baseFont: cellFont)
+                    var attrs: [NSAttributedString.Key: Any] = [
+                        .font: runFont,
+                        .foregroundColor: run.textColor ?? textColor,
+                        .paragraphStyle: paraStyle
+                    ]
+                    if run.styles.contains(.bold) || cell.isHeader {
+                        attrs[.font] = fontForRun(run, baseFont: boldFont)
+                    }
+                    if let link = run.link {
+                        attrs[.foregroundColor] = accentColor
+                        attrs[.link] = link
+                    }
+                    rowStr.append(NSAttributedString(string: run.text, attributes: attrs))
+                }
+                // If cell has no runs, add empty space
+                if cell.runs.isEmpty {
+                    rowStr.append(NSAttributedString(string: " ", attributes: [
+                        .font: cellFont, .foregroundColor: textColor, .paragraphStyle: paraStyle
+                    ]))
+                }
+            }
+            rowStr.append(NSAttributedString(string: "\n", attributes: [
+                .font: font, .foregroundColor: textColor, .paragraphStyle: paraStyle
+            ]))
+            result.append(rowStr)
+
+            // Header separator line
+            if isHeaderRow {
+                let sepStyle = NSMutableParagraphStyle()
+                sepStyle.lineHeightMultiple = 0.3
+                sepStyle.paragraphSpacing = fontSize * 0.15
+                let sepWidth = min(totalWidth, contentWidth)
+                let dashes = String(repeating: "\u{2500}", count: max(1, Int(sepWidth / fontSize * 1.5)))
+                let sepAttrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: fontSize * 0.5),
+                    .foregroundColor: textColor.withAlphaComponent(0.3),
+                    .paragraphStyle: sepStyle
+                ]
+                result.append(NSAttributedString(string: dashes + "\n", attributes: sepAttrs))
+            }
+        }
+
+        // Table bottom spacing
+        let bottomStyle = NSMutableParagraphStyle()
+        bottomStyle.paragraphSpacing = fontSize * 0.3
+        result.append(NSAttributedString(string: "\n", attributes: [
+            .font: font, .paragraphStyle: bottomStyle
+        ]))
     }
 
     // MARK: - Text Run Rendering
@@ -889,7 +1064,7 @@ class AttributedStringBuilder {
                             baseFont: UIFont, paragraphStyle: NSParagraphStyle) {
         for run in runs {
             var displayText = run.text
-            let runFont: UIFont
+            var runFont: UIFont
 
             // Handle small-caps: uppercase text + smaller font
             if run.styles.contains(.smallCaps) {
@@ -904,6 +1079,17 @@ class AttributedStringBuilder {
                 runFont = fontForRun(run, baseFont: baseFont)
             }
 
+            // Embedded font override
+            if let family = run.fontFamily,
+               let customFont = UIFont(name: family, size: runFont.pointSize) {
+                // Preserve bold/italic traits from the resolved font
+                if let desc = customFont.fontDescriptor.withSymbolicTraits(runFont.fontDescriptor.symbolicTraits) {
+                    runFont = UIFont(descriptor: desc, size: runFont.pointSize)
+                } else {
+                    runFont = customFont
+                }
+            }
+
             var attrs: [NSAttributedString.Key: Any] = [
                 .font: runFont,
                 .foregroundColor: textColor,
@@ -911,6 +1097,11 @@ class AttributedStringBuilder {
                 .kern: fontSize * 0.01,   // Subtle kerning
                 .ligature: 1              // Standard ligatures
             ]
+
+            // CSS color override (applied after default, before link override)
+            if let cssColor = run.textColor {
+                attrs[.foregroundColor] = cssColor
+            }
 
             if run.styles.contains(.strikethrough) {
                 attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
@@ -920,7 +1111,7 @@ class AttributedStringBuilder {
             }
             if let link = run.link {
                 attrs[.link] = link
-                attrs[.foregroundColor] = accentColor
+                attrs[.foregroundColor] = accentColor  // Link color wins over CSS color
             }
             if run.styles.contains(.superscript) {
                 attrs[.baselineOffset] = fontSize * 0.3

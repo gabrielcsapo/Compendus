@@ -23,27 +23,21 @@ struct BlockStyle {
     var marginRight: CSSLength?
     var display: CSSDisplay?
     var listStyleType: CSSListStyleType?
-
-    init(textAlign: CSSTextAlign? = nil, textIndent: CSSLength? = nil,
-         marginTop: CSSLength? = nil, marginBottom: CSSLength? = nil,
-         marginLeft: CSSLength? = nil, marginRight: CSSLength? = nil,
-         display: CSSDisplay? = nil, listStyleType: CSSListStyleType? = nil) {
-        self.textAlign = textAlign
-        self.textIndent = textIndent
-        self.marginTop = marginTop
-        self.marginBottom = marginBottom
-        self.marginLeft = marginLeft
-        self.marginRight = marginRight
-        self.display = display
-        self.listStyleType = listStyleType
-    }
+    var backgroundColor: UIColor?
+    var writingDirection: NSWritingDirection?
+    var paddingTop: CSSLength?
+    var paddingBottom: CSSLength?
+    var paddingLeft: CSSLength?
+    var paddingRight: CSSLength?
 
     static let empty = BlockStyle()
 
     var isEmpty: Bool {
         textAlign == nil && textIndent == nil && marginTop == nil &&
         marginBottom == nil && marginLeft == nil && marginRight == nil &&
-        display == nil && listStyleType == nil
+        display == nil && listStyleType == nil && backgroundColor == nil &&
+        writingDirection == nil && paddingTop == nil && paddingBottom == nil &&
+        paddingLeft == nil && paddingRight == nil
     }
 }
 
@@ -102,14 +96,19 @@ enum ContentNode {
 
 /// A run of inline text with styling attributes.
 struct TextRun {
-    let text: String
+    var text: String
     var styles: Set<TextStyle>
     var link: URL?
+    var textColor: UIColor?
+    var fontFamily: String?
 
-    init(text: String, styles: Set<TextStyle> = [], link: URL? = nil) {
+    init(text: String, styles: Set<TextStyle> = [], link: URL? = nil,
+         textColor: UIColor? = nil, fontFamily: String? = nil) {
         self.text = text
         self.styles = styles
         self.link = link
+        self.textColor = textColor
+        self.fontFamily = fontFamily
     }
 }
 
@@ -143,4 +142,6 @@ struct TableRow {
 struct TableCell {
     let isHeader: Bool
     let runs: [TextRun]
+    var colspan: Int = 1
+    var rowspan: Int = 1
 }
