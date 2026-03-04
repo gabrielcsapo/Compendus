@@ -12,6 +12,8 @@ import SwiftData
 struct ContinueReadingSection: View {
     let books: [DownloadedBook]
     var onBookTap: ((DownloadedBook) -> Void)?
+    var onMarkAsRead: ((DownloadedBook) -> Void)?
+    var onViewDetails: ((DownloadedBook) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,6 +38,31 @@ struct ContinueReadingSection: View {
                         ContinueReadingCard(book: book)
                             .onTapGesture {
                                 onBookTap?(book)
+                            }
+                            .contextMenu {
+                                Button {
+                                    onBookTap?(book)
+                                } label: {
+                                    Label(
+                                        book.isAudiobook ? "Continue Listening" : "Continue Reading",
+                                        systemImage: book.isAudiobook ? "headphones" : "book"
+                                    )
+                                }
+
+                                Button {
+                                    onMarkAsRead?(book)
+                                } label: {
+                                    Label(
+                                        book.isRead ? "Mark as Unread" : "Mark as Read",
+                                        systemImage: book.isRead ? "checkmark.circle.fill" : "checkmark.circle"
+                                    )
+                                }
+
+                                Button {
+                                    onViewDetails?(book)
+                                } label: {
+                                    Label("View Details", systemImage: "info.circle")
+                                }
                             }
                     }
                 }

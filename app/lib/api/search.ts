@@ -33,6 +33,9 @@ interface ApiBook {
   narrator: string | null;
   chapters: ApiChapter[] | null;
   hasTranscript: boolean;
+  isRead: boolean;
+  rating: number | null;
+  review: string | null;
 }
 
 interface ApiChapter {
@@ -113,6 +116,9 @@ function toApiBook(book: Book, baseUrl: string): ApiBook {
     narrator: book.narrator,
     chapters,
     hasTranscript: !!book.transcriptPath,
+    isRead: book.isRead ?? false,
+    rating: book.rating ?? null,
+    review: book.review ?? null,
   };
 }
 

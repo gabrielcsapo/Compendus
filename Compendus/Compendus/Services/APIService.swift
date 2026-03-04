@@ -430,11 +430,15 @@ struct UpdateBookRequest: Codable {
     var pageCount: Int?
     var series: String?
     var seriesNumber: String?
+    var isRead: Bool?
+    var rating: Int?
+    var review: String?
     var source: String = "ios"
 
     enum CodingKeys: String, CodingKey {
         case title, subtitle, authors, publisher, publishedDate
-        case description, isbn, language, pageCount, series, seriesNumber, source
+        case description, isbn, language, pageCount, series, seriesNumber
+        case isRead, rating, review, source
     }
 
     func encode(to encoder: Encoder) throws {
@@ -450,6 +454,9 @@ struct UpdateBookRequest: Codable {
         try container.encodeIfPresent(pageCount, forKey: .pageCount)
         try container.encodeIfPresent(series, forKey: .series)
         try container.encodeIfPresent(seriesNumber, forKey: .seriesNumber)
+        try container.encodeIfPresent(isRead, forKey: .isRead)
+        try container.encodeIfPresent(rating, forKey: .rating)
+        try container.encodeIfPresent(review, forKey: .review)
         try container.encode(source, forKey: .source)
     }
 }

@@ -82,6 +82,7 @@ struct DownloadsView: View {
     @State private var seriesSheet: DownloadSeriesSheet? = nil
     @State private var showingDeleteError = false
     @State private var deleteError: String?
+    @State private var navigationPath = NavigationPath()
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -147,7 +148,7 @@ struct DownloadsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             mainContent
                 .navigationTitle(navigationTitle)
                 .toolbar {
@@ -299,17 +300,26 @@ struct DownloadsView: View {
         ScrollView {
             // Continue Reading section
             if !recentlyReadBooks.isEmpty && searchText.isEmpty && selectedFilter == .all {
-                ContinueReadingSection(books: recentlyReadBooks) { book in
-                    if book.isAudiobook {
-                        Task {
-                            await audiobookPlayer.loadBook(book)
-                            audiobookPlayer.play()
-                            audiobookPlayer.isFullPlayerPresented = true
+                ContinueReadingSection(
+                    books: recentlyReadBooks,
+                    onBookTap: { book in
+                        if book.isAudiobook {
+                            Task {
+                                await audiobookPlayer.loadBook(book)
+                                audiobookPlayer.play()
+                                audiobookPlayer.isFullPlayerPresented = true
+                            }
+                        } else {
+                            bookToRead = book
                         }
-                    } else {
-                        bookToRead = book
+                    },
+                    onMarkAsRead: { book in
+                        toggleReadStatus(for: book)
+                    },
+                    onViewDetails: { book in
+                        navigationPath.append(book)
                     }
-                }
+                )
                 .padding(.top, 16)
                 .padding(.bottom, 8)
             }
@@ -349,6 +359,15 @@ struct DownloadsView: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
+                        Button {
+                            toggleReadStatus(for: book)
+                        } label: {
+                            Label(
+                                book.isRead ? "Mark as Unread" : "Mark as Read",
+                                systemImage: book.isRead ? "checkmark.circle.fill" : "checkmark.circle"
+                            )
+                        }
+
                         Button(role: .destructive) {
                             bookToDelete = book
                             showingDeleteConfirmation = true
@@ -584,6 +603,17 @@ struct DownloadsView: View {
             return "This will remove \"\(book.title)\" from your device. You can download it again from your library."
         } else {
             return "This will remove all downloaded books from your device. You can download them again from your library."
+        }
+    }
+
+    private func toggleReadStatus(for book: DownloadedBook) {
+        book.isRead.toggle()
+        try? modelContext.save()
+
+        // Sync to server
+        if let edit = PendingBookEdit.toggleRead(bookId: book.id, isRead: book.isRead) {
+            modelContext.insert(edit)
+            try? modelContext.save()
         }
     }
 

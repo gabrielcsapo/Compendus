@@ -66,6 +66,12 @@ struct DownloadedBookDetailView: View {
                         .padding(.horizontal, 20)
                 }
 
+                if book.review != nil {
+                    reviewDisplaySection
+                        .padding(.top, 16)
+                        .padding(.horizontal, 20)
+                }
+
                 if let description = book.bookDescription, !description.isEmpty {
                     descriptionSection(description)
                         .padding(.top, 16)
@@ -219,21 +225,44 @@ struct DownloadedBookDetailView: View {
 
     @ViewBuilder
     private var metadataRow: some View {
-        HStack(spacing: 12) {
-            formatBadge
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                formatBadge
 
-            if book.isAudiobook {
-                if let duration = book.durationDisplay {
-                    metadataLabel(icon: "clock", text: duration)
+                if book.isRead {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                        Text("Read")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                 }
-                if let narrator = book.narrator {
-                    metadataLabel(icon: "person.wave.2", text: narrator)
+
+                if book.isAudiobook {
+                    if let duration = book.durationDisplay {
+                        metadataLabel(icon: "clock", text: duration)
+                    }
+                    if let narrator = book.narrator {
+                        metadataLabel(icon: "person.wave.2", text: narrator)
+                    }
+                } else if let pageCount = book.pageCount {
+                    metadataLabel(icon: "doc.text", text: "\(pageCount) pages")
                 }
-            } else if let pageCount = book.pageCount {
-                metadataLabel(icon: "doc.text", text: "\(pageCount) pages")
+
+                metadataLabel(icon: nil, text: book.fileSizeDisplay)
             }
 
-            metadataLabel(icon: nil, text: book.fileSizeDisplay)
+            if let rating = book.rating {
+                HStack(spacing: 2) {
+                    ForEach(1...5, id: \.self) { star in
+                        Image(systemName: star <= rating ? "star.fill" : "star")
+                            .font(.caption)
+                            .foregroundStyle(star <= rating ? .yellow : .secondary.opacity(0.3))
+                    }
+                }
+            }
         }
         .padding(.horizontal, 20)
     }
@@ -360,6 +389,28 @@ struct DownloadedBookDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Review Display
+
+    @ViewBuilder
+    private var reviewDisplaySection: some View {
+        if let review = book.review, !review.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your Review")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                Text(review)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(Color(.systemGray6))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     // MARK: - Reading Stats
@@ -595,6 +646,7 @@ struct BookManagementSheet: View {
     @State private var showingDeleteTranscriptConfirmation = false
     @State private var isDeletingTranscript = false
     @State private var showingEditSheet = false
+    @State private var showingReviewSheet = false
 
     /// Whether a transcript exists (saved or in-progress partial)
     private var hasAnyTranscript: Bool {
@@ -618,6 +670,47 @@ struct BookManagementSheet: View {
                     }
                 } header: {
                     Text("Metadata")
+                }
+
+                // Status section
+                Section {
+                    Button {
+                        toggleReadStatus()
+                    } label: {
+                        Label(
+                            book.isRead ? "Mark as Unread" : "Mark as Read",
+                            systemImage: book.isRead ? "checkmark.circle.fill" : "checkmark.circle"
+                        )
+                    }
+
+                    // Star rating
+                    HStack {
+                        Text("Rating")
+                        Spacer()
+                        HStack(spacing: 4) {
+                            ForEach(1...5, id: \.self) { star in
+                                Button {
+                                    setRating(star == book.rating ? nil : star)
+                                } label: {
+                                    Image(systemName: star <= (book.rating ?? 0) ? "star.fill" : "star")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(star <= (book.rating ?? 0) ? .yellow : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    Button {
+                        showingReviewSheet = true
+                    } label: {
+                        Label(
+                            book.review != nil ? "Edit Review" : "Write Review",
+                            systemImage: "text.quote"
+                        )
+                    }
+                } header: {
+                    Text("Status")
                 }
 
                 // Transcription section (audiobooks only)
@@ -733,6 +826,32 @@ struct BookManagementSheet: View {
         .sheet(isPresented: $showingEditSheet) {
             EditBookView(downloadedBook: book)
         }
+        .sheet(isPresented: $showingReviewSheet) {
+            BookReviewSheet(book: book)
+        }
+    }
+
+    private func toggleReadStatus() {
+        let newValue = !book.isRead
+        book.isRead = newValue
+        try? modelContext.save()
+
+        // Sync to server
+        if let edit = PendingBookEdit.toggleRead(bookId: book.id, isRead: newValue) {
+            modelContext.insert(edit)
+            try? modelContext.save()
+        }
+    }
+
+    private func setRating(_ rating: Int?) {
+        book.rating = rating
+        try? modelContext.save()
+
+        // Sync to server
+        if let edit = PendingBookEdit.rateBook(bookId: book.id, rating: rating, review: book.review) {
+            modelContext.insert(edit)
+            try? modelContext.save()
+        }
     }
 
     private func deleteTranscript() {
@@ -751,6 +870,64 @@ struct BookManagementSheet: View {
             try? await apiService.deleteTranscript(bookId: book.id)
             isDeletingTranscript = false
         }
+    }
+}
+
+// MARK: - Book Review Sheet
+
+struct BookReviewSheet: View {
+    let book: DownloadedBook
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var reviewText: String = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $reviewText)
+                        .frame(minHeight: 150)
+                } header: {
+                    Text("Your Review")
+                } footer: {
+                    Text("Write your thoughts about this book.")
+                }
+            }
+            .navigationTitle("Review")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        saveReview()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+            .onAppear {
+                reviewText = book.review ?? ""
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func saveReview() {
+        book.review = reviewText.isEmpty ? nil : reviewText
+        try? modelContext.save()
+
+        // Sync to server
+        if let edit = PendingBookEdit.rateBook(bookId: book.id, rating: book.rating, review: book.review) {
+            modelContext.insert(edit)
+            try? modelContext.save()
+        }
+
+        dismiss()
     }
 }
 

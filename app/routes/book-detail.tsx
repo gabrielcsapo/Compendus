@@ -11,6 +11,8 @@ import { AuthorLinks } from "../components/AuthorLink";
 import type { BookFormat } from "../lib/types";
 import { ConvertToEpubButton, ReconvertEpubButton } from "../components/ConvertToEpubButton";
 import { TranscribeButton } from "../components/TranscribeButton";
+import { ToggleReadButton } from "../components/ToggleReadButton";
+import { BookReview } from "../components/BookReview";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
@@ -134,6 +136,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               </svg>
               Download {book.format.toUpperCase()}
             </a>
+            <ToggleReadButton book={book} />
           </div>
 
           {/* Transcribe audiobook */}
@@ -237,6 +240,11 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
+              {book.isRead && (
+                <span className={`${badgeStyles.base} ${badgeStyles.success}`}>
+                  Completed
+                </span>
+              )}
               <span className={`${badgeStyles.base} ${badgeStyles.primary} uppercase`}>
                 {book.format}
               </span>
@@ -264,6 +272,14 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               </p>
             </section>
           )}
+
+          {/* Rating & Review */}
+          <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
+              Rating & Review
+            </h2>
+            <BookReview book={book} />
+          </section>
 
           {/* Tags & Collections */}
           <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">

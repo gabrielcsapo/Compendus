@@ -43,6 +43,13 @@
       "when": 1772137103172,
       "tag": "0005_naive_mach_iv",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772654327421,
+      "tag": "0006_friendly_bill_hollister",
+      "breakpoints": true
     }
   ]
 }

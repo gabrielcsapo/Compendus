@@ -73,6 +73,9 @@ export const books = sqliteTable(
     readingProgress: real("reading_progress").default(0),
     lastReadAt: integer("last_read_at", { mode: "timestamp" }),
     lastPosition: text("last_position"),
+    isRead: integer("is_read", { mode: "boolean" }).default(false),
+    rating: integer("rating"),       // 1-5, null = unrated
+    review: text("review"),          // free-text, null = no review
 
     // Timestamps
     createdAt: integer("created_at", { mode: "timestamp" })

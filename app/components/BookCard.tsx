@@ -82,6 +82,15 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
           </span>
         )}
 
+        {/* Read badge */}
+        {book.isRead && (
+          <span className="absolute top-2 left-2 w-6 h-6 rounded-full bg-success text-white flex items-center justify-center shadow-sm" title="Read">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </span>
+        )}
+
       </Link>
 
       {/* Hover overlay with quick action - positioned absolutely over the card */}
@@ -132,6 +141,23 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
               />
             </div>
             {!compact && <p className="text-xs text-foreground-muted mt-1">{progressPercent}%</p>}
+          </div>
+        )}
+
+        {/* Star rating */}
+        {!compact && book.rating != null && (
+          <div className="flex items-center gap-0.5 mt-1.5">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <svg
+                key={star}
+                className={`w-3 h-3 ${star <= book.rating! ? "text-amber-400" : "text-foreground-muted/20"}`}
+                fill={star <= book.rating! ? "currentColor" : "none"}
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
+            ))}
           </div>
         )}
       </div>

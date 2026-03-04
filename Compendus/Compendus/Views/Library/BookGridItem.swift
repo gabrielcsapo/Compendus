@@ -111,6 +111,15 @@ struct DownloadedBookGridItem: View {
             .aspectRatio(bookAspectRatio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+            .overlay(alignment: .topLeading) {
+                if book.isRead {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white)
+                        .background(Circle().fill(Color.green).padding(-2))
+                        .padding(6)
+                }
+            }
 
             // Title and author
             VStack(alignment: .leading, spacing: 2) {
@@ -141,6 +150,16 @@ struct DownloadedBookGridItem: View {
                         ProgressView(value: book.readingProgress)
                             .progressViewStyle(LinearProgressViewStyle())
                             .frame(width: 40)
+                    }
+                }
+
+                if let rating = book.rating {
+                    HStack(spacing: 1) {
+                        ForEach(1...5, id: \.self) { star in
+                            Image(systemName: star <= rating ? "star.fill" : "star")
+                                .font(.system(size: 8))
+                                .foregroundStyle(star <= rating ? .yellow : .secondary.opacity(0.3))
+                        }
                     }
                 }
             }

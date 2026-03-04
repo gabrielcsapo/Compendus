@@ -154,6 +154,9 @@ export async function updateBook(
     readingProgress: number;
     lastPosition: string;
     bookTypeOverride: string | null;
+    isRead: boolean;
+    rating: number | null;
+    review: string | null;
   }>,
   source: "web" | "ios" | "api" | "metadata" = "web",
 ): Promise<Book | null> {
@@ -1071,4 +1074,43 @@ export async function extractCoverFromBook(
     console.error("Failed to extract cover:", error);
     return { success: false, message: "Failed to extract cover from book file" };
   }
+}
+
+export async function toggleBookReadStatus(
+  bookId: string,
+  isRead: boolean,
+): Promise<{ isRead: boolean } | null> {
+  const book = await getBook(bookId);
+  if (!book) return null;
+
+  await db
+    .update(books)
+    .set({
+      isRead,
+      updatedAt: sql`(unixepoch())`,
+    })
+    .where(eq(books.id, bookId));
+
+  return { isRead };
+}
+
+export async function rateBook(
+  bookId: string,
+  rating: number | null,
+  review?: string | null,
+): Promise<{ rating: number | null; review: string | null } | null> {
+  const book = await getBook(bookId);
+  if (!book) return null;
+
+  const updateData: Record<string, unknown> = {
+    rating,
+    updatedAt: sql`(unixepoch())`,
+  };
+  if (review !== undefined) {
+    updateData.review = review;
+  }
+
+  await db.update(books).set(updateData).where(eq(books.id, bookId));
+
+  return { rating, review: review !== undefined ? (review ?? null) : (book.review ?? null) };
 }

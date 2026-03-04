@@ -50,4 +50,21 @@ final class PendingBookEdit {
         guard let payload = try? JSONEncoder().encode(["tagId": tagId]) else { return nil }
         return PendingBookEdit(bookId: bookId, operationType: "removeTag", payload: payload)
     }
+
+    /// Create a pending isRead toggle
+    static func toggleRead(bookId: String, isRead: Bool) -> PendingBookEdit? {
+        var request = UpdateBookRequest()
+        request.isRead = isRead
+        guard let payload = try? JSONEncoder().encode(request) else { return nil }
+        return PendingBookEdit(bookId: bookId, operationType: "metadata", payload: payload)
+    }
+
+    /// Create a pending rating/review update
+    static func rateBook(bookId: String, rating: Int?, review: String?) -> PendingBookEdit? {
+        var request = UpdateBookRequest()
+        request.rating = rating
+        request.review = review
+        guard let payload = try? JSONEncoder().encode(request) else { return nil }
+        return PendingBookEdit(bookId: bookId, operationType: "metadata", payload: payload)
+    }
 }

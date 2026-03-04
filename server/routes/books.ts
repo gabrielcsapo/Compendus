@@ -63,7 +63,7 @@ app.put("/api/books/:id", async (c) => {
   const editableFields = [
     "title", "subtitle", "authors", "publisher", "publishedDate",
     "description", "isbn", "language", "pageCount", "series",
-    "seriesNumber", "bookTypeOverride",
+    "seriesNumber", "bookTypeOverride", "isRead", "rating", "review",
   ];
   const updates: Record<string, unknown> = {};
 

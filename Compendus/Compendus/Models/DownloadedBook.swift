@@ -25,6 +25,9 @@ final class DownloadedBook {
     var lastReadAt: Date?
     var readingProgress: Double     // 0.0 - 1.0
     var lastPosition: String?       // Format-specific position (page number, CFI, timestamp)
+    var isRead: Bool = false        // Explicitly marked as read/completed
+    var rating: Int?                // 1-5 star rating, nil = unrated
+    var review: String?             // Free-text review
     var series: String?
     var seriesNumber: Double?
     var duration: Int?              // Audiobooks (in seconds)
@@ -71,6 +74,9 @@ final class DownloadedBook {
         self.lastReadAt = nil
         self.readingProgress = 0.0
         self.lastPosition = nil
+        self.isRead = false
+        self.rating = nil
+        self.review = nil
         self.series = series
         self.seriesNumber = seriesNumber
         self.duration = duration
@@ -187,6 +193,17 @@ final class DownloadedBook {
             chaptersData = try? JSONEncoder().encode(chapters)
         }
 
+        // Sync read status, rating, and review from server
+        if let serverIsRead = book.isRead {
+            isRead = serverIsRead
+        }
+        if let serverRating = book.rating {
+            rating = serverRating
+        }
+        if let serverReview = book.review {
+            review = serverReview
+        }
+
         // Update cover if new data is provided
         if let newCover = coverData {
             self.coverData = newCover
@@ -206,7 +223,7 @@ final class DownloadedBook {
             seriesNumberDouble = Double(numStr)
         }
 
-        return DownloadedBook(
+        let downloaded = DownloadedBook(
             id: book.id,
             title: book.title,
             subtitle: book.subtitle,
@@ -225,5 +242,9 @@ final class DownloadedBook {
             chaptersData: chaptersData,
             pageCount: book.pageCount
         )
+        downloaded.isRead = book.isRead ?? false
+        downloaded.rating = book.rating
+        downloaded.review = book.review
+        return downloaded
     }
 }
