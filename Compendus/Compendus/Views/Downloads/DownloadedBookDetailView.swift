@@ -36,6 +36,9 @@ struct DownloadedBookDetailView: View {
     @State private var sessionCount: Int = 0
     @State private var isLoadingStats = true
     @State private var showingReadingHistory = false
+    @State private var isCheckingConnection = false
+    @State private var showingDeleteError = false
+    @State private var deleteError: String?
 
     var body: some View {
         ScrollView {
@@ -109,6 +112,11 @@ struct DownloadedBookDetailView: View {
                 .environment(storageManager)
                 .environment(readerSettings)
                 .modelContext(modelContext)
+        }
+        .alert("Delete Failed", isPresented: $showingDeleteError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(deleteError ?? "An error occurred while deleting the book.")
         }
         .sheet(item: $selectedRelatedBook) { relatedBook in
             BookDetailView(
@@ -490,11 +498,17 @@ struct DownloadedBookDetailView: View {
                         HStack(spacing: 4) {
                             Text(book.seriesNumber != nil ? "\(series) #\(Int(book.seriesNumber!))" : series)
                                 .font(.subheadline)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
+                            if isCheckingConnection {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                            }
                         }
                         .foregroundStyle(.accent)
                     }
+                    .disabled(isCheckingConnection)
                 }
             }
         }
@@ -538,8 +552,10 @@ struct DownloadedBookDetailView: View {
 
     private func navigateToSeries(_ series: String) {
         Task {
+            isCheckingConnection = true
             let isConnected = await serverConfig.testConnection()
             await MainActor.run {
+                isCheckingConnection = false
                 if isConnected {
                     // Navigate to Library tab filtered by this series
                     appNavigation.pendingSeriesFilter = series
@@ -558,7 +574,8 @@ struct DownloadedBookDetailView: View {
             try downloadManager.deleteBook(book, modelContext: modelContext)
             dismiss()
         } catch {
-            // Handle error silently
+            deleteError = error.localizedDescription
+            showingDeleteError = true
         }
     }
 }

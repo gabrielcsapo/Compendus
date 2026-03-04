@@ -131,6 +131,16 @@ struct UnifiedReaderView: View {
                     Label("Error", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(message)
+                } actions: {
+                    Button("Try Again") {
+                        readerState = .loading
+                        Task { await initializeEngine() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Close", role: .cancel) {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }

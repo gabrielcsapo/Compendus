@@ -80,6 +80,8 @@ struct DownloadsView: View {
     @State private var bookToRead: DownloadedBook?
     @State private var viewMode: DownloadViewMode = .books
     @State private var seriesSheet: DownloadSeriesSheet? = nil
+    @State private var showingDeleteError = false
+    @State private var deleteError: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -205,6 +207,11 @@ struct DownloadsView: View {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Retry failed downloads when app returns to foreground (network may have recovered)
                     downloadManager.retryFailedDownloads(modelContext: modelContext)
+                }
+                .alert("Delete Failed", isPresented: $showingDeleteError) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(deleteError ?? "An error occurred while deleting the book.")
                 }
         }
     }
@@ -588,7 +595,8 @@ struct DownloadsView: View {
                 try downloadManager.deleteAllBooks(modelContext: modelContext)
             }
         } catch {
-            // Handle error silently for now
+            deleteError = error.localizedDescription
+            showingDeleteError = true
         }
         bookToDelete = nil
     }

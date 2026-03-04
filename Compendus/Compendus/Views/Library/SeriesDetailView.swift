@@ -31,6 +31,8 @@ struct SeriesDetailView: View {
     @State private var selectedSort: BookSort = .recent
     @State private var bookToRead: DownloadedBook?
     @State private var downloadingBooks: Set<String> = []
+    @State private var showingDownloadError = false
+    @State private var downloadError: String?
 
     private let limit = 50
     private let columns = [
@@ -119,6 +121,11 @@ struct SeriesDetailView: View {
         .fullScreenCover(item: $bookToRead) { book in
             ReaderContainerView(book: book)
                 .environment(readerSettings)
+        }
+        .alert("Download Failed", isPresented: $showingDownloadError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(downloadError ?? "An error occurred while downloading the book.")
         }
     }
 
@@ -285,6 +292,8 @@ struct SeriesDetailView: View {
             } catch {
                 await MainActor.run {
                     downloadingBooks.remove(book.id)
+                    downloadError = error.localizedDescription
+                    showingDownloadError = true
                 }
             }
         }

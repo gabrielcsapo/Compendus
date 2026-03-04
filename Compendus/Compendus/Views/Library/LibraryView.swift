@@ -110,6 +110,11 @@ struct LibraryView: View {
     @State private var seriesItems: [SeriesItem] = []
     @State private var seriesSheet: SeriesSheet? = nil
     @State private var isLoadingSeries = false
+    @State private var searchTask: Task<Void, Never>?
+    @State private var showingDownloadError = false
+    @State private var downloadError: String?
+    @State private var seriesErrorMessage: String?
+    @State private var paginationFailed = false
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -161,6 +166,11 @@ struct LibraryView: View {
                 ReaderContainerView(book: book)
                     .environment(readerSettings)
             }
+            .alert("Download Failed", isPresented: $showingDownloadError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(downloadError ?? "An error occurred while downloading the book.")
+            }
     }
 
     private var libraryBase: some View {
@@ -199,14 +209,17 @@ struct LibraryView: View {
             .toolbar { libraryToolbar }
             .searchable(text: $searchText, prompt: searchPrompt)
             .onChange(of: searchText) { _, newValue in
-                Task {
-                    if viewMode == .series {
-                        // Search is handled locally for series
-                    } else if newValue.isEmpty {
-                        await loadBooks()
-                    } else {
-                        await searchBooks(query: newValue)
-                    }
+                searchTask?.cancel()
+                guard viewMode != .series else { return } // series search is local
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    searchTask = Task { await loadBooks() }
+                    return
+                }
+                searchTask = Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    await searchBooks(query: trimmed)
                 }
             }
             .onChange(of: selectedFilter) { _, _ in
@@ -262,6 +275,19 @@ struct LibraryView: View {
             if isLoading && !books.isEmpty {
                 ProgressView()
                     .padding()
+            }
+
+            if paginationFailed && !isLoading {
+                Button {
+                    paginationFailed = false
+                    hasMore = true
+                    Task { await loadMoreBooks() }
+                } label: {
+                    Label("Failed to load more. Tap to retry.", systemImage: "arrow.clockwise")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
             }
         }
     }
@@ -380,6 +406,10 @@ struct LibraryView: View {
     private var seriesGridContent: some View {
         if isLoadingSeries && seriesItems.isEmpty {
             SkeletonBookGrid(count: 6)
+        } else if seriesItems.isEmpty && seriesErrorMessage != nil {
+            ErrorStateView(message: seriesErrorMessage ?? "Unknown error") {
+                Task { await loadSeries() }
+            }
         } else if filteredSeriesItems.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "books.vertical")
@@ -461,7 +491,7 @@ struct LibraryView: View {
             hasMore = newBooks.count >= limit
             offset += newBooks.count
         } catch {
-            // Silently fail for pagination errors
+            paginationFailed = true
         }
 
         isLoading = false
@@ -469,13 +499,14 @@ struct LibraryView: View {
 
     private func loadSeries() async {
         isLoadingSeries = true
+        seriesErrorMessage = nil
 
         do {
             let response = try await apiService.fetchSeries()
             seriesItems = response.series
         } catch {
             print("[LibraryView] Load series error: \(error)")
-            seriesItems = []
+            seriesErrorMessage = error.localizedDescription
         }
 
         isLoadingSeries = false
@@ -534,6 +565,8 @@ struct LibraryView: View {
             } catch {
                 await MainActor.run {
                     downloadingBooks.remove(book.id)
+                    downloadError = error.localizedDescription
+                    showingDownloadError = true
                 }
             }
         }

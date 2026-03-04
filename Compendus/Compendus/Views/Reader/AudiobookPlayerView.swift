@@ -26,6 +26,7 @@ struct AudiobookPlayerView: View {
     @State private var liveBufferResumeTime: Double?
     /// True when the current transcription was started as "live" (tied to playback).
     @State private var isLiveTranscription = false
+    @State private var isLoadingBook = false
 
     private var showTranscriptionPill: Bool {
         !transcriptionPillDismissed && (
@@ -63,7 +64,15 @@ struct AudiobookPlayerView: View {
                 }
 
                 VStack(spacing: 0) {
-                    if showLyrics, liveBufferResumeTime != nil {
+                    if isLoadingBook {
+                        Spacer()
+                        ProgressView()
+                        Text("Loading audiobook...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 8)
+                        Spacer()
+                    } else if showLyrics, liveBufferResumeTime != nil {
                         // Buffering transcript before playback resumes
                         VStack(spacing: 16) {
                             Spacer()
@@ -181,7 +190,9 @@ struct AudiobookPlayerView: View {
         .task {
             // Only load if this isn't already the active book
             if player.currentBook?.id != book.id {
+                isLoadingBook = true
                 await player.loadBook(book)
+                isLoadingBook = false
             }
             if !player.isPlaying {
                 player.play()
