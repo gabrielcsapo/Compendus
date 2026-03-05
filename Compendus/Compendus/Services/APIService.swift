@@ -453,7 +453,7 @@ class APIService {
     }
 
     /// Update a profile (name, avatar emoji)
-    func updateProfile(id: String, name: String? = nil, avatar: String?? = nil) async throws -> Profile {
+    func updateProfile(id: String, name: String? = nil, avatar: String?? = nil, pin: String?? = nil) async throws -> Profile {
         guard let url = config.apiURL("/api/profiles/\(id)") else {
             throw APIError.invalidURL
         }
@@ -468,6 +468,13 @@ class APIService {
                 body["avatar"] = av
             } else {
                 body["avatar"] = NSNull()
+            }
+        }
+        if let pinValue = pin {
+            if let p = pinValue {
+                body["pin"] = p
+            } else {
+                body["pin"] = NSNull()
             }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

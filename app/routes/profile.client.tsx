@@ -41,6 +41,13 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [pinSaving, setPinSaving] = useState(false);
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hadInitialData = useRef(initialProfile !== undefined);
 
@@ -148,6 +155,89 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
       }
     } catch {
       setError("Failed to remove avatar");
+    }
+  };
+
+  const openNameModal = () => {
+    setEditName(profile?.name ?? "");
+    setShowNameModal(true);
+  };
+
+  const handleNameSave = async () => {
+    if (!profile || !editName.trim() || editName.trim() === profile.name) return;
+    setNameSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/profiles/${profile.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim() }),
+      });
+      const data = await res.json();
+      if (data.success && data.profile) {
+        setProfile(data.profile);
+      } else {
+        setError(data.error || "Failed to update name");
+      }
+    } catch {
+      setError("Failed to update name");
+    } finally {
+      setNameSaving(false);
+      setShowNameModal(false);
+    }
+  };
+
+  const openPinModal = () => {
+    setPin("");
+    setConfirmPin("");
+    setShowPinModal(true);
+  };
+
+  const handlePinSave = async () => {
+    if (!profile || pin.length !== 4 || pin !== confirmPin) return;
+    setPinSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/profiles/${profile.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json();
+      if (data.success && data.profile) {
+        setProfile(data.profile);
+      } else {
+        setError(data.error || "Failed to update PIN");
+      }
+    } catch {
+      setError("Failed to update PIN");
+    } finally {
+      setPinSaving(false);
+      setShowPinModal(false);
+    }
+  };
+
+  const handlePinRemove = async () => {
+    if (!profile) return;
+    setPinSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/profiles/${profile.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: null }),
+      });
+      const data = await res.json();
+      if (data.success && data.profile) {
+        setProfile(data.profile);
+      } else {
+        setError(data.error || "Failed to remove PIN");
+      }
+    } catch {
+      setError("Failed to remove PIN");
+    } finally {
+      setPinSaving(false);
+      setShowPinModal(false);
     }
   };
 
@@ -272,10 +362,23 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
 
       {/* Profile Info */}
       <div className="bg-surface border border-border rounded-xl divide-y divide-border">
-        <div className="px-5 py-4 flex items-center justify-between">
+        <button
+          onClick={openNameModal}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-surface-elevated transition-colors text-left"
+        >
           <span className="text-sm text-foreground-muted">Name</span>
-          <span className="text-sm font-medium text-foreground">{profile.name}</span>
-        </div>
+          <span className="text-sm font-medium text-foreground flex items-center gap-1.5">
+            {profile.name}
+            <svg
+              className="w-4 h-4 text-foreground-muted"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </span>
+        </button>
 
         <div className="px-5 py-4 flex items-center justify-between">
           <span className="text-sm text-foreground-muted">Role</span>
@@ -290,10 +393,23 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
           </span>
         </div>
 
-        <div className="px-5 py-4 flex items-center justify-between">
+        <button
+          onClick={openPinModal}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-surface-elevated transition-colors text-left"
+        >
           <span className="text-sm text-foreground-muted">PIN Protection</span>
-          <span className="text-sm text-foreground">{profile.hasPin ? "Enabled" : "Not set"}</span>
-        </div>
+          <span className="text-sm text-foreground flex items-center gap-1.5">
+            {profile.hasPin ? "Enabled" : "Not set"}
+            <svg
+              className="w-4 h-4 text-foreground-muted"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </span>
+        </button>
 
         {profile.createdAt && (
           <div className="px-5 py-4 flex items-center justify-between">
@@ -323,6 +439,130 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
           Switch Profile
         </Link>
       </div>
+
+      {/* Name Modal */}
+      {showNameModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowNameModal(false)}
+        >
+          <div
+            className="bg-surface border border-border rounded-xl shadow-xl w-full max-w-sm mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-foreground mb-4">Change Name</h2>
+
+            <div className="mb-5">
+              <label className="block text-sm text-foreground-muted mb-1">Name</label>
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleNameSave();
+                }}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowNameModal(false)}
+                className={`${buttonStyles.base} ${buttonStyles.ghost} flex-1`}
+                disabled={nameSaving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleNameSave}
+                disabled={!editName.trim() || editName.trim() === profile.name || nameSaving}
+                className={`${buttonStyles.base} ${buttonStyles.primary} flex-1`}
+              >
+                {nameSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Modal */}
+      {showPinModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowPinModal(false)}
+        >
+          <div
+            className="bg-surface border border-border rounded-xl shadow-xl w-full max-w-sm mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              {profile.hasPin ? "Change PIN" : "Set PIN"}
+            </h2>
+
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="block text-sm text-foreground-muted mb-1">New 4-digit PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground text-center text-lg tracking-widest"
+                  placeholder="••••"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-foreground-muted mb-1">Confirm PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-foreground text-center text-lg tracking-widest"
+                  placeholder="••••"
+                />
+              </div>
+              {pin.length > 0 && pin.length < 4 && (
+                <p className="text-xs text-danger">PIN must be 4 digits</p>
+              )}
+              {confirmPin.length > 0 && pin !== confirmPin && (
+                <p className="text-xs text-danger">PINs do not match</p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowPinModal(false)}
+                className={`${buttonStyles.base} ${buttonStyles.ghost} flex-1`}
+                disabled={pinSaving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePinSave}
+                disabled={pin.length !== 4 || pin !== confirmPin || pinSaving}
+                className={`${buttonStyles.base} ${buttonStyles.primary} flex-1`}
+              >
+                {pinSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+
+            {profile.hasPin && (
+              <button
+                onClick={handlePinRemove}
+                disabled={pinSaving}
+                className="w-full mt-3 text-sm text-danger hover:text-danger/80 transition-colors py-2"
+              >
+                Remove PIN
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

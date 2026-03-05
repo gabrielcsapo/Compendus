@@ -351,6 +351,15 @@ struct CreateProfileSheet: View {
                         }
                         .padding(.vertical, 4)
                     }
+
+                    HStack {
+                        Text("Or pick any emoji")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        EmojiTextField(selectedEmoji: $avatar)
+                            .frame(width: 60, height: 44)
+                    }
                 } header: {
                     Text("Avatar")
                 }

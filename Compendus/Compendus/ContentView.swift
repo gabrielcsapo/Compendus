@@ -47,9 +47,16 @@ struct ContentView: View {
                             .tag(2)
                             .toolbar(.hidden, for: .tabBar)
 
+                        NavigationStack {
+                            ProfileView()
+                        }
+                            .tabItem { Label("Profile", systemImage: "person") }
+                            .tag(3)
+                            .toolbar(.hidden, for: .tabBar)
+
                         SettingsView()
                             .tabItem { Label("Settings", systemImage: "gear") }
-                            .tag(3)
+                            .tag(4)
                             .toolbar(.hidden, for: .tabBar)
                     }
 
@@ -116,6 +123,7 @@ struct CustomBottomBar: View {
     @Binding var selectedTab: Int
     @Environment(AudiobookPlayer.self) private var player
     @Environment(ThemeManager.self) private var themeManager
+    @Environment(ServerConfig.self) private var serverConfig
 
     private struct TabItem {
         let icon: String
@@ -123,10 +131,13 @@ struct CustomBottomBar: View {
         let label: String
     }
 
+    private static let profileTabIndex = 3
+
     private let tabs: [TabItem] = [
         TabItem(icon: "house", activeIcon: "house.fill", label: "Home"),
         TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
         TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
+        TabItem(icon: "person", activeIcon: "person.fill", label: "Profile"),
         TabItem(icon: "gear", activeIcon: "gearshape.fill", label: "Settings"),
     ]
 
@@ -146,8 +157,17 @@ struct CustomBottomBar: View {
                         selectedTab = index
                     } label: {
                         VStack(spacing: 4) {
-                            Image(systemName: selectedTab == index ? tabs[index].activeIcon : tabs[index].icon)
-                                .font(.system(size: 20))
+                            if index == Self.profileTabIndex {
+                                ProfileAvatarView(serverConfig: serverConfig, size: 22)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(selectedTab == index ? themeManager.accentColor : .clear, lineWidth: 2)
+                                            .frame(width: 26, height: 26)
+                                    )
+                            } else {
+                                Image(systemName: selectedTab == index ? tabs[index].activeIcon : tabs[index].icon)
+                                    .font(.system(size: 20))
+                            }
 
                             Text(tabs[index].label)
                                 .font(.caption2)

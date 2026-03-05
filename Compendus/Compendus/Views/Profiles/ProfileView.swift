@@ -20,6 +20,10 @@ struct ProfileView: View {
     @State private var currentProfile: Profile?
     @State private var isLoading = true
     @State private var showingRemoveConfirmation = false
+    @State private var showingPhotoPicker = false
+    @State private var showingPinSheet = false
+    @State private var showingNameSheet = false
+    @State private var customEmoji = ""
 
     private let emojiSuggestions = [
         "\u{1F60A}", "\u{1F4DA}", "\u{1F98A}", "\u{1F31F}", "\u{1F3A8}", "\u{1F3B5}",
@@ -51,8 +55,19 @@ struct ProfileView: View {
         } message: {
             Text("Your avatar will be removed and replaced with your initial.")
         }
+        .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhoto, matching: .images)
         .sheet(isPresented: $showingEmojiPicker) {
             emojiPickerSheet
+        }
+        .sheet(isPresented: $showingPinSheet) {
+            PinChangeSheet(hasExistingPin: currentProfile?.hasPin == true) { newPin in
+                Task { await updatePin(newPin) }
+            }
+        }
+        .sheet(isPresented: $showingNameSheet) {
+            NameChangeSheet(currentName: currentProfile?.name ?? serverConfig.selectedProfileName ?? "") { newName in
+                Task { await updateName(newName) }
+            }
         }
     }
 
@@ -76,7 +91,9 @@ struct ProfileView: View {
                     } else {
                         Menu {
                             Section {
-                                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                                Button {
+                                    showingPhotoPicker = true
+                                } label: {
                                     Label("Choose from Library", systemImage: "photo.on.rectangle")
                                 }
                                 Button {
@@ -109,11 +126,19 @@ struct ProfileView: View {
     @ViewBuilder
     private var profileInfoSection: some View {
         Section("Profile") {
-            HStack {
-                Text("Name")
-                Spacer()
-                Text(currentProfile?.name ?? serverConfig.selectedProfileName ?? "Unknown")
-                    .foregroundStyle(.secondary)
+            Button {
+                showingNameSheet = true
+            } label: {
+                HStack {
+                    Text("Name")
+                    Spacer()
+                    Text(currentProfile?.name ?? serverConfig.selectedProfileName ?? "Unknown")
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
             }
 
             if currentProfile?.isAdmin ?? serverConfig.selectedProfileIsAdmin {
@@ -125,11 +150,19 @@ struct ProfileView: View {
                 }
             }
 
-            HStack {
-                Text("PIN Protection")
-                Spacer()
-                Text(currentProfile?.hasPin == true ? "Enabled" : "Not set")
-                    .foregroundStyle(.secondary)
+            Button {
+                showingPinSheet = true
+            } label: {
+                HStack {
+                    Text("PIN Protection")
+                    Spacer()
+                    Text(currentProfile?.hasPin == true ? "Enabled" : "Not set")
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
             }
 
             if let createdAt = currentProfile?.createdAt,
@@ -159,18 +192,35 @@ struct ProfileView: View {
     private var emojiPickerSheet: some View {
         NavigationStack {
             ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                    ForEach(emojiSuggestions, id: \.self) { emoji in
-                        Button {
+                VStack(spacing: 20) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                        ForEach(emojiSuggestions, id: \.self) { emoji in
+                            Button {
+                                showingEmojiPicker = false
+                                Task { await selectEmoji(emoji) }
+                            } label: {
+                                Text(emoji)
+                                    .font(.system(size: 36))
+                                    .frame(width: 52, height: 52)
+                                    .background(Color(.systemGray6))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(spacing: 8) {
+                        Text("Or pick any emoji")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        EmojiTextField(selectedEmoji: $customEmoji) { emoji in
                             showingEmojiPicker = false
                             Task { await selectEmoji(emoji) }
-                        } label: {
-                            Text(emoji)
-                                .font(.system(size: 36))
-                                .frame(width: 52, height: 52)
-                                .background(Color(.systemGray6))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
+                        .frame(height: 60)
+                        .frame(maxWidth: 80)
                     }
                 }
                 .padding()
@@ -186,6 +236,7 @@ struct ProfileView: View {
             }
         }
         .presentationDetents([.medium])
+        .onDisappear { customEmoji = "" }
     }
 
     // MARK: - Actions
@@ -252,6 +303,38 @@ struct ProfileView: View {
         }
     }
 
+    private func updateName(_ newName: String) async {
+        guard let profileId = serverConfig.selectedProfileId else { return }
+        do {
+            let updated = try await apiService.updateProfile(id: profileId, name: newName)
+            await MainActor.run {
+                serverConfig.selectProfile(updated)
+                currentProfile = updated
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to update name"
+                showingError = true
+            }
+        }
+    }
+
+    private func updatePin(_ newPin: String?) async {
+        guard let profileId = serverConfig.selectedProfileId else { return }
+        do {
+            let updated = try await apiService.updateProfile(id: profileId, pin: .some(newPin))
+            await MainActor.run {
+                serverConfig.selectProfile(updated)
+                currentProfile = updated
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to update PIN"
+                showingError = true
+            }
+        }
+    }
+
     private func removeAvatar() async {
         guard let profileId = serverConfig.selectedProfileId else { return }
         do {
@@ -271,5 +354,114 @@ struct ProfileView: View {
                 showingError = true
             }
         }
+    }
+}
+
+// MARK: - Name Change Sheet
+
+private struct NameChangeSheet: View {
+    let currentName: String
+    let onSave: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $name)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                }
+            }
+            .navigationTitle("Change Name")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        dismiss()
+                        onSave(name.trimmingCharacters(in: .whitespaces))
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || name.trimmingCharacters(in: .whitespaces) == currentName)
+                }
+            }
+            .onAppear { name = currentName }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// MARK: - PIN Change Sheet
+
+private struct PinChangeSheet: View {
+    let hasExistingPin: Bool
+    let onSave: (String?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var pin = ""
+    @State private var confirmPin = ""
+    @State private var showingRemoveConfirmation = false
+
+    private var isValid: Bool {
+        pin.count == 4 && pin == confirmPin && pin.allSatisfy(\.isNumber)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    SecureField("New 4-digit PIN", text: $pin)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+
+                    SecureField("Confirm PIN", text: $confirmPin)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                } footer: {
+                    if !pin.isEmpty && pin.count < 4 {
+                        Text("PIN must be 4 digits")
+                            .foregroundStyle(.red)
+                    } else if !confirmPin.isEmpty && pin != confirmPin {
+                        Text("PINs do not match")
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if hasExistingPin {
+                    Section {
+                        Button("Remove PIN", role: .destructive) {
+                            showingRemoveConfirmation = true
+                        }
+                    }
+                }
+            }
+            .navigationTitle(hasExistingPin ? "Change PIN" : "Set PIN")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        dismiss()
+                        onSave(pin)
+                    }
+                    .disabled(!isValid)
+                }
+            }
+            .confirmationDialog("Remove PIN?", isPresented: $showingRemoveConfirmation) {
+                Button("Remove PIN", role: .destructive) {
+                    dismiss()
+                    onSave(nil)
+                }
+            } message: {
+                Text("Anyone will be able to access this profile without a PIN.")
+            }
+        }
+        .presentationDetents([.medium])
     }
 }

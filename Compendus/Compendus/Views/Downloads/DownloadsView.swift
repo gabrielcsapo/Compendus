@@ -149,11 +149,6 @@ struct DownloadsView: View {
                         seriesSheet = DownloadSeriesSheet(id: seriesName)
                     }
                 }
-                .navigationDestination(for: String.self) { destination in
-                    if destination == "profile" {
-                        ProfileView()
-                    }
-                }
                 .searchable(text: $searchText, prompt: searchPrompt)
                 .confirmationDialog(
                     deleteDialogTitle,
@@ -378,12 +373,6 @@ struct DownloadsView: View {
 
     @ToolbarContentBuilder
     private var downloadsToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            NavigationLink(value: "profile") {
-                ProfileAvatarView(serverConfig: serverConfig, size: 28)
-            }
-        }
-
         if !books.isEmpty {
             ToolbarItem(placement: .topBarLeading) {
                 Picker("View", selection: $viewMode) {
