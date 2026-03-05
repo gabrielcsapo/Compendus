@@ -1,15 +1,6 @@
 "use server";
 
-import {
-  db,
-  books,
-  booksTags,
-  booksCollections,
-  tags,
-  bookEdits,
-  userBookState,
-  profiles,
-} from "../lib/db";
+import { db, books, booksTags, booksCollections, tags, bookEdits, userBookState } from "../lib/db";
 import { eq, desc, asc, like, inArray, sql, and, or } from "drizzle-orm";
 import {
   deleteBookFile,
@@ -25,28 +16,7 @@ import type { BookFormat } from "../lib/types";
 import { v4 as uuid } from "uuid";
 import { randomUUID } from "crypto";
 import { getFormatsByType, type BookType } from "../lib/book-types";
-import { getRequest } from "react-flight-router/server";
-
-/**
- * Resolve the current profileId from the request cookie.
- * Falls back to auto-selecting if exactly one profile exists.
- */
-function resolveProfileId(): string | undefined {
-  const request = getRequest();
-  if (request) {
-    const cookieHeader = request.headers.get("Cookie") ?? "";
-    const match = cookieHeader.match(/(?:^|;\s*)compendus-profile=([^;]+)/);
-    if (match) {
-      const id = decodeURIComponent(match[1]);
-      const profile = db.select().from(profiles).where(eq(profiles.id, id)).get();
-      if (profile) return profile.id;
-    }
-  }
-  // Fallback: auto-select if exactly one profile exists
-  const allProfiles = db.select().from(profiles).all();
-  if (allProfiles.length === 1) return allProfiles[0].id;
-  return undefined;
-}
+import { resolveProfileId } from "../lib/profile";
 
 /**
  * Book with per-profile reading state overlaid from userBookState.

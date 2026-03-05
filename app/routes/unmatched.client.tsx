@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-flight-router/client";
 import { buttonStyles } from "../lib/styles";
 import { BookCover } from "../components/BookCover";
@@ -28,11 +28,18 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export default function UnmatchedBooks() {
-  const [currentBook, setCurrentBook] = useState<Book | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [totalRemaining, setTotalRemaining] = useState(0);
+export default function UnmatchedBooks({
+  initialBook,
+  initialCount,
+}: {
+  initialBook?: Book | null;
+  initialCount?: number;
+}) {
+  const [currentBook, setCurrentBook] = useState<Book | null>(initialBook ?? null);
+  const [loading, setLoading] = useState(initialBook === undefined);
+  const [totalRemaining, setTotalRemaining] = useState(initialCount ?? 0);
   const [processedCount, setProcessedCount] = useState(0);
+  const hadInitialData = useRef(initialBook !== undefined);
 
   // Search state
   const [searching, setSearching] = useState(false);
@@ -75,8 +82,16 @@ export default function UnmatchedBooks() {
     }
   }, []);
 
-  // Load first book on mount
+  // Load first book on mount (skip if server provided initial data)
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      // Still set search query from initial book
+      if (initialBook) {
+        setSearchQuery(initialBook.title);
+      }
+      return;
+    }
     loadNextBook();
   }, [loadNextBook]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "react-flight-router/client";
 import { buttonStyles, inputStyles } from "../lib/styles";
 
@@ -10,13 +10,14 @@ interface Profile {
   avatar: string | null;
   hasPin: boolean;
   isAdmin: boolean;
-  createdAt: string;
+  createdAt: string | null;
 }
 
-export default function ProfilePickerClient() {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ProfilePickerClient({ initialProfiles }: { initialProfiles?: Profile[] }) {
+  const [profiles, setProfiles] = useState<Profile[]>(initialProfiles ?? []);
+  const [loading, setLoading] = useState(!initialProfiles);
   const [error, setError] = useState<string | null>(null);
+  const hadInitialData = useRef(!!initialProfiles);
 
   // PIN entry modal
   const [pinProfile, setPinProfile] = useState<Profile | null>(null);
@@ -52,6 +53,10 @@ export default function ProfilePickerClient() {
   }, []);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     fetchProfiles();
   }, [fetchProfiles]);
 

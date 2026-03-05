@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, memo, useMemo } from "react";
+import { useState, useEffect, useRef, memo, useMemo } from "react";
 import { Link, useSearchParams, useRouter } from "react-flight-router/client";
 import { searchBooks, searchBooksCount, type MissingField } from "../actions/search";
 import { getBooks, getBooksCount } from "../actions/books";
@@ -41,10 +41,17 @@ type SearchData = {
   totalCount: number;
 };
 
-export default function Search() {
+export default function Search({
+  initialData,
+  initialSearchParamsKey,
+}: {
+  initialData?: SearchData;
+  initialSearchParamsKey?: string;
+}) {
   const [searchParams] = useSearchParams();
-  const [data, setData] = useState<SearchData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<SearchData | null>(initialData ?? null);
+  const [loading, setLoading] = useState(!initialData);
+  const skippedInitial = useRef(false);
 
   const query = searchParams.get("q") || "";
   const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
@@ -63,6 +70,16 @@ export default function Search() {
   const offset = (page - 1) * RESULTS_PER_PAGE;
 
   useEffect(() => {
+    if (
+      !skippedInitial.current &&
+      initialData &&
+      initialSearchParamsKey === searchParams.toString()
+    ) {
+      skippedInitial.current = true;
+      return;
+    }
+    skippedInitial.current = true;
+
     let cancelled = false;
     setLoading(true);
 

@@ -37,14 +37,32 @@ async function uploadFileWithMetadata(
   return response.json();
 }
 
-export default function Component() {
-  const [wantedBooks, setWantedBooksState] = useState<WantedBook[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+export default function Component({
+  initialBooks,
+  initialRemoved,
+}: {
+  initialBooks?: WantedBook[];
+  initialRemoved?: number;
+}) {
+  const [wantedBooks, setWantedBooksState] = useState<WantedBook[]>(initialBooks ?? []);
+  const [loading, setLoading] = useState(!initialBooks);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
+    initialRemoved && initialRemoved > 0
+      ? {
+          type: "success",
+          text: `${initialRemoved} book${initialRemoved > 1 ? "s" : ""} removed from wishlist (now in library)`,
+        }
+      : null,
+  );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const hadInitialData = useRef(!!initialBooks);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     loadWantedList();
   }, []);
 

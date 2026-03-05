@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { buttonStyles, inputStyles, badgeStyles } from "../lib/styles";
 
 interface Profile {
@@ -9,7 +9,7 @@ interface Profile {
   avatar: string | null;
   hasPin: boolean;
   isAdmin: boolean;
-  createdAt: string;
+  createdAt: string | null;
 }
 
 interface CurrentProfile {
@@ -18,11 +18,20 @@ interface CurrentProfile {
   isAdmin: boolean;
 }
 
-export default function AdminProfilesClient() {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [currentProfile, setCurrentProfile] = useState<CurrentProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function AdminProfilesClient({
+  initialProfiles,
+  initialCurrentProfile,
+}: {
+  initialProfiles?: Profile[];
+  initialCurrentProfile?: CurrentProfile | null;
+}) {
+  const [profiles, setProfiles] = useState<Profile[]>(initialProfiles ?? []);
+  const [currentProfile, setCurrentProfile] = useState<CurrentProfile | null>(
+    initialCurrentProfile ?? null,
+  );
+  const [loading, setLoading] = useState(!initialProfiles);
   const [error, setError] = useState<string | null>(null);
+  const hadInitialData = useRef(!!initialProfiles);
 
   // Create/Edit modal
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
@@ -66,6 +75,10 @@ export default function AdminProfilesClient() {
   }, []);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     fetchData();
   }, [fetchData]);
 
@@ -318,7 +331,10 @@ export default function AdminProfilesClient() {
                       )}
                     </div>
                     <p className="text-xs text-foreground-muted mt-0.5">
-                      Created {new Date(profile.createdAt).toLocaleDateString()}
+                      Created{" "}
+                      {profile.createdAt
+                        ? new Date(profile.createdAt).toLocaleDateString()
+                        : "Unknown"}
                     </p>
                   </div>
 

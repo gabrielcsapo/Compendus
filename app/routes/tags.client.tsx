@@ -1,24 +1,40 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
 import { getTagsWithCounts, getBooksWithTag } from "../actions/tags";
 import { BookGrid } from "../components/BookGrid";
 
 type TagItem = Awaited<ReturnType<typeof getTagsWithCounts>>[number];
 
-export default function Tags() {
+export default function Tags({
+  initialTags,
+  initialBooks,
+  initialSelectedTagId,
+}: {
+  initialTags?: TagItem[];
+  initialBooks?: Awaited<ReturnType<typeof getBooksWithTag>>;
+  initialSelectedTagId?: string | null;
+}) {
   const [searchParams] = useSearchParams();
-  const [tags, setTags] = useState<TagItem[] | null>(null);
-  const [books, setBooks] = useState<Awaited<ReturnType<typeof getBooksWithTag>>>([]);
-  const [tagsLoading, setTagsLoading] = useState(true);
+  const [tags, setTags] = useState<TagItem[] | null>(initialTags ?? null);
+  const [books, setBooks] = useState<Awaited<ReturnType<typeof getBooksWithTag>>>(
+    initialBooks ?? [],
+  );
+  const [tagsLoading, setTagsLoading] = useState(!initialTags);
   const [booksLoading, setBooksLoading] = useState(false);
+  const hadInitialTags = useRef(!!initialTags);
+  const hadInitialBooks = useRef(!!initialBooks && initialSelectedTagId != null);
 
   const selectedTagId = searchParams.get("tag");
   const selectedTag = tags?.find((t) => t.id === selectedTagId) ?? null;
 
   // Load tags once on mount (not on every tag selection)
   useEffect(() => {
+    if (hadInitialTags.current) {
+      hadInitialTags.current = false;
+      return;
+    }
     let cancelled = false;
     getTagsWithCounts().then((result) => {
       if (!cancelled) {
@@ -37,6 +53,12 @@ export default function Tags() {
       setBooks([]);
       return;
     }
+    // Skip if server already provided books for this tag
+    if (hadInitialBooks.current && selectedTagId === initialSelectedTagId) {
+      hadInitialBooks.current = false;
+      return;
+    }
+    hadInitialBooks.current = false;
     let cancelled = false;
     setBooksLoading(true);
     getBooksWithTag(selectedTagId).then((result) => {

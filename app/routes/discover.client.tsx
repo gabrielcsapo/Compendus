@@ -1,14 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, Outlet, useLocation } from "react-flight-router/client";
 import { getWantedBooks } from "../actions/wanted.js";
 
-export default function Component() {
+export default function Component({ initialWantedCount }: { initialWantedCount?: number }) {
   const location = useLocation();
-  const [wantedCount, setWantedCount] = useState(0);
+  const [wantedCount, setWantedCount] = useState(initialWantedCount ?? 0);
+  const hadInitialData = useRef(initialWantedCount != null);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     loadWantedCount();
   }, []);
 

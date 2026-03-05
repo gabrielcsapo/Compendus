@@ -1,39 +1,39 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getRecentBooks } from "../actions/books";
 import { ContinueReadingCarousel } from "../components/dashboard/ContinueReadingCarousel";
 import { ReadingStreakCard } from "../components/dashboard/ReadingStreakCard";
 import { WeeklyReadingChart } from "../components/dashboard/WeeklyReadingChart";
 import { MonthlyHeatmap } from "../components/dashboard/MonthlyHeatmap";
-
-type StatsResponse = {
-  totalMinutes: number;
-  booksRead: number;
-  currentStreak: number;
-  bestStreak: number;
-  todayMinutes: number;
-  last7Days: { date: string; minutes: number }[];
-  last30Days: { date: string; minutes: number }[];
-  topBooks: {
-    bookId: string;
-    minutes: number;
-    title: string;
-    authors: string | null;
-    coverUrl: string | null;
-  }[];
-};
+import type { StatsResponse } from "../actions/stats";
 
 type DashboardData = {
   continueReading: Awaited<ReturnType<typeof getRecentBooks>>;
   stats: StatsResponse | null;
 };
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function DashboardPage({
+  initialContinueReading,
+  initialStats,
+}: {
+  initialContinueReading?: Awaited<ReturnType<typeof getRecentBooks>>;
+  initialStats?: StatsResponse | null;
+}) {
+  const [data, setData] = useState<DashboardData | null>(
+    initialContinueReading
+      ? { continueReading: initialContinueReading, stats: initialStats ?? null }
+      : null,
+  );
+  const [loading, setLoading] = useState(!initialContinueReading);
+  const hadInitialData = useRef(!!initialContinueReading);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
+
     let cancelled = false;
 
     async function load() {

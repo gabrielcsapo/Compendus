@@ -13,7 +13,7 @@ interface Profile {
   avatarUrl: string | null;
   hasPin: boolean;
   isAdmin: boolean;
-  createdAt: string;
+  createdAt: string | null;
 }
 
 const EMOJI_SUGGESTIONS = [
@@ -35,13 +35,14 @@ const EMOJI_SUGGESTIONS = [
   "\u{26A1}",
 ];
 
-export default function ProfileClient() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function ProfileClient({ initialProfile }: { initialProfile?: Profile | null }) {
+  const [profile, setProfile] = useState<Profile | null>(initialProfile ?? null);
+  const [loading, setLoading] = useState(initialProfile === undefined);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hadInitialData = useRef(initialProfile !== undefined);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -60,6 +61,10 @@ export default function ProfileClient() {
   }, []);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     fetchProfile();
   }, [fetchProfile]);
 

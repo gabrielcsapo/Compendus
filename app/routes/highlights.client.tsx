@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useRef } from "react";
 import { Link } from "react-flight-router/client";
 import { getAllHighlights, deleteHighlight, updateHighlightNote } from "../actions/reader";
 import { HighlightNote } from "../components/HighlightNote";
@@ -23,40 +23,44 @@ type HighlightsData = {
   groups: HighlightGroup[];
 };
 
-export default function Highlights() {
-  const [data, setData] = useState<HighlightsData | null>(null);
-  const [loading, setLoading] = useState(true);
+function groupHighlights(highlights: HighlightItem[]): HighlightsData {
+  const grouped = new Map<string, HighlightGroup>();
+  for (const h of highlights) {
+    if (!grouped.has(h.bookId)) {
+      grouped.set(h.bookId, {
+        bookId: h.bookId,
+        bookTitle: h.bookTitle,
+        bookAuthors: h.bookAuthors,
+        bookCoverPath: h.bookCoverPath,
+        bookUpdatedAt: h.bookUpdatedAt,
+        bookFormat: h.bookFormat,
+        highlights: [],
+      });
+    }
+    grouped.get(h.bookId)!.highlights.push(h);
+  }
+  return { totalCount: highlights.length, groups: Array.from(grouped.values()) };
+}
+
+export default function Highlights({ initialHighlights }: { initialHighlights?: HighlightItem[] }) {
+  const [data, setData] = useState<HighlightsData | null>(
+    initialHighlights ? groupHighlights(initialHighlights) : null,
+  );
+  const [loading, setLoading] = useState(!initialHighlights);
   const [isPending, startTransition] = useTransition();
+  const hadInitialData = useRef(!!initialHighlights);
 
   const loadData = async () => {
     const highlights = await getAllHighlights();
-
-    // Group by bookId
-    const grouped = new Map<string, HighlightGroup>();
-
-    for (const h of highlights) {
-      if (!grouped.has(h.bookId)) {
-        grouped.set(h.bookId, {
-          bookId: h.bookId,
-          bookTitle: h.bookTitle,
-          bookAuthors: h.bookAuthors,
-          bookCoverPath: h.bookCoverPath,
-          bookUpdatedAt: h.bookUpdatedAt,
-          bookFormat: h.bookFormat,
-          highlights: [],
-        });
-      }
-      grouped.get(h.bookId)!.highlights.push(h);
-    }
-
-    setData({
-      totalCount: highlights.length,
-      groups: Array.from(grouped.values()),
-    });
+    setData(groupHighlights(highlights));
     setLoading(false);
   };
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     loadData();
   }, []);
 

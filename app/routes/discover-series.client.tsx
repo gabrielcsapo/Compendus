@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-flight-router/client";
 import { BookCover } from "../components/BookCover";
 import { addToWantedList, isBookWanted } from "../actions/wanted";
@@ -14,17 +14,26 @@ import {
 import type { MetadataSearchResult } from "../lib/metadata";
 import { badgeStyles } from "../lib/styles";
 
-export default function Component() {
-  const [seriesList, setSeriesList] = useState<SeriesWithCounts[]>([]);
+export default function Component({
+  initialSeriesList,
+}: {
+  initialSeriesList?: SeriesWithCounts[];
+}) {
+  const [seriesList, setSeriesList] = useState<SeriesWithCounts[]>(initialSeriesList ?? []);
   const [selectedSeries, setSelectedSeries] = useState<string | null>(null);
   const [seriesDetails, setSeriesDetails] = useState<SeriesInfo | null>(null);
   const [missingBooks, setMissingBooks] = useState<MetadataSearchResult[]>([]);
   const [wantedMap, setWantedMap] = useState<Map<string, boolean>>(new Map());
   const [loading, setLoading] = useState(false);
-  const [loadingList, setLoadingList] = useState(true);
+  const [loadingList, setLoadingList] = useState(!initialSeriesList);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const hadInitialData = useRef(!!initialSeriesList);
 
   useEffect(() => {
+    if (hadInitialData.current) {
+      hadInitialData.current = false;
+      return;
+    }
     loadSeriesList();
   }, []);
 

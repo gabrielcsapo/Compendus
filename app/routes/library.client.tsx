@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
 import { getCoverUrl } from "../lib/cover";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
@@ -50,10 +50,17 @@ type LibraryData = {
   otherFormatBooks: Awaited<ReturnType<typeof getBooks>>;
 };
 
-export default function LibraryPage() {
+export default function LibraryPage({
+  initialData,
+  initialSearchParamsKey,
+}: {
+  initialData?: LibraryData;
+  initialSearchParamsKey?: string;
+}) {
   const [searchParams] = useSearchParams();
-  const [data, setData] = useState<LibraryData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<LibraryData | null>(initialData ?? null);
+  const [loading, setLoading] = useState(!initialData);
+  const skippedInitial = useRef(false);
 
   const view = searchParams.get("view");
   const seriesFilter = searchParams.get("series");
@@ -65,6 +72,16 @@ export default function LibraryPage() {
   const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
 
   useEffect(() => {
+    if (
+      !skippedInitial.current &&
+      initialData &&
+      initialSearchParamsKey === searchParams.toString()
+    ) {
+      skippedInitial.current = true;
+      return;
+    }
+    skippedInitial.current = true;
+
     let cancelled = false;
     setLoading(true);
 

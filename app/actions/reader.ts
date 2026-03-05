@@ -1,17 +1,9 @@
 "use server";
 
-import {
-  db,
-  books,
-  bookmarks,
-  highlights,
-  userBookState,
-  readingSessions,
-  profiles,
-} from "../lib/db";
+import { db, books, bookmarks, highlights, userBookState, readingSessions } from "../lib/db";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { getRequest } from "react-flight-router/server";
+import { resolveProfileId } from "../lib/profile";
 import { getContent, paginationEngine } from "../lib/reader";
 import type {
   ViewportConfig,
@@ -341,29 +333,7 @@ export async function getBookProgress(
 // PROFILE RESOLUTION
 // ============================================
 
-/**
- * Resolve the active profileId from the request cookie or fallback to
- * the single profile if only one exists. Mirrors the logic in
- * server/middleware/profile.ts but works inside server actions where
- * the Hono context is not available.
- */
-function resolveProfileId(): string | undefined {
-  const request = getRequest();
-  if (request) {
-    const cookieHeader = request.headers.get("Cookie") ?? "";
-    const match = cookieHeader.match(/(?:^|;\s*)compendus-profile=([^;]+)/);
-    if (match) {
-      const id = decodeURIComponent(match[1]);
-      // Verify the profile exists
-      const profile = db.select().from(profiles).where(eq(profiles.id, id)).get();
-      if (profile) return profile.id;
-    }
-  }
-  // Fallback: auto-select if exactly one profile exists
-  const allProfiles = db.select().from(profiles).all();
-  if (allProfiles.length === 1) return allProfiles[0].id;
-  return undefined;
-}
+// resolveProfileId is imported from ../lib/profile
 
 // ============================================
 // READING SESSIONS
