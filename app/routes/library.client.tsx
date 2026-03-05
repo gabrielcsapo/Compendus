@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
-import { getBooks, getBooksCount, getRecentBooks, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
+import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { SeriesCard } from "../components/SeriesCard";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
-import { BookGrid } from "../components/BookGrid";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 import { TypeTabs, type TypeFilter } from "../components/TypeTabs";
@@ -31,7 +30,7 @@ function getSortParams(sort: SortOption): {
   }
 }
 
-type HomeData = {
+type LibraryData = {
   view: "series" | "books";
   seriesList: Array<{
     name: string;
@@ -41,7 +40,6 @@ type HomeData = {
   seriesFilter: string | null;
   books: Awaited<ReturnType<typeof getBooks>>;
   totalCount: number;
-  recentBooks: Awaited<ReturnType<typeof getRecentBooks>>;
   unmatchedCount: number;
   currentSort: SortOption;
   currentType: TypeFilter;
@@ -50,9 +48,9 @@ type HomeData = {
   otherFormatBooks: Awaited<ReturnType<typeof getBooks>>;
 };
 
-export default function Home() {
+export default function LibraryPage() {
   const [searchParams] = useSearchParams();
-  const [data, setData] = useState<HomeData | null>(null);
+  const [data, setData] = useState<LibraryData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const view = searchParams.get("view");
@@ -87,7 +85,6 @@ export default function Home() {
           seriesFilter: null,
           books: [],
           totalCount: 0,
-          recentBooks: [],
           unmatchedCount: 0,
           currentSort: sort,
           currentType: type,
@@ -97,10 +94,9 @@ export default function Home() {
         };
       }
 
-      const [books, totalCount, recentBooks, unmatchedCount, formatCounts, otherFormatBooks] = await Promise.all([
+      const [books, totalCount, unmatchedCount, formatCounts, otherFormatBooks] = await Promise.all([
         getBooks({ limit: BOOKS_PER_PAGE, offset: 0, orderBy, order, type: typeFilter, format, series: seriesFilter || undefined }),
         getBooksCount(typeFilter, format, seriesFilter || undefined),
-        seriesFilter ? Promise.resolve([]) : getRecentBooks(5),
         getUnmatchedBooksCount(),
         getFormatCounts(typeFilter),
         // When viewing a series with a type filter, also get books in other formats
@@ -109,11 +105,10 @@ export default function Home() {
 
       return {
         view: "books" as const,
-        seriesList: [] as HomeData["seriesList"],
+        seriesList: [] as LibraryData["seriesList"],
         seriesFilter,
         books,
         totalCount,
-        recentBooks,
         unmatchedCount,
         currentSort: sort,
         currentType: type,
@@ -145,7 +140,7 @@ export default function Home() {
 
   const {
     view: currentView, seriesList, seriesFilter: currentSeriesFilter,
-    books, totalCount, recentBooks, unmatchedCount,
+    books, totalCount, unmatchedCount,
     currentSort, currentType, currentFormats, formatCounts, otherFormatBooks,
   } = data;
 
@@ -158,7 +153,7 @@ export default function Home() {
             {currentSeriesFilter ? (
               <>
                 <div className="flex items-center gap-2 mb-1">
-                  <Link to={`/?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`} className="text-sm text-primary hover:text-primary-hover transition-colors">
+                  <Link to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`} className="text-sm text-primary hover:text-primary-hover transition-colors">
                     &larr; All Series
                   </Link>
                 </div>
@@ -181,29 +176,54 @@ export default function Home() {
               </>
             )}
           </div>
-          {!currentSeriesFilter && unmatchedCount > 0 && (
-            <Link
-              to="/admin/unmatched"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <span className="font-medium">{unmatchedCount}</span>
-            </Link>
-          )}
+          <div className="flex items-center gap-2">
+            {!currentSeriesFilter && unmatchedCount > 0 && (
+              <Link
+                to="/admin/unmatched"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <span className="font-medium">{unmatchedCount}</span>
+              </Link>
+            )}
+            {/* Browse by links */}
+            {!currentSeriesFilter && currentView !== "series" && (
+              <>
+                <Link
+                  to="/collections"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Collections
+                </Link>
+                <Link
+                  to="/tags"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                  Tags
+                </Link>
+              </>
+            )}
+          </div>
         </div>
         {!currentSeriesFilter && (
           <div className="flex flex-wrap items-center gap-3">
             {/* View mode toggle */}
             <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
               <Link
-                to={`/?${currentType !== "all" ? `type=${currentType}&` : ""}${currentSort !== "recent" ? `sort=${currentSort}` : ""}`}
+                to={`/library?${currentType !== "all" ? `type=${currentType}&` : ""}${currentSort !== "recent" ? `sort=${currentSort}` : ""}`}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
                   currentView !== "series"
                     ? "bg-primary text-white shadow-sm"
@@ -216,7 +236,7 @@ export default function Home() {
                 Books
               </Link>
               <Link
-                to={`/?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
+                to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
                   currentView === "series"
                     ? "bg-primary text-white shadow-sm"
@@ -229,7 +249,7 @@ export default function Home() {
                 Series
               </Link>
             </div>
-            <TypeTabs currentType={currentType} currentSort={currentSort} currentView={currentView} />
+            <TypeTabs currentType={currentType} currentSort={currentSort} currentView={currentView} basePath="/library" />
             {currentView !== "series" && (
               <>
                 {formatCounts.length > 1 && (
@@ -278,14 +298,6 @@ export default function Home() {
         </section>
       ) : (
         <>
-          {/* Recently read */}
-          {recentBooks.length > 0 && !currentSeriesFilter && (
-            <section className="mb-10">
-              <h2 className="text-lg font-semibold mb-4 text-foreground">Continue Reading</h2>
-              <BookGrid books={recentBooks} size="compact" />
-            </section>
-          )}
-
           {/* Books grid with infinite scroll */}
           <section>
             <InfiniteBookGrid
@@ -306,7 +318,27 @@ export default function Home() {
               <p className="text-sm text-foreground-muted mb-4">
                 {otherFormatBooks.length} {otherFormatBooks.length === 1 ? "book" : "books"} from this series in other formats
               </p>
-              <BookGrid books={otherFormatBooks} size="compact" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                {otherFormatBooks.map((book) => (
+                  <Link key={book.id} to={`/book/${book.id}`} className="group">
+                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-surface-elevated shadow-md">
+                      {book.coverPath ? (
+                        <img
+                          src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
+                          alt={book.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
+                          <span className="text-xs text-foreground-muted">{book.title}</span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs font-medium mt-1 text-foreground line-clamp-1">{book.title}</p>
+                    <p className="text-[10px] text-foreground-muted uppercase">{book.format}</p>
+                  </Link>
+                ))}
+              </div>
             </section>
           )}
         </>

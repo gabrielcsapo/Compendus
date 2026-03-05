@@ -57,90 +57,21 @@ struct StorageBreakdownView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingCacheClearConfirmation = false
 
-    private var segments: [StorageSegment] {
-        var result: [StorageSegment] = []
-
-        // Split books by format
-        let ebooks = books.filter { ["epub", "pdf"].contains($0.format.lowercased()) }
-        let audiobooks = books.filter { ["m4b", "mp3", "m4a"].contains($0.format.lowercased()) }
-        let comics = books.filter { ["cbr", "cbz"].contains($0.format.lowercased()) }
-        let other = books.filter { book in
-            !["epub", "pdf", "m4b", "mp3", "m4a", "cbr", "cbz"].contains(book.format.lowercased())
-        }
-
-        let ebookBytes = Int64(ebooks.reduce(0) { $0 + $1.fileSize })
-        let audioBytes = Int64(audiobooks.reduce(0) { $0 + $1.fileSize })
-        let comicBytes = Int64(comics.reduce(0) { $0 + $1.fileSize })
-        let otherBytes = Int64(other.reduce(0) { $0 + $1.fileSize })
-
-        if ebookBytes > 0 { result.append(StorageSegment(category: "Ebooks", bytes: ebookBytes, color: .blue)) }
-        if audioBytes > 0 { result.append(StorageSegment(category: "Audiobooks", bytes: audioBytes, color: .green)) }
-        if comicBytes > 0 { result.append(StorageSegment(category: "Comics", bytes: comicBytes, color: .purple)) }
-        if otherBytes > 0 { result.append(StorageSegment(category: "Other", bytes: otherBytes, color: .orange)) }
-
-        let comicCacheBytes = storageManager.comicCacheSize()
-        let coverCacheBytes = storageManager.coverCacheSize()
-        let ttsCacheBytes = storageManager.ttsCacheSize()
-
-        if comicCacheBytes > 0 { result.append(StorageSegment(category: "Comic Cache", bytes: comicCacheBytes, color: .indigo)) }
-        if coverCacheBytes > 0 { result.append(StorageSegment(category: "Cover Cache", bytes: coverCacheBytes, color: .mint)) }
-        if ttsCacheBytes > 0 { result.append(StorageSegment(category: "TTS Cache", bytes: ttsCacheBytes, color: .teal)) }
-
-        return result
-    }
-
-    private var cacheEntries: [CacheEntry] {
-        var entries: [CacheEntry] = []
-        let comicCacheBytes = storageManager.comicCacheSize()
-        let coverCacheBytes = storageManager.coverCacheSize()
-        let ttsCacheBytes = storageManager.ttsCacheSize()
-
-        if comicCacheBytes > 0 {
-            entries.append(CacheEntry(
-                name: "Comic Cache",
-                icon: "book.pages",
-                color: .indigo,
-                bytes: comicCacheBytes,
-                clearAction: { try storageManager.clearComicCache() }
-            ))
-        }
-        if coverCacheBytes > 0 {
-            entries.append(CacheEntry(
-                name: "Cover Cache",
-                icon: "photo",
-                color: .mint,
-                bytes: coverCacheBytes,
-                clearAction: { try storageManager.clearCoverCache() }
-            ))
-        }
-        if ttsCacheBytes > 0 {
-            entries.append(CacheEntry(
-                name: "TTS Cache",
-                icon: "waveform",
-                color: .teal,
-                bytes: ttsCacheBytes,
-                clearAction: { try storageManager.clearTTSCache() }
-            ))
-        }
-        return entries
-    }
-
-    /// All items (books + caches) sorted by size descending
-    private var allItems: [StorageItem] {
-        var items: [StorageItem] = books.map { .book($0) }
-        items.append(contentsOf: cacheEntries.map { .cache($0) })
-        return items.sorted { $0.bytes > $1.bytes }
-    }
+    // Cached storage data — loaded async to avoid blocking main thread with directory enumeration
+    @State private var cachedSegments: [StorageSegment] = []
+    @State private var cachedCacheEntries: [CacheEntry] = []
+    @State private var cachedAllItems: [StorageItem] = []
+    @State private var cachedAvailableBytes: Int64 = 0
 
     var body: some View {
         NavigationStack {
             List {
                 // Ring chart
                 Section {
-                    if !segments.isEmpty {
+                    if !cachedSegments.isEmpty {
                         StorageRingChart(
-                            segments: segments,
-                            availableBytes: storageManager.availableDiskSpace()
+                            segments: cachedSegments,
+                            availableBytes: cachedAvailableBytes
                         )
                         .frame(maxWidth: .infinity)
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
@@ -149,11 +80,11 @@ struct StorageBreakdownView: View {
 
                 // All items sorted by size
                 Section {
-                    if allItems.isEmpty {
+                    if cachedAllItems.isEmpty {
                         Text("No downloaded content")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(allItems) { item in
+                        ForEach(cachedAllItems) { item in
                             switch item {
                             case .book(let book):
                                 StorageBookRow(book: book)
@@ -199,6 +130,7 @@ struct StorageBreakdownView: View {
                 Button("Delete", role: .destructive) {
                     if let book = bookToDelete {
                         try? downloadManager.deleteBook(book, modelContext: modelContext)
+                        refreshStorageData()
                     }
                     bookToDelete = nil
                 }
@@ -216,8 +148,9 @@ struct StorageBreakdownView: View {
                 titleVisibility: .visible
             ) {
                 Button("Clear", role: .destructive) {
-                    if let name = cacheToDelete, let entry = cacheEntries.first(where: { $0.name == name }) {
+                    if let name = cacheToDelete, let entry = cachedCacheEntries.first(where: { $0.name == name }) {
                         try? entry.clearAction()
+                        refreshStorageData()
                     }
                     cacheToDelete = nil
                 }
@@ -228,6 +161,67 @@ struct StorageBreakdownView: View {
                 if let name = cacheToDelete {
                     Text("This will clear all data in \(name).")
                 }
+            }
+            .task {
+                refreshStorageData()
+            }
+            .onChange(of: allBooks.count) { _, _ in
+                refreshStorageData()
+            }
+        }
+    }
+
+    /// Compute storage data off the main thread, then update state
+    private func refreshStorageData() {
+        let sm = storageManager
+        let currentBooks = books
+        Task.detached(priority: .userInitiated) {
+            let comicCacheBytes = sm.comicCacheSize()
+            let coverCacheBytes = sm.coverCacheSize()
+            let ttsCacheBytes = sm.ttsCacheSize()
+            let available = sm.availableDiskSpace()
+
+            // Build segments
+            var segs: [StorageSegment] = []
+            var ebookBytes: Int64 = 0, audioBytes: Int64 = 0, comicBytes: Int64 = 0, otherBytes: Int64 = 0
+            for book in currentBooks {
+                let fmt = book.format.lowercased()
+                let size = Int64(book.fileSize)
+                if ["epub", "pdf"].contains(fmt) { ebookBytes += size }
+                else if ["m4b", "mp3", "m4a"].contains(fmt) { audioBytes += size }
+                else if ["cbr", "cbz"].contains(fmt) { comicBytes += size }
+                else { otherBytes += size }
+            }
+            if ebookBytes > 0 { segs.append(StorageSegment(category: "Ebooks", bytes: ebookBytes, color: .blue)) }
+            if audioBytes > 0 { segs.append(StorageSegment(category: "Audiobooks", bytes: audioBytes, color: .green)) }
+            if comicBytes > 0 { segs.append(StorageSegment(category: "Comics", bytes: comicBytes, color: .purple)) }
+            if otherBytes > 0 { segs.append(StorageSegment(category: "Other", bytes: otherBytes, color: .orange)) }
+            if comicCacheBytes > 0 { segs.append(StorageSegment(category: "Comic Cache", bytes: comicCacheBytes, color: .indigo)) }
+            if coverCacheBytes > 0 { segs.append(StorageSegment(category: "Cover Cache", bytes: coverCacheBytes, color: .mint)) }
+            if ttsCacheBytes > 0 { segs.append(StorageSegment(category: "TTS Cache", bytes: ttsCacheBytes, color: .teal)) }
+
+            // Build cache entries
+            var entries: [CacheEntry] = []
+            if comicCacheBytes > 0 {
+                entries.append(CacheEntry(name: "Comic Cache", icon: "book.pages", color: .indigo, bytes: comicCacheBytes, clearAction: { try sm.clearComicCache() }))
+            }
+            if coverCacheBytes > 0 {
+                entries.append(CacheEntry(name: "Cover Cache", icon: "photo", color: .mint, bytes: coverCacheBytes, clearAction: { try sm.clearCoverCache() }))
+            }
+            if ttsCacheBytes > 0 {
+                entries.append(CacheEntry(name: "TTS Cache", icon: "waveform", color: .teal, bytes: ttsCacheBytes, clearAction: { try sm.clearTTSCache() }))
+            }
+
+            // Build all items
+            var items: [StorageItem] = currentBooks.map { .book($0) }
+            items.append(contentsOf: entries.map { .cache($0) })
+            items.sort { $0.bytes > $1.bytes }
+
+            await MainActor.run {
+                cachedSegments = segs
+                cachedCacheEntries = entries
+                cachedAllItems = items
+                cachedAvailableBytes = available
             }
         }
     }

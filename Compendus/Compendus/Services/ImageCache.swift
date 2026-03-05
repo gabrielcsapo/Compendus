@@ -13,7 +13,13 @@ import UIKit
 class ImageCache {
     private let memoryCache = NSCache<NSString, UIImage>()
     private let fileManager = FileManager.default
+    // Thread safety: all access to inFlightRequests is on @MainActor
     private var inFlightRequests: [String: Task<UIImage?, Never>] = [:]
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10
+        return URLSession(configuration: config)
+    }()
 
     /// Cover cache directory URL
     var cacheURL: URL {
@@ -55,7 +61,7 @@ class ImageCache {
             defer { inFlightRequests.removeValue(forKey: bookId) }
 
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
+                let (data, _) = try await session.data(from: url)
                 guard let image = UIImage(data: data) else { return nil }
 
                 // Save to disk
@@ -90,7 +96,7 @@ class ImageCache {
         let task = Task<UIImage?, Never> {
             defer { inFlightRequests.removeValue(forKey: bookId) }
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
+                let (data, _) = try await session.data(from: url)
                 guard let image = UIImage(data: data) else { return nil }
                 try? data.write(to: diskURL)
                 memoryCache.setObject(image, forKey: key)

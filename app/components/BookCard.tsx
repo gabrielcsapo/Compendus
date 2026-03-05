@@ -123,7 +123,7 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
               <span className="text-foreground-muted">#{book.seriesNumber} in </span>
             )}
             <Link
-              to={`/?series=${encodeURIComponent(book.series)}`}
+              to={`/library?series=${encodeURIComponent(book.series)}`}
               className="text-primary hover:text-primary-hover font-medium"
             >
               {book.series}

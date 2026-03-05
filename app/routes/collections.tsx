@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { getCollections, getCollectionBookCount } from "../actions/collections";
 import { CreateCollectionButton } from "../components/CreateCollectionModal";
@@ -5,29 +6,21 @@ import { CreateCollectionButton } from "../components/CreateCollectionModal";
 export default async function Collections() {
   const collections = await getCollections();
 
-  // Get book counts for each collection
-  const collectionsWithCounts = await Promise.all(
-    collections.map(async (collection) => ({
-      ...collection,
-      bookCount: await getCollectionBookCount(collection.id),
-    })),
-  );
-
   return (
     <main className="container my-8 px-6 mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Collections</h1>
           <p className="text-foreground-muted">
-            {collectionsWithCounts.length} {collectionsWithCounts.length === 1 ? "collection" : "collections"}
+            {collections.length} {collections.length === 1 ? "collection" : "collections"}
           </p>
         </div>
         <CreateCollectionButton />
       </div>
 
-      {collectionsWithCounts.length > 0 ? (
+      {collections.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {collectionsWithCounts.map((collection) => (
+          {collections.map((collection) => (
             <Link
               key={collection.id}
               to={`/collection/${collection.id}`}
@@ -47,9 +40,9 @@ export default async function Collections() {
                     {collection.description}
                   </p>
                 )}
-                <p className="text-sm text-foreground-muted">
-                  {collection.bookCount} {collection.bookCount === 1 ? "book" : "books"}
-                </p>
+                <Suspense fallback={<span className="text-sm text-foreground-muted">&hellip;</span>}>
+                  <CollectionBookCount collectionId={collection.id} />
+                </Suspense>
               </div>
             </Link>
           ))}
@@ -78,5 +71,14 @@ export default async function Collections() {
         </div>
       )}
     </main>
+  );
+}
+
+async function CollectionBookCount({ collectionId }: { collectionId: string }) {
+  const bookCount = await getCollectionBookCount(collectionId);
+  return (
+    <p className="text-sm text-foreground-muted">
+      {bookCount} {bookCount === 1 ? "book" : "books"}
+    </p>
   );
 }

@@ -67,7 +67,7 @@ struct ReadingStreakView: View {
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showingStats) {
-            ReadingStatsView()
+            ReadingDashboardView()
         }
         .task { await calculateStreak() }
         .redacted(reason: isLoading ? .placeholder : [])

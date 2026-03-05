@@ -45,10 +45,10 @@ struct TTSCacheBreakdownView: View {
         let isWhisper: Bool // true = audiobook transcript, false = TTS transcript
     }
 
+    @State private var cachedTTSBytes: Int64 = 0
+
     private var totalSize: Int64 {
-        let ttsBytes = storageManager.ttsCacheSize()
-        let transcriptBytes = Int64(transcribedBooks.reduce(0) { $0 + $1.dataSize })
-        return ttsBytes + transcriptBytes
+        cachedTTSBytes + Int64(transcribedBooks.reduce(0) { $0 + $1.dataSize })
     }
 
     var body: some View {
@@ -136,7 +136,7 @@ struct TTSCacheBreakdownView: View {
         }
         .navigationTitle("Generated Data")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { refreshLists() }
+        .task { await refreshListsAsync() }
         .confirmationDialog(
             "Delete TTS Cache?",
             isPresented: $showingDeleteTTSConfirmation,
@@ -206,36 +206,47 @@ struct TTSCacheBreakdownView: View {
 
     // MARK: - Data Loading
 
-    private func refreshLists() {
-        refreshTTSCache()
+    private func refreshListsAsync() async {
+        let sm = storageManager
+        let currentBooks = books
+        let bookMap = Dictionary(uniqueKeysWithValues: currentBooks.map { ($0.id, $0) })
+
+        let result = await Task.detached(priority: .userInitiated) {
+            let bookIds = sm.ttsCacheBookIds()
+            let totalTTS = sm.ttsCacheSize()
+
+            let cached: [CachedBookInfo] = bookIds.compactMap { bookId in
+                let size = sm.ttsCacheSize(for: bookId)
+                guard size > 0 else { return nil }
+
+                let book = bookMap[bookId]
+                let title = book?.title ?? "Unknown Book"
+                let authors = book?.authors.joined(separator: ", ") ?? bookId
+
+                let cacheDir = sm.ttsCacheURL.appendingPathComponent(bookId, isDirectory: true)
+                let chapterCount = (try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil))?
+                    .filter { $0.pathExtension == "pcm" }.count ?? 0
+
+                return CachedBookInfo(
+                    id: bookId,
+                    title: title,
+                    authors: authors,
+                    cacheSize: size,
+                    chapterCount: chapterCount
+                )
+            }
+            .sorted { $0.cacheSize > $1.cacheSize }
+
+            return (cached, totalTTS)
+        }.value
+
+        ttsCachedBooks = result.0
+        cachedTTSBytes = result.1
         refreshTranscriptions()
     }
 
-    private func refreshTTSCache() {
-        let bookIds = storageManager.ttsCacheBookIds()
-        let bookMap = Dictionary(uniqueKeysWithValues: books.map { ($0.id, $0) })
-
-        ttsCachedBooks = bookIds.compactMap { bookId in
-            let size = storageManager.ttsCacheSize(for: bookId)
-            guard size > 0 else { return nil }
-
-            let book = bookMap[bookId]
-            let title = book?.title ?? "Unknown Book"
-            let authors = book?.authors.joined(separator: ", ") ?? bookId
-
-            let cacheDir = storageManager.ttsCacheURL.appendingPathComponent(bookId, isDirectory: true)
-            let chapterCount = (try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil))?
-                .filter { $0.pathExtension == "pcm" }.count ?? 0
-
-            return CachedBookInfo(
-                id: bookId,
-                title: title,
-                authors: authors,
-                cacheSize: size,
-                chapterCount: chapterCount
-            )
-        }
-        .sorted { $0.cacheSize > $1.cacheSize }
+    private func refreshLists() {
+        Task { await refreshListsAsync() }
     }
 
     private func refreshTranscriptions() {

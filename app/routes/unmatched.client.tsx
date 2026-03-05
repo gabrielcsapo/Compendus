@@ -223,7 +223,7 @@ export default function UnmatchedBooks() {
             You processed {processedCount} {processedCount === 1 ? "book" : "books"} this session.
           </p>
         )}
-        <Link to="/" className={`${buttonStyles.base} ${buttonStyles.primary}`}>
+        <Link to="/library" className={`${buttonStyles.base} ${buttonStyles.primary}`}>
           Back to Library
         </Link>
       </div>

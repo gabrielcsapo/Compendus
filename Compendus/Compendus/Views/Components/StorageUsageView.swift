@@ -12,6 +12,10 @@ struct StorageUsageView: View {
 
     var onTap: (() -> Void)?
 
+    @State private var usedDisplay: String = ""
+    @State private var availableDisplay: String = ""
+    @State private var usedRatio: CGFloat = 0
+
     init(onTap: (() -> Void)? = nil) {
         self.onTap = onTap
     }
@@ -27,7 +31,7 @@ struct StorageUsageView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     HStack(spacing: 4) {
-                        Text(storageManager.totalStorageUsedDisplay())
+                        Text(usedDisplay)
                             .font(.subheadline)
                             .fontWeight(.medium)
                         Image(systemName: "chevron.right")
@@ -38,10 +42,6 @@ struct StorageUsageView: View {
 
                 GeometryReader { geometry in
                     let totalWidth = geometry.size.width
-                    let usedBytes = storageManager.totalStorageUsed()
-                    let availableBytes = storageManager.availableDiskSpace()
-                    let totalBytes = usedBytes + availableBytes
-                    let usedRatio = totalBytes > 0 ? CGFloat(usedBytes) / CGFloat(totalBytes) : 0
 
                     ZStack(alignment: .leading) {
                         // Background
@@ -58,7 +58,7 @@ struct StorageUsageView: View {
                 .frame(height: 8)
 
                 HStack {
-                    Text("\(storageManager.availableDiskSpaceDisplay()) available")
+                    Text("\(availableDisplay) available")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -70,6 +70,28 @@ struct StorageUsageView: View {
             .shadow(Shadow.subtle)
         }
         .buttonStyle(.plain)
+        .task {
+            refreshStorageInfo()
+        }
+    }
+
+    private func refreshStorageInfo() {
+        let sm = storageManager
+        Task.detached(priority: .userInitiated) {
+            let used = sm.totalStorageUsed()
+            let available = sm.availableDiskSpace()
+            let total = used + available
+            let ratio = total > 0 ? CGFloat(used) / CGFloat(total) : 0
+            let formatter = ByteCountFormatter()
+            formatter.countStyle = .file
+            let usedStr = formatter.string(fromByteCount: used)
+            let availStr = formatter.string(fromByteCount: available)
+            await MainActor.run {
+                usedDisplay = usedStr
+                availableDisplay = availStr
+                usedRatio = ratio
+            }
+        }
     }
 
     private func usageColor(ratio: CGFloat) -> Color {

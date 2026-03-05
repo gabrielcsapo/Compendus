@@ -71,7 +71,7 @@ export function Footer({ variant = "full" }: FooterProps) {
             <ul className="space-y-2 text-sm">
               <li>
                 <Link
-                  to="/"
+                  to="/library"
                   className="text-foreground-muted hover:text-foreground transition-colors"
                 >
                   Browse Books

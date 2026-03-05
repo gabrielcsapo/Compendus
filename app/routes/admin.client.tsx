@@ -19,7 +19,7 @@ export default function AdminLayout() {
       {/* Header */}
       <div className="mb-8">
         <Link
-          to="/"
+          to="/library"
           className="text-primary hover:text-primary-hover text-sm font-medium transition-colors"
         >
           &larr; Back to Library

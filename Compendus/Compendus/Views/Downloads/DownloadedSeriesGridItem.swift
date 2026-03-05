@@ -50,9 +50,13 @@ struct DownloadedSeriesGridItem: View {
     @ViewBuilder
     private func coverContent(_ book: DownloadedSeriesCoverBook) -> some View {
         if let data = book.coverData, let uiImage = UIImage(data: data) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+            Color.clear
+                .overlay {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                }
+                .clipped()
         } else {
             RoundedRectangle(cornerRadius: 6)
                 .fill(

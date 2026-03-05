@@ -100,7 +100,7 @@ struct LibraryView: View {
     }
 
     @State private var books: [Book] = []
-    @State private var isLoading = false
+    @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var searchText = ""
     @State private var hasMore = true

@@ -36,6 +36,8 @@ class AudiobookPlayer: NSObject {
     @ObservationIgnored private var progressSaveTimer: Timer?
     @ObservationIgnored private var currentSession: ReadingSession?
     @ObservationIgnored private var sessionContext: ModelContext?
+    @ObservationIgnored private var lifecycleObserver: Any?
+    @ObservationIgnored private var interruptionObserver: Any?
 
     override init() {
         super.init()
@@ -277,7 +279,7 @@ class AudiobookPlayer: NSObject {
     }
 
     private func observeAppLifecycle() {
-        NotificationCenter.default.addObserver(
+        lifecycleObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willResignActiveNotification,
             object: nil,
             queue: .main
@@ -289,7 +291,7 @@ class AudiobookPlayer: NSObject {
     }
 
     private func observeAudioInterruptions() {
-        NotificationCenter.default.addObserver(
+        interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil,
             queue: .main
@@ -303,6 +305,17 @@ class AudiobookPlayer: NSObject {
                     self?.stopTimer()
                 }
             }
+        }
+    }
+
+    private func removeObservers() {
+        if let observer = lifecycleObserver {
+            NotificationCenter.default.removeObserver(observer)
+            lifecycleObserver = nil
+        }
+        if let observer = interruptionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            interruptionObserver = nil
         }
     }
 
@@ -402,6 +415,7 @@ class AudiobookPlayer: NSObject {
     }
 
     private func stopPlayback() {
+        player?.delegate = nil
         player?.stop()
         player = nil
         isPlaying = false

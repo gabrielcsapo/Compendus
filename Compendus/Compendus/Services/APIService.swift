@@ -39,9 +39,15 @@ enum APIError: LocalizedError {
 @Observable
 class APIService {
     let config: ServerConfig
+    let session: URLSession
 
     init(config: ServerConfig) {
         self.config = config
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 120
+        configuration.waitsForConnectivity = true
+        self.session = URLSession(configuration: configuration)
     }
 
     // MARK: - Books
@@ -168,7 +174,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -205,7 +211,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -249,7 +255,7 @@ class APIService {
         let body = ["transcript": transcript]
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8)
@@ -265,7 +271,7 @@ class APIService {
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
@@ -285,7 +291,7 @@ class APIService {
         request.httpBody = try JSONEncoder().encode(updates)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -323,7 +329,7 @@ class APIService {
         request.httpBody = try JSONEncoder().encode(["name": name])
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -349,7 +355,7 @@ class APIService {
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
@@ -372,7 +378,7 @@ class APIService {
         }
         // Don't add profile header for this endpoint (it's pre-auth)
         let request = URLRequest(url: url)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -394,7 +400,7 @@ class APIService {
         } else {
             request.httpBody = "{}".data(using: .utf8)
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -414,7 +420,7 @@ class APIService {
             throw APIError.invalidURL
         }
         let request = buildRequest(url)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -435,7 +441,7 @@ class APIService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(ProfileCreateRequest(name: name, avatar: avatar, pin: pin))
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -453,7 +459,7 @@ class APIService {
         }
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -485,7 +491,7 @@ class APIService {
     private func fetchData(_ url: URL) async throws -> Data {
         do {
             let request = buildRequest(url)
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse

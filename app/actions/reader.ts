@@ -204,6 +204,7 @@ export async function getAllHighlights(profileId?: string): Promise<
     bookTitle: string;
     bookAuthors: string[];
     bookCoverPath?: string;
+    bookUpdatedAt?: Date;
     bookFormat: string;
   }[]
 > {
@@ -220,6 +221,7 @@ export async function getAllHighlights(profileId?: string): Promise<
       bookTitle: books.title,
       bookAuthors: books.authors,
       bookCoverPath: books.coverPath,
+      bookUpdatedAt: books.updatedAt,
       bookFormat: books.format,
     })
     .from(highlights)
@@ -244,6 +246,7 @@ export async function getAllHighlights(profileId?: string): Promise<
     bookTitle: h.bookTitle,
     bookAuthors: h.bookAuthors ? JSON.parse(h.bookAuthors) : [],
     bookCoverPath: h.bookCoverPath ?? undefined,
+    bookUpdatedAt: h.bookUpdatedAt ?? undefined,
     bookFormat: h.bookFormat,
   }));
 }

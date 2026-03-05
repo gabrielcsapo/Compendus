@@ -32,13 +32,13 @@ struct ContentView: View {
                 @Bindable var player = audiobookPlayer
                 VStack(spacing: 0) {
                     TabView(selection: $nav.selectedTab) {
-                        LibraryView()
-                            .tabItem { Label("Library", systemImage: "books.vertical") }
+                        DownloadsView()
+                            .tabItem { Label("Home", systemImage: "house") }
                             .tag(0)
                             .toolbar(.hidden, for: .tabBar)
 
-                        DownloadsView()
-                            .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+                        LibraryView()
+                            .tabItem { Label("Library", systemImage: "books.vertical") }
                             .tag(1)
                             .toolbar(.hidden, for: .tabBar)
 
@@ -103,7 +103,7 @@ struct ContentView: View {
             } else {
                 deepLinkedBook = book
             }
-            appNavigation.selectedTab = 1
+            appNavigation.selectedTab = 0
         }
 
         deepLinkBookId.wrappedValue = nil
@@ -124,8 +124,8 @@ struct CustomBottomBar: View {
     }
 
     private let tabs: [TabItem] = [
+        TabItem(icon: "house", activeIcon: "house.fill", label: "Home"),
         TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
-        TabItem(icon: "arrow.down.circle", activeIcon: "arrow.down.circle.fill", label: "Downloads"),
         TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
         TabItem(icon: "gear", activeIcon: "gearshape.fill", label: "Settings"),
     ]

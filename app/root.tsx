@@ -1,4 +1,5 @@
 import "./styles.css";
+import { Suspense } from "react";
 import { Outlet, ScrollRestoration } from "react-flight-router/client";
 import { ClientShell } from "./components/ClientShell";
 
@@ -47,10 +48,20 @@ export default function Root() {
       </head>
       <body className="min-h-screen flex flex-col">
         <ClientShell>
-          <Outlet />
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <Outlet />
+          </Suspense>
         </ClientShell>
         <ScrollRestoration />
       </body>
     </html>
+  );
+}
+
+function RouteLoadingFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center py-20">
+      <div className="w-8 h-8 border-3 border-primary/30 border-t-primary rounded-full animate-spin" />
+    </div>
   );
 }

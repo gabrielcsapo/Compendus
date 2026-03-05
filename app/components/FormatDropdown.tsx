@@ -10,6 +10,7 @@ interface FormatDropdownProps {
   selectedFormats: string[];
   currentType: TypeFilter;
   currentSort: string;
+  basePath?: string;
 }
 
 export function FormatDropdown({
@@ -17,6 +18,7 @@ export function FormatDropdown({
   selectedFormats,
   currentType,
   currentSort,
+  basePath = "/library",
 }: FormatDropdownProps) {
   const { navigate } = useRouter();
   const [open, setOpen] = useState(false);
@@ -49,7 +51,7 @@ export function FormatDropdown({
       params.set("format", formats.join(","));
     }
     const qs = params.toString();
-    return qs ? `/?${qs}` : "/";
+    return qs ? `${basePath}?${qs}` : basePath;
   }
 
   function toggle(fmt: string) {

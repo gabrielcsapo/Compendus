@@ -60,7 +60,7 @@ const TYPE_OPTIONS: { value: TypeFilter; label: string; icon: React.ReactNode }[
   },
 ];
 
-function buildUrl(type: TypeFilter, currentSort: string, currentView?: "series" | "books"): string {
+function buildUrl(type: TypeFilter, currentSort: string, currentView?: "series" | "books", basePath = "/library"): string {
   const params = new URLSearchParams();
   if (currentView === "series") {
     params.set("view", "series");
@@ -72,17 +72,19 @@ function buildUrl(type: TypeFilter, currentSort: string, currentView?: "series" 
     params.set("sort", currentSort);
   }
   const queryString = params.toString();
-  return queryString ? `/?${queryString}` : "/";
+  return queryString ? `${basePath}?${queryString}` : basePath;
 }
 
 export function TypeTabs({
   currentType,
   currentSort,
   currentView,
+  basePath = "/library",
 }: {
   currentType: TypeFilter;
   currentSort: string;
   currentView?: "series" | "books";
+  basePath?: string;
 }) {
   return (
     <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
@@ -91,7 +93,7 @@ export function TypeTabs({
         return (
           <Link
             key={option.value}
-            to={buildUrl(option.value, currentSort, currentView)}
+            to={buildUrl(option.value, currentSort, currentView, basePath)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
               isActive
                 ? "bg-primary text-white shadow-sm"

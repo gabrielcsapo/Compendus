@@ -144,7 +144,7 @@ export default function Search() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <Link
-              to="/"
+              to="/library"
               className="text-primary hover:text-primary-hover text-sm font-medium transition-colors"
             >
               &larr; Back to Library

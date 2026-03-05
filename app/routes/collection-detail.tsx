@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { getCollection, getBooksInCollection } from "../actions/collections";
 import { BookGrid } from "../components/BookGrid";
@@ -9,8 +10,6 @@ export default async function CollectionDetail({ params }: { params?: Record<str
   if (!collection) {
     throw new Response("Collection not found", { status: 404 });
   }
-
-  const books = await getBooksInCollection(id);
 
   return (
     <main className="container my-8 px-8 mx-auto">
@@ -31,9 +30,6 @@ export default async function CollectionDetail({ params }: { params?: Record<str
               )}
             </div>
           </div>
-          <p className="text-foreground-muted/70 mt-2">
-            {books.length} {books.length === 1 ? "book" : "books"}
-          </p>
         </div>
 
         <div className="flex items-center gap-4">
@@ -45,7 +41,37 @@ export default async function CollectionDetail({ params }: { params?: Record<str
         </div>
       </div>
 
-      <BookGrid books={books} emptyMessage="No books in this collection yet" />
+      <Suspense fallback={<BookGridSkeleton />}>
+        <CollectionBooks collectionId={id} />
+      </Suspense>
     </main>
+  );
+}
+
+async function CollectionBooks({ collectionId }: { collectionId: string }) {
+  const books = await getBooksInCollection(collectionId);
+  return (
+    <>
+      <p className="text-foreground-muted/70 mb-4">
+        {books.length} {books.length === 1 ? "book" : "books"}
+      </p>
+      <BookGrid books={books} emptyMessage="No books in this collection yet" />
+    </>
+  );
+}
+
+function BookGridSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="h-4 bg-surface-elevated rounded w-24 mb-4" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="space-y-2">
+            <div className="aspect-[2/3] bg-surface-elevated rounded-lg" />
+            <div className="h-3 bg-surface-elevated rounded w-3/4" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -21,6 +21,7 @@ import { editorRoutes } from "./routes/editor";
 import { assetsRoutes } from "./routes/assets";
 import { libraryRoutes } from "./routes/library";
 import { adminRoutes } from "./routes/admin";
+import { statsRoutes } from "./routes/stats";
 import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
@@ -95,6 +96,7 @@ app.use("/api/wishlist*", requireProfile);
 app.use("/api/tags*", requireProfile);
 app.use("/api/reader*", requireProfile);
 app.use("/api/jobs*", requireProfile);
+app.use("/api/stats*", requireProfile);
 
 // Admin-only routes
 app.use("/api/upload*", requireAdmin);
@@ -113,6 +115,7 @@ app.route("/", transcribeRoutes);
 app.route("/", editorRoutes);
 app.route("/", libraryRoutes);
 app.route("/", adminRoutes);
+app.route("/", statsRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);
@@ -152,6 +155,7 @@ app.all("/api/*", (c) => {
         addTag: "POST /api/books/:id/tags (JSON body: {name})",
         removeTag: "DELETE /api/books/:id/tags/:tagId",
         library: "GET /api/library?offset=0&sort=recent&type=ebook&format=epub",
+        stats: "GET /api/stats",
       },
     },
     404,

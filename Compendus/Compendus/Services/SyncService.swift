@@ -95,35 +95,50 @@ class SyncService {
         print("[Sync] Server: \(apiService.config.serverURL ?? "nil")")
         print("[Sync] Since: \(since?.description ?? "nil (full sync)")")
 
-        do {
-            // Refresh profile info (name, avatar, admin status)
-            if let profile = try? await apiService.fetchCurrentProfile() {
-                print("[Sync] Profile refreshed: \(profile.name) (admin=\(profile.isAdmin))")
-                apiService.config.selectProfile(profile)
-            } else {
-                print("[Sync] WARNING: Could not refresh profile info")
+        // Wrap the entire sync in a 60-second timeout to prevent indefinite hangs
+        let result = await withTaskGroup(of: Bool.self) { group -> Bool in
+            group.addTask { @MainActor [self] in
+                do {
+                    if let profile = try? await self.apiService.fetchCurrentProfile() {
+                        print("[Sync] Profile refreshed: \(profile.name) (admin=\(profile.isAdmin))")
+                        self.apiService.config.selectProfile(profile)
+                    } else {
+                        print("[Sync] WARNING: Could not refresh profile info")
+                    }
+
+                    try await self.pullReadingProgress(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pullHighlights(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pullBookmarks(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pullReadingSessions(since: since, profileId: profileId, modelContext: modelContext)
+
+                    try await self.pushReadingProgress(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pushHighlights(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pushBookmarks(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pushReadingSessions(since: since, profileId: profileId, modelContext: modelContext)
+
+                    return true
+                } catch {
+                    print("[Sync] ========== Sync FAILED ==========")
+                    print("[Sync] Error: \(error)")
+                    return false
+                }
             }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(60))
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
 
-            // Pull from server and merge locally
-            try await pullReadingProgress(since: since, profileId: profileId, modelContext: modelContext)
-            try await pullHighlights(since: since, profileId: profileId, modelContext: modelContext)
-            try await pullBookmarks(since: since, profileId: profileId, modelContext: modelContext)
-            try await pullReadingSessions(since: since, profileId: profileId, modelContext: modelContext)
-
-            // Push local changes to server
-            try await pushReadingProgress(since: since, profileId: profileId, modelContext: modelContext)
-            try await pushHighlights(since: since, profileId: profileId, modelContext: modelContext)
-            try await pushBookmarks(since: since, profileId: profileId, modelContext: modelContext)
-            try await pushReadingSessions(since: since, profileId: profileId, modelContext: modelContext)
-
+        if result {
             setLastSyncTime(Date(), for: profileId)
             print("[Sync] ========== Sync complete ==========")
-            return true
-        } catch {
-            print("[Sync] ========== Sync FAILED ==========")
-            print("[Sync] Error: \(error)")
-            return false
+        } else {
+            print("[Sync] ========== Sync timed out or failed ==========")
         }
+        return result
     }
 
     // MARK: - Background Task Handler

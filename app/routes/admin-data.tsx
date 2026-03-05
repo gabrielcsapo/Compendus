@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { readdirSync, statSync } from "fs";
 import { resolve } from "path";
 import { desc } from "drizzle-orm";
@@ -22,7 +23,15 @@ interface BookRecord {
   format: string;
 }
 
-export default async function AdminData() {
+export default function AdminData() {
+  return (
+    <Suspense fallback={<AdminDataSkeleton />}>
+      <AdminDataContent />
+    </Suspense>
+  );
+}
+
+async function AdminDataContent() {
   // Get all files from data/books directory
   const files: FileInfo[] = [];
   try {
@@ -133,5 +142,23 @@ export default async function AdminData() {
       booksDir={BOOKS_DIR}
       jobs={jobs}
     />
+  );
+}
+
+function AdminDataSkeleton() {
+  return (
+    <div className="container my-8 px-6 mx-auto animate-pulse">
+      <div className="h-8 bg-surface-elevated rounded w-64 mb-6" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-24 bg-surface-elevated rounded-xl" />
+        ))}
+      </div>
+      <div className="space-y-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-12 bg-surface-elevated rounded" />
+        ))}
+      </div>
+    </div>
   );
 }

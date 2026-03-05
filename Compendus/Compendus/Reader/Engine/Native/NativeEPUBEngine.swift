@@ -397,14 +397,11 @@ class NativeEPUBEngine: ReaderEngine {
                     // Display the requested chapter immediately so the user can
                     // start reading, then paginate all remaining chapters in the
                     // background for accurate global page counts.
-                    self.fullPaginationTask = Task {
+                    self.fullPaginationTask = Task { [weak self] in
+                        guard let self = self else { return }
                         self.loadChapter(at: pending.spineIndex, progression: pending.progression)
-                        // Wait for the initial chapter to finish loading before
-                        // paginating the rest, so it won't be processed twice.
                         await self.chapterLoadTask?.value
                         guard !Task.isCancelled else { return }
-                        // If a charOffset was specified (universal position format),
-                        // navigate to the exact character position now that the chapter is loaded.
                         if let charOffset = self.pendingCharOffset {
                             self.pendingCharOffset = nil
                             self.navigateToOffsetInCurrentChapter(charOffset)

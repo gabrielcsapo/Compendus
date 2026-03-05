@@ -175,10 +175,12 @@ class StorageManager {
         try data.write(to: url)
     }
 
-    /// Get cached comic page data
-    func getCachedComicPage(bookId: String, page: Int) -> Data? {
+    /// Get cached comic page data (async to avoid blocking main thread with large files)
+    func getCachedComicPage(bookId: String, page: Int) async -> Data? {
         let url = cachedComicPageURL(bookId: bookId, page: page)
-        return try? Data(contentsOf: url)
+        return await Task.detached(priority: .userInitiated) {
+            try? Data(contentsOf: url)
+        }.value
     }
 
     /// Clear comic cache for a specific book

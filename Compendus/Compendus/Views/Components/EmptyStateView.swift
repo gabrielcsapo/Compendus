@@ -141,13 +141,13 @@ struct LibraryEmptyStateView: View {
     }
 }
 
-/// Downloads-specific empty states
+/// Home tab empty state
 struct DownloadsEmptyStateView: View {
     var body: some View {
         EmptyStateView(
-            icon: "arrow.down.circle",
-            title: "No Downloads Yet",
-            description: "Downloaded books will appear here for offline reading. Head to your library to download some books!"
+            icon: "house",
+            title: "Welcome Home",
+            description: "Your downloaded books and reading activity will appear here. Head to your library to download some books!"
         )
     }
 }

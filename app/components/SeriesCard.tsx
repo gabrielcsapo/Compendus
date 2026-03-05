@@ -19,7 +19,7 @@ export function SeriesCard({ name, bookCount, coverBooks, currentType }: SeriesC
 
   return (
     <Link
-      to={`/?series=${encodeURIComponent(name)}${typeParam}`}
+      to={`/library?series=${encodeURIComponent(name)}${typeParam}`}
       className="group relative transition-all duration-200 hover:-translate-y-1"
     >
       {/* Fanned covers */}

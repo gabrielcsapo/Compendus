@@ -610,7 +610,7 @@ struct DownloadedBookDetailView: View {
                 if isConnected {
                     // Navigate to Library tab filtered by this series
                     appNavigation.pendingSeriesFilter = series
-                    appNavigation.selectedTab = 0
+                    appNavigation.selectedTab = 1
                 } else {
                     // Stay in Downloads, filter by series
                     onSeriesTap?(series)

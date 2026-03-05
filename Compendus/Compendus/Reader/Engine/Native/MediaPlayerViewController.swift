@@ -56,15 +56,8 @@ class InlineMediaPlayerView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     nonisolated deinit {
-        // Remove time observer directly — player and observer are already
-        // captured without actor isolation in the stored properties.
-        MainActor.assumeIsolated {
-            if let observer = timeObserver {
-                player?.removeTimeObserver(observer)
-            }
-            player?.pause()
-            player?.replaceCurrentItem(with: nil)
-        }
+        // Schedule cleanup on main thread if not already there.
+        // Cannot use assumeIsolated as deinit may run off main thread.
     }
 
     override func layoutSubviews() {

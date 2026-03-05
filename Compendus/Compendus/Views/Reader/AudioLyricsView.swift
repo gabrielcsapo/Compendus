@@ -53,17 +53,6 @@ struct AudioLyricsView: View {
                                     onSeek(segment.start)
                                 }
                             }
-                            .onGeometryChange(for: CGFloat.self) { proxy in
-                                proxy.frame(in: .global).midY
-                            } action: { midY in
-                                if scrollDriven {
-                                    // Select the segment closest to center
-                                    let distanceToCenter = abs(midY - centerY)
-                                    if distanceToCenter < 40 {
-                                        activeSegmentIndex = index
-                                    }
-                                }
-                            }
                         }
 
                         // Bottom spacer to allow centering the last segment
@@ -203,24 +192,21 @@ private struct LyricsLineView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.primary)
         } else {
-            // Use a wrapping text approach
-            words.reduce(Text("")) { result, word in
-                let isWordActive = currentTime >= word.start && currentTime < word.end
-                let isWordPast = currentTime >= word.end
-
-                let color: Color = isWordActive
-                    ? accentColor
-                    : isWordPast
-                        ? .primary
-                        : .secondary
-
-                let weight: Font.Weight = isWordActive ? .bold : .semibold
-
-                return result + Text(word.word + " ")
-                    .foregroundColor(color)
-                    .fontWeight(weight)
-            }
-            .font(.title3)
+            Text(buildKaraokeText(words: words))
+                .font(.title3)
         }
+    }
+
+    private func buildKaraokeText(words: [TranscriptWord]) -> AttributedString {
+        var result = AttributedString()
+        for word in words {
+            var part = AttributedString(word.word + " ")
+            let isWordActive = currentTime >= word.start && currentTime < word.end
+            let isWordPast = currentTime >= word.end
+            part.foregroundColor = isWordActive ? accentColor : isWordPast ? .primary : .secondary
+            part.font = .title3.weight(isWordActive ? .bold : .semibold)
+            result.append(part)
+        }
+        return result
     }
 }

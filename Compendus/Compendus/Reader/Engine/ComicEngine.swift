@@ -135,7 +135,7 @@ class ComicEngine: ReaderEngine {
         }
 
         // 2. Check disk cache
-        if let cachedData = storageManager.getCachedComicPage(bookId: book.id, page: page),
+        if let cachedData = await storageManager.getCachedComicPage(bookId: book.id, page: page),
            let image = UIImage(data: cachedData) {
             pageImageCache.setObject(image, forKey: NSNumber(value: page))
             return image

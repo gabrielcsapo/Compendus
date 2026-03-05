@@ -141,6 +141,26 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
   );
 }
 
+function NavLink({ to, children, exact = false }: { to: string; children: React.ReactNode; exact?: boolean }) {
+  const location = useLocation();
+  const isActive = exact
+    ? location.pathname === to
+    : location.pathname === to || location.pathname.startsWith(to + "/") || location.pathname.startsWith(to + "?");
+
+  return (
+    <Link
+      to={to}
+      className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+        isActive
+          ? "bg-surface-elevated text-foreground"
+          : "text-foreground-muted hover:text-foreground hover:bg-surface-elevated"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function ClientShell({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<ProfileInfo | null>(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -199,44 +219,16 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
               </Link>
             </li>
             <li>
-              <Link
-                to="/"
-                className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
-              >
-                Library
-              </Link>
+              <NavLink to="/" exact>Dashboard</NavLink>
             </li>
             <li>
-              <Link
-                to="/collections"
-                className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
-              >
-                Collections
-              </Link>
+              <NavLink to="/library">Library</NavLink>
             </li>
             <li>
-              <Link
-                to="/tags"
-                className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
-              >
-                Tags
-              </Link>
+              <NavLink to="/highlights">Highlights</NavLink>
             </li>
             <li>
-              <Link
-                to="/highlights"
-                className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
-              >
-                Highlights
-              </Link>
-            </li>
-            <li>
-              <Link
-                to="/discover"
-                className="px-3 py-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors font-medium"
-              >
-                Discover
-              </Link>
+              <NavLink to="/discover">Discover</NavLink>
             </li>
             <li className="ml-auto">
               <SearchInput />

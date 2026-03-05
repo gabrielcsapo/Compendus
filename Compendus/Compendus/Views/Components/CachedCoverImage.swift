@@ -23,9 +23,13 @@ struct CachedCoverImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
+                Color.clear
+                    .overlay {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                    .clipped()
             } else if isLoading && hasCover {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(.systemGray5))
@@ -52,7 +56,21 @@ struct CachedCoverImage: View {
         isLoading = true
         hasFailed = false
 
-        if let loaded = await imageCache.image(for: bookId, url: url) {
+        // Race the image load against a 10-second timeout to avoid infinite spinner
+        let loaded = await withTaskGroup(of: UIImage?.self) { group -> UIImage? in
+            group.addTask {
+                await imageCache.image(for: bookId, url: url)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(10))
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+
+        if let loaded {
             image = loaded
             isLoading = false
         } else {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { buttonStyles, badgeStyles } from "../lib/styles";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
@@ -21,12 +22,8 @@ export default async function BookDetail({ params }: { params?: Record<string, s
     throw new Response("Book not found", { status: 404 });
   }
 
-  const [tags, collections, linkedFormats, relatedBooks] = await Promise.all([
-    getTagsForBook(id),
-    getCollectionsForBook(id),
-    getLinkedFormats(id),
-    getRelatedBooks(book),
-  ]);
+  // Tags needed immediately for EditBookButton in header
+  const tags = await getTagsForBook(id);
 
   // Parse authors with defensive handling for corrupted data
   const rawAuthors = book.authors ? JSON.parse(book.authors) : [];
@@ -55,7 +52,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
       )}
       <div className="mb-8">
         <Link
-          to="/"
+          to="/library"
           className="inline-flex items-center gap-1.5 text-sm text-foreground-muted hover:text-primary transition-colors group"
         >
           <svg
@@ -144,34 +141,10 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
           )}
 
-          {/* Linked formats (same ISBN, different format) */}
-          {linkedFormats.length > 0 && (
-            <div className="p-3 bg-surface-elevated rounded-lg border border-border">
-              <p className="text-xs text-foreground-muted mb-2">Also available as:</p>
-              <div className="flex flex-wrap gap-2">
-                {linkedFormats.map((linked) => (
-                  <Link
-                    key={linked.id}
-                    to={`/book/${linked.id}`}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full bg-primary-light text-primary hover:bg-primary hover:text-white transition-colors"
-                  >
-                    {linked.format === "m4b" ||
-                    linked.format === "mp3" ||
-                    linked.format === "m4a" ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                    )}
-                    {linked.format.toUpperCase()}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Linked formats — streamed via Suspense */}
+          <Suspense>
+            <LinkedFormatsSection bookId={id} />
+          </Suspense>
 
         </aside>
 
@@ -231,7 +204,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                   <span>Book {book.seriesNumber} in </span>
                 )}
                 <Link
-                  to={`/?series=${encodeURIComponent(book.series)}`}
+                  to={`/library?series=${encodeURIComponent(book.series)}`}
                   className="text-primary hover:text-primary-hover font-medium"
                 >
                   {book.series}
@@ -281,39 +254,10 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             <BookReview book={book} />
           </section>
 
-          {/* Tags & Collections */}
-          <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
-              Organization
-            </h2>
-
-            {tags.length > 0 && (
-              <div className="mb-5">
-                <h3 className="text-xs font-medium text-foreground-muted mb-2">Tags</h3>
-                <div className="flex flex-wrap gap-2">
-                  {tags.map((tag) => (
-                    <Link
-                      key={tag.id}
-                      to={`/tags?tag=${tag.id}`}
-                      className="inline-block px-3 py-1 text-sm rounded-full bg-secondary-light text-secondary hover:opacity-80 transition-opacity"
-                      style={
-                        tag.color
-                          ? {
-                              backgroundColor: tag.color + "20",
-                              color: tag.color,
-                            }
-                          : undefined
-                      }
-                    >
-                      {tag.name}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <BookCollectionsManager bookId={book.id} currentCollections={collections} />
-          </section>
+          {/* Tags & Collections — streamed via Suspense */}
+          <Suspense fallback={<SectionSkeleton title="Organization" />}>
+            <OrganizationSection bookId={id} tags={tags} />
+          </Suspense>
 
           {/* Details */}
           <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
@@ -380,62 +324,161 @@ export default async function BookDetail({ params }: { params?: Record<string, s
 
           </section>
 
-          {/* Related Books */}
-          {relatedBooks.length > 0 && (
-            <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
-                Related Books
-              </h2>
-              <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
-                {relatedBooks.map((related) => {
-                  const relatedAuthors = (() => {
-                    try {
-                      const parsed = related.authors ? JSON.parse(related.authors) : [];
-                      return Array.isArray(parsed) ? parsed.filter((a: unknown): a is string => typeof a === "string") : [];
-                    } catch {
-                      return [];
-                    }
-                  })();
-                  const coverUrl = related.coverPath
-                    ? `/covers/${related.id}.jpg?v=${related.updatedAt?.getTime() || ""}`
-                    : null;
-
-                  return (
-                    <Link
-                      key={related.id}
-                      to={`/book/${related.id}`}
-                      className="flex-shrink-0 w-[100px] group"
-                    >
-                      {coverUrl ? (
-                        <img
-                          src={coverUrl}
-                          alt={related.title}
-                          className="w-[100px] aspect-[2/3] object-cover rounded-lg shadow-md group-hover:shadow-lg transition-shadow"
-                        />
-                      ) : (
-                        <div className="w-[100px] aspect-[2/3] rounded-lg shadow-md bg-surface-elevated border border-border flex items-center justify-center">
-                          <svg className="w-8 h-8 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                          </svg>
-                        </div>
-                      )}
-                      <p className="mt-2 text-sm font-medium text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors">
-                        {related.title}
-                      </p>
-                      {relatedAuthors.length > 0 && (
-                        <p className="mt-0.5 text-xs text-foreground-muted line-clamp-1">
-                          {relatedAuthors.join(", ")}
-                        </p>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+          {/* Related Books — streamed via Suspense */}
+          <Suspense fallback={<SectionSkeleton title="Related Books" />}>
+            <RelatedBooksSection book={book} />
+          </Suspense>
         </div>
       </div>
     </main>
+  );
+}
+
+// Async server component — streams linked formats after book header renders
+async function LinkedFormatsSection({ bookId }: { bookId: string }) {
+  const linkedFormats = await getLinkedFormats(bookId);
+  if (linkedFormats.length === 0) return null;
+
+  return (
+    <div className="p-3 bg-surface-elevated rounded-lg border border-border">
+      <p className="text-xs text-foreground-muted mb-2">Also available as:</p>
+      <div className="flex flex-wrap gap-2">
+        {linkedFormats.map((linked) => (
+          <Link
+            key={linked.id}
+            to={`/book/${linked.id}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full bg-primary-light text-primary hover:bg-primary hover:text-white transition-colors"
+          >
+            {linked.format === "m4b" ||
+            linked.format === "mp3" ||
+            linked.format === "m4a" ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            )}
+            {linked.format.toUpperCase()}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Async server component — streams organization section (collections require DB query)
+async function OrganizationSection({ bookId, tags }: { bookId: string; tags: Awaited<ReturnType<typeof getTagsForBook>> }) {
+  const collections = await getCollectionsForBook(bookId);
+
+  return (
+    <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
+        Organization
+      </h2>
+
+      {tags.length > 0 && (
+        <div className="mb-5">
+          <h3 className="text-xs font-medium text-foreground-muted mb-2">Tags</h3>
+          <div className="flex flex-wrap gap-2">
+            {tags.map((tag) => (
+              <Link
+                key={tag.id}
+                to={`/tags?tag=${tag.id}`}
+                className="inline-block px-3 py-1 text-sm rounded-full bg-secondary-light text-secondary hover:opacity-80 transition-opacity"
+                style={
+                  tag.color
+                    ? {
+                        backgroundColor: tag.color + "20",
+                        color: tag.color,
+                      }
+                    : undefined
+                }
+              >
+                {tag.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <BookCollectionsManager bookId={bookId} currentCollections={collections} />
+    </section>
+  );
+}
+
+// Async server component — streams related books (requires DB query for related books)
+async function RelatedBooksSection({ book }: { book: Awaited<ReturnType<typeof getBook>> }) {
+  if (!book) return null;
+  const relatedBooks = await getRelatedBooks(book);
+  if (relatedBooks.length === 0) return null;
+
+  return (
+    <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
+        Related Books
+      </h2>
+      <div className="flex gap-4 overflow-x-auto pb-2 -mx-1 px-1">
+        {relatedBooks.map((related) => {
+          const relatedAuthors = (() => {
+            try {
+              const parsed = related.authors ? JSON.parse(related.authors) : [];
+              return Array.isArray(parsed) ? parsed.filter((a: unknown): a is string => typeof a === "string") : [];
+            } catch {
+              return [];
+            }
+          })();
+          const coverUrl = related.coverPath
+            ? `/covers/${related.id}.jpg?v=${related.updatedAt?.getTime() || ""}`
+            : null;
+
+          return (
+            <Link
+              key={related.id}
+              to={`/book/${related.id}`}
+              className="flex-shrink-0 w-[100px] group"
+            >
+              {coverUrl ? (
+                <img
+                  src={coverUrl}
+                  alt={related.title}
+                  className="w-[100px] aspect-[2/3] object-cover rounded-lg shadow-md group-hover:shadow-lg transition-shadow"
+                />
+              ) : (
+                <div className="w-[100px] aspect-[2/3] rounded-lg shadow-md bg-surface-elevated border border-border flex items-center justify-center">
+                  <svg className="w-8 h-8 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                </div>
+              )}
+              <p className="mt-2 text-sm font-medium text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors">
+                {related.title}
+              </p>
+              {relatedAuthors.length > 0 && (
+                <p className="mt-0.5 text-xs text-foreground-muted line-clamp-1">
+                  {relatedAuthors.join(", ")}
+                </p>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SectionSkeleton({ title }: { title: string }) {
+  return (
+    <section className="bg-surface border border-border rounded-xl p-6 shadow-paper animate-pulse">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
+        {title}
+      </h2>
+      <div className="space-y-3">
+        <div className="h-4 bg-surface-elevated rounded w-3/4" />
+        <div className="h-4 bg-surface-elevated rounded w-1/2" />
+      </div>
+    </section>
   );
 }
 

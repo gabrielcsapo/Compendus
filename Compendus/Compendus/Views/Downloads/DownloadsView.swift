@@ -107,51 +107,14 @@ struct DownloadsView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
     }
 
-    private var filteredBooks: [DownloadedBook] {
-        var result = books
-
-        // Apply type filter
-        if selectedFilter != .all {
-            result = result.filter { selectedFilter.matches(format: $0.format) }
-        }
-
-        // Apply search filter
-        if !searchText.isEmpty {
-            let query = searchText.lowercased()
-            result = result.filter { book in
-                book.title.lowercased().contains(query) ||
-                book.authors.joined(separator: " ").lowercased().contains(query)
-            }
-        }
-
-        return result
-    }
-
-    private var seriesItems: [DownloadedSeriesItem] {
-        let booksWithSeries = books.filter { $0.series != nil }
-
-        let grouped = Dictionary(grouping: booksWithSeries) { $0.series! }
-
-        return grouped.map { name, seriesBooks in
-            let coverBooks = seriesBooks
-                .sorted { ($0.seriesNumber ?? .infinity) < ($1.seriesNumber ?? .infinity) }
-                .prefix(3)
-                .map { DownloadedSeriesCoverBook(id: $0.id, coverData: $0.coverData) }
-
-            return DownloadedSeriesItem(
-                name: name,
-                bookCount: seriesBooks.count,
-                coverBooks: Array(coverBooks)
-            )
-        }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
+    @State private var cachedFilteredBooks: [DownloadedBook] = []
+    @State private var cachedSeriesItems: [DownloadedSeriesItem] = []
 
     private var filteredSeriesItems: [DownloadedSeriesItem] {
         if searchText.isEmpty {
-            return seriesItems
+            return cachedSeriesItems
         }
-        return seriesItems.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        return cachedSeriesItems.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
 
     /// Pending downloads that are still active (not yet completed as DownloadedBook)
@@ -217,9 +180,17 @@ struct DownloadsView: View {
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext, force: true)
                 }
                 .task {
+                    recomputeFilteredBooks()
+                    recomputeSeriesItems()
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
                     // Clean up stale failed download entries on launch
                     downloadManager.cleanupStaleFailedDownloads()
+                }
+                .onChange(of: searchText) { _, _ in recomputeFilteredBooks() }
+                .onChange(of: selectedFilter) { _, _ in recomputeFilteredBooks() }
+                .onChange(of: allBooks.count) { _, _ in
+                    recomputeFilteredBooks()
+                    recomputeSeriesItems()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Retry failed downloads when app returns to foreground (network may have recovered)
@@ -237,16 +208,16 @@ struct DownloadsView: View {
 
     private var navigationTitle: String {
         if viewMode == .series {
-            return seriesItems.isEmpty ? "Series" : "Series (\(seriesItems.count))"
+            return cachedSeriesItems.isEmpty ? "Series" : "Series (\(cachedSeriesItems.count))"
         }
-        return "Downloads"
+        return "Home"
     }
 
     private var searchPrompt: String {
         if viewMode == .series {
             return "Search series..."
         }
-        return "Search downloads..."
+        return "Search your books..."
     }
 
     // MARK: - Main Content
@@ -257,7 +228,7 @@ struct DownloadsView: View {
             DownloadsEmptyStateView()
         } else if viewMode == .series {
             seriesGridContent
-        } else if filteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
+        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -367,7 +338,7 @@ struct DownloadsView: View {
             }
 
             LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(filteredBooks) { book in
+                ForEach(cachedFilteredBooks) { book in
                     NavigationLink(value: book) {
                         DownloadedBookGridItem(book: book, onSeriesTap: { seriesName in
                             seriesSheet = DownloadSeriesSheet(id: seriesName)
@@ -631,6 +602,38 @@ struct DownloadsView: View {
             modelContext.insert(edit)
             try? modelContext.save()
         }
+    }
+
+    private func recomputeFilteredBooks() {
+        var result = books
+        if selectedFilter != .all {
+            result = result.filter { selectedFilter.matches(format: $0.format) }
+        }
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter { book in
+                book.title.lowercased().contains(query) ||
+                book.authors.joined(separator: " ").lowercased().contains(query)
+            }
+        }
+        cachedFilteredBooks = result
+    }
+
+    private func recomputeSeriesItems() {
+        let booksWithSeries = books.filter { $0.series != nil }
+        let grouped = Dictionary(grouping: booksWithSeries) { $0.series! }
+        cachedSeriesItems = grouped.map { name, seriesBooks in
+            let coverBooks = seriesBooks
+                .sorted { ($0.seriesNumber ?? .infinity) < ($1.seriesNumber ?? .infinity) }
+                .prefix(3)
+                .map { DownloadedSeriesCoverBook(id: $0.id, coverData: $0.coverData) }
+            return DownloadedSeriesItem(
+                name: name,
+                bookCount: seriesBooks.count,
+                coverBooks: Array(coverBooks)
+            )
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     private func performDelete() {

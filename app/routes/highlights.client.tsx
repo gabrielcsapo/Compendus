@@ -12,6 +12,7 @@ type HighlightGroup = {
   bookTitle: string;
   bookAuthors: string[];
   bookCoverPath?: string;
+  bookUpdatedAt?: Date;
   bookFormat: string;
   highlights: HighlightItem[];
 };
@@ -39,6 +40,7 @@ export default function Highlights() {
           bookTitle: h.bookTitle,
           bookAuthors: h.bookAuthors,
           bookCoverPath: h.bookCoverPath,
+          bookUpdatedAt: h.bookUpdatedAt,
           bookFormat: h.bookFormat,
           highlights: [],
         });
@@ -105,7 +107,7 @@ export default function Highlights() {
               >
                 {group.bookCoverPath ? (
                   <img
-                    src={group.bookCoverPath}
+                    src={`${group.bookCoverPath}?v=${group.bookUpdatedAt ? new Date(group.bookUpdatedAt).getTime() : ""}`}
                     alt={group.bookTitle}
                     className="w-12 h-[4.5rem] object-cover rounded-md shadow-sm"
                   />
