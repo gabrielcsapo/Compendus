@@ -54,17 +54,20 @@ struct CompendusApp: App {
     @State private var apiService: APIService
     @State private var downloadManager: DownloadManager
     @State private var bookEditSyncService: BookEditSyncService
+    @State private var syncService: SyncService
 
     init() {
         let config = ServerConfig()
         let api = APIService(config: config)
         let download = DownloadManager(config: config, apiService: api)
         let editSync = BookEditSyncService(apiService: api)
+        let sync = SyncService(apiService: api)
 
         _serverConfig = State(initialValue: config)
         _apiService = State(initialValue: api)
         _downloadManager = State(initialValue: download)
         _bookEditSyncService = State(initialValue: editSync)
+        _syncService = State(initialValue: sync)
     }
 
     @Environment(\.scenePhase) private var scenePhase
@@ -91,6 +94,7 @@ struct CompendusApp: App {
                 .environment(ttsPreGenerationService)
                 .environment(backgroundProcessingManager)
                 .environment(bookEditSyncService)
+                .environment(syncService)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .tint(themeManager.accentColor)
                 .preferredColorScheme(appSettings.colorScheme)
@@ -106,12 +110,16 @@ struct CompendusApp: App {
                     downloadManager.pocketTTSModelManager = pocketTTSModelManager
                     audiobookPlayer.modelContainer = sharedModelContainer
                     bookEditSyncService.modelContainer = sharedModelContainer
+                    syncService.modelContainer = sharedModelContainer
                     onDeviceTranscriptionService.appSettings = appSettings
                     OnDeviceTranscriptionService.registerBackgroundTask(
                         service: onDeviceTranscriptionService
                     )
                     BookEditSyncService.registerBackgroundTask(
                         service: bookEditSyncService
+                    )
+                    SyncService.registerBackgroundTask(
+                        service: syncService
                     )
                     BackgroundProcessingManager.registerBackgroundTasks(
                         manager: backgroundProcessingManager
@@ -132,10 +140,12 @@ struct CompendusApp: App {
             case .background:
                 onDeviceTranscriptionService.handleAppBackgrounded()
                 bookEditSyncService.scheduleBackgroundTaskIfNeeded()
+                syncService.scheduleBackgroundTask()
                 backgroundProcessingManager.handleAppBackgrounded()
             case .active:
                 onDeviceTranscriptionService.handleAppForegrounded()
                 bookEditSyncService.handleAppForegrounded()
+                syncService.handleAppForegrounded()
                 backgroundProcessingManager.handleAppForegrounded()
             default:
                 break

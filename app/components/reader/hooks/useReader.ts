@@ -25,6 +25,8 @@ import {
   updateHighlightColor as updateHighlightColorAction,
   saveReadingProgress,
   searchContent as searchContentAction,
+  createReadingSession,
+  endReadingSession,
 } from "@/actions/reader";
 
 interface UseReaderOptions {
@@ -137,6 +139,12 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
   const [clientTotalPages, setClientTotalPages] = useState<number | null>(null);
   const [chapterTitle, setChapterTitle] = useState<string>("");
   const isColumnPaginated = fullTextContent !== null;
+
+  // Reading session tracking
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionStartPageRef = useRef<number>(1);
+  const currentPageRef = useRef<number>(1);
+  const currentPositionRef = useRef<number>(0);
 
   // Navigation mode tracking
   const isJumpNavigationRef = useRef(false);
@@ -354,6 +362,61 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     fetchAnnotations();
   }, [bookId]);
 
+  // Keep refs in sync with latest state for use in cleanup functions
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    const totalPages = isColumnPaginated && clientTotalPages !== null
+      ? clientTotalPages
+      : bookInfo?.totalPages || 0;
+    const pos = isColumnPaginated && totalPages > 0
+      ? (currentPage - 1) / totalPages
+      : pageContent?.position ?? 0;
+    currentPositionRef.current = pos;
+  }, [currentPage, pageContent, isColumnPaginated, clientTotalPages, bookInfo]);
+
+  // Start a reading session when the book info loads, end it on unmount
+  useEffect(() => {
+    if (!bookInfo) return;
+
+    const startPosition = initialPosition > 0 ? initialPosition.toString() : undefined;
+    createReadingSession(bookId, startPosition)
+      .then((id) => {
+        sessionIdRef.current = id;
+        sessionStartPageRef.current = currentPageRef.current;
+      })
+      .catch((err) => {
+        console.error("Failed to create reading session:", err);
+      });
+
+    // End session helper — reads latest values from refs
+    const endSession = () => {
+      const sid = sessionIdRef.current;
+      if (!sid) return;
+      sessionIdRef.current = null;
+
+      const pagesRead = Math.abs(currentPageRef.current - sessionStartPageRef.current);
+      const pos = String(currentPositionRef.current);
+
+      endReadingSession(sid, pos, pagesRead > 0 ? pagesRead : undefined).catch(() => {
+        // Silently fail — session will just have no endedAt
+      });
+    };
+
+    const handleBeforeUnload = () => {
+      endSession();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      endSession();
+    };
+  }, [bookId, bookInfo]); // Only depend on bookId and bookInfo — we read current values from refs
+
   // The effective total pages (client-reported for column pagination, server for others)
   const effectiveTotalPages = isColumnPaginated && clientTotalPages !== null
     ? clientTotalPages
@@ -552,12 +615,39 @@ export function useReader({ bookId, initialPosition = 0, formatOverride }: UseRe
     const position = columnPosition ?? pageContent?.position;
     if (position === undefined && position === null) return;
 
+    // Build universal position JSON for EPUB column-paginated content
+    let positionJSON: string | undefined;
+    if (fullTextContent && columnPosition !== null) {
+      const charPos = Math.floor(columnPosition * fullTextContent.totalCharacters);
+      let spineIndex = 0;
+      let charOffset = charPos;
+      for (let i = 0; i < fullTextContent.chapters.length; i++) {
+        const ch = fullTextContent.chapters[i];
+        if (charPos >= ch.characterStart && charPos < ch.characterEnd) {
+          spineIndex = i;
+          charOffset = charPos - ch.characterStart;
+          break;
+        }
+        // If past all chapters, use the last one
+        if (i === fullTextContent.chapters.length - 1) {
+          spineIndex = i;
+          charOffset = charPos - ch.characterStart;
+        }
+      }
+      positionJSON = JSON.stringify({
+        type: "epub",
+        spineIndex,
+        charOffset,
+        progress: columnPosition,
+      });
+    }
+
     try {
-      await saveReadingProgress(bookId, position ?? 0, currentPage);
+      await saveReadingProgress(bookId, position ?? 0, currentPage, undefined, positionJSON);
     } catch (err) {
       console.error("Failed to save progress:", err);
     }
-  }, [bookId, currentPage, pageContent, columnPosition]);
+  }, [bookId, currentPage, pageContent, columnPosition, fullTextContent]);
 
   // Auto-save progress when page changes
   useEffect(() => {

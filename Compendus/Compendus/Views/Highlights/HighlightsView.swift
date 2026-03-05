@@ -10,10 +10,22 @@ import SwiftUI
 import SwiftData
 
 struct HighlightsView: View {
-    @Query(sort: \BookHighlight.createdAt, order: .reverse) private var allHighlights: [BookHighlight]
-    @Query private var allBooks: [DownloadedBook]
+    @Query(sort: \BookHighlight.createdAt, order: .reverse) private var allHighlightsQuery: [BookHighlight]
+    @Query private var allBooksQuery: [DownloadedBook]
+
+    @Environment(ServerConfig.self) private var serverConfig
 
     @State private var searchText = ""
+
+    private var allHighlights: [BookHighlight] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allHighlightsQuery.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
+
+    private var allBooks: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allBooksQuery.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     /// Cached grouped highlights to avoid recomputing on every render
     private var groupedHighlights: [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {

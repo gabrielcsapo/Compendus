@@ -6,10 +6,15 @@ import { eq } from "drizzle-orm";
 import { db, books } from "../../app/lib/db";
 import { enqueueJob, getJob } from "../../app/lib/queue";
 import { isWhisperAvailable } from "../../app/lib/processing/transcribe";
+import { requireAdmin } from "../middleware/profile";
 
 const app = new Hono();
 
 const AUDIO_FORMATS = ["m4b", "mp3", "m4a"];
+
+// Transcription affects the shared library — admin only
+app.use("/api/books/:id/transcribe", requireAdmin);
+app.use("/api/books/:id/transcript", requireAdmin);
 
 /**
  * POST /api/books/:id/transcribe

@@ -1,8 +1,9 @@
 "use server";
 
-import { db, books, bookmarks, highlights } from "../lib/db";
-import { eq, sql } from "drizzle-orm";
-import { v4 as uuid } from "uuid";
+import { db, books, bookmarks, highlights, userBookState, readingSessions, profiles } from "../lib/db";
+import { eq, and, isNull, sql } from "drizzle-orm";
+import { randomUUID } from "crypto";
+import { getRequest } from "react-flight-router/server";
 import { getContent, paginationEngine } from "../lib/reader";
 import type {
   ViewportConfig,
@@ -20,8 +21,15 @@ import type { BookFormat } from "../lib/types";
 // BOOKMARKS
 // ============================================
 
-export async function getBookmarks(bookId: string): Promise<ReaderBookmark[]> {
-  const bookmarksList = await db.select().from(bookmarks).where(eq(bookmarks.bookId, bookId)).all();
+export async function getBookmarks(bookId: string, profileId?: string): Promise<ReaderBookmark[]> {
+  const conditions = [eq(bookmarks.bookId, bookId), isNull(bookmarks.deletedAt)];
+  if (profileId) conditions.push(eq(bookmarks.profileId, profileId));
+
+  const bookmarksList = await db
+    .select()
+    .from(bookmarks)
+    .where(and(...conditions))
+    .all();
 
   return bookmarksList.map((b) => ({
     id: b.id,
@@ -40,34 +48,51 @@ export async function addBookmark(
   title?: string,
   note?: string,
   color?: string,
+  profileId?: string,
 ): Promise<ReaderBookmark> {
-  const id = uuid();
+  if (!profileId) throw new Error("profileId is required");
+  const id = randomUUID();
   const createdAt = new Date();
+  const updatedAt = new Date();
   await db.insert(bookmarks).values({
     id,
     bookId,
+    profileId,
     position: position.toString(),
     title: title || null,
     note: note || null,
     color: color || null,
+    updatedAt,
   });
 
   return { id, bookId, position, title, note, color, createdAt };
 }
 
-export async function deleteBookmark(bookmarkId: string): Promise<void> {
-  await db.delete(bookmarks).where(eq(bookmarks.id, bookmarkId));
+export async function deleteBookmark(bookmarkId: string, profileId?: string): Promise<void> {
+  // Verify ownership before soft-deleting (if profileId provided)
+  const bookmark = await db.select().from(bookmarks).where(eq(bookmarks.id, bookmarkId)).get();
+  if (!bookmark) return;
+  if (profileId && bookmark.profileId !== profileId) return;
+
+  const now = new Date();
+  await db
+    .update(bookmarks)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(eq(bookmarks.id, bookmarkId));
 }
 
 // ============================================
 // HIGHLIGHTS
 // ============================================
 
-export async function getHighlights(bookId: string): Promise<ReaderHighlight[]> {
+export async function getHighlights(bookId: string, profileId?: string): Promise<ReaderHighlight[]> {
+  const conditions = [eq(highlights.bookId, bookId), isNull(highlights.deletedAt)];
+  if (profileId) conditions.push(eq(highlights.profileId, profileId));
+
   const highlightsList = await db
     .select()
     .from(highlights)
-    .where(eq(highlights.bookId, bookId))
+    .where(and(...conditions))
     .all();
 
   return highlightsList.map((h) => ({
@@ -89,19 +114,24 @@ export async function addHighlight(
   text: string,
   note?: string,
   color?: string,
+  profileId?: string,
 ): Promise<ReaderHighlight> {
-  const id = uuid();
+  if (!profileId) throw new Error("profileId is required");
+  const id = randomUUID();
   const highlightColor = color || "#ffff00";
   const createdAt = new Date();
+  const updatedAt = new Date();
 
   await db.insert(highlights).values({
     id,
     bookId,
+    profileId,
     startPosition: startPosition.toString(),
     endPosition: endPosition.toString(),
     text,
     note: note || null,
     color: highlightColor,
+    updatedAt,
   });
 
   return {
@@ -116,31 +146,52 @@ export async function addHighlight(
   };
 }
 
-export async function deleteHighlight(highlightId: string): Promise<void> {
-  await db.delete(highlights).where(eq(highlights.id, highlightId));
+export async function deleteHighlight(highlightId: string, profileId?: string): Promise<void> {
+  // Verify ownership before soft-deleting (if profileId provided)
+  const highlight = await db.select().from(highlights).where(eq(highlights.id, highlightId)).get();
+  if (!highlight) return;
+  if (profileId && highlight.profileId !== profileId) return;
+
+  const now = new Date();
+  await db
+    .update(highlights)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(eq(highlights.id, highlightId));
 }
 
 export async function updateHighlightNote(
   highlightId: string,
   note: string | null,
+  profileId?: string,
 ): Promise<void> {
+  if (!profileId) throw new Error("profileId is required");
+  // Verify ownership
+  const highlight = await db.select().from(highlights).where(eq(highlights.id, highlightId)).get();
+  if (!highlight || highlight.profileId !== profileId) return;
+
   await db
     .update(highlights)
-    .set({ note: note || null })
+    .set({ note: note || null, updatedAt: new Date() })
     .where(eq(highlights.id, highlightId));
 }
 
 export async function updateHighlightColor(
   highlightId: string,
   color: string,
+  profileId?: string,
 ): Promise<void> {
+  if (!profileId) throw new Error("profileId is required");
+  // Verify ownership
+  const highlight = await db.select().from(highlights).where(eq(highlights.id, highlightId)).get();
+  if (!highlight || highlight.profileId !== profileId) return;
+
   await db
     .update(highlights)
-    .set({ color })
+    .set({ color, updatedAt: new Date() })
     .where(eq(highlights.id, highlightId));
 }
 
-export async function getAllHighlights(): Promise<
+export async function getAllHighlights(profileId?: string): Promise<
   {
     id: string;
     bookId: string;
@@ -173,6 +224,11 @@ export async function getAllHighlights(): Promise<
     })
     .from(highlights)
     .innerJoin(books, eq(highlights.bookId, books.id))
+    .where(
+      profileId
+        ? and(eq(highlights.profileId, profileId), isNull(highlights.deletedAt))
+        : isNull(highlights.deletedAt),
+    )
     .orderBy(sql`${highlights.createdAt} DESC`)
     .all();
 
@@ -200,18 +256,152 @@ export async function saveReadingProgress(
   bookId: string,
   position: number,
   pageNum?: number,
+  profileId?: string,
+  positionJSON?: string,
 ): Promise<{ position: number; pageNum?: number }> {
-  await db
-    .update(books)
-    .set({
+  if (!profileId) throw new Error("profileId is required");
+
+  const now = new Date();
+  // Use universal position format if provided, otherwise legacy format
+  const lastPosition = positionJSON ?? JSON.stringify({ position, pageNum });
+
+  // Check if a record already exists for this profile + book
+  const existing = await db
+    .select()
+    .from(userBookState)
+    .where(
+      and(
+        eq(userBookState.profileId, profileId),
+        eq(userBookState.bookId, bookId),
+      ),
+    )
+    .get();
+
+  if (existing) {
+    await db
+      .update(userBookState)
+      .set({
+        readingProgress: position,
+        lastPosition,
+        lastReadAt: now,
+        updatedAt: now,
+      })
+      .where(eq(userBookState.id, existing.id));
+  } else {
+    await db.insert(userBookState).values({
+      id: randomUUID(),
+      profileId,
+      bookId,
       readingProgress: position,
-      lastPosition: JSON.stringify({ position, pageNum }),
-      lastReadAt: sql`(unixepoch())`,
-      updatedAt: sql`(unixepoch())`,
-    })
-    .where(eq(books.id, bookId));
+      lastPosition,
+      lastReadAt: now,
+      updatedAt: now,
+    });
+  }
 
   return { position, pageNum };
+}
+
+export async function getBookProgress(
+  bookId: string,
+  profileId?: string,
+): Promise<{ readingProgress: number; lastPosition: string | null; lastReadAt: Date | null } | null> {
+  const conditions = [eq(userBookState.bookId, bookId)];
+  if (profileId) conditions.push(eq(userBookState.profileId, profileId));
+
+  const state = await db
+    .select()
+    .from(userBookState)
+    .where(and(...conditions))
+    .get();
+
+  if (!state) return null;
+
+  return {
+    readingProgress: state.readingProgress ?? 0,
+    lastPosition: state.lastPosition,
+    lastReadAt: state.lastReadAt,
+  };
+}
+
+// ============================================
+// PROFILE RESOLUTION
+// ============================================
+
+/**
+ * Resolve the active profileId from the request cookie or fallback to
+ * the single profile if only one exists. Mirrors the logic in
+ * server/middleware/profile.ts but works inside server actions where
+ * the Hono context is not available.
+ */
+function resolveProfileId(): string | undefined {
+  const request = getRequest();
+  if (request) {
+    const cookieHeader = request.headers.get("Cookie") ?? "";
+    const match = cookieHeader.match(/(?:^|;\s*)compendus-profile=([^;]+)/);
+    if (match) {
+      const id = decodeURIComponent(match[1]);
+      // Verify the profile exists
+      const profile = db.select().from(profiles).where(eq(profiles.id, id)).get();
+      if (profile) return profile.id;
+    }
+  }
+  // Fallback: auto-select if exactly one profile exists
+  const allProfiles = db.select().from(profiles).all();
+  if (allProfiles.length === 1) return allProfiles[0].id;
+  return undefined;
+}
+
+// ============================================
+// READING SESSIONS
+// ============================================
+
+export async function createReadingSession(
+  bookId: string,
+  startPosition?: string,
+): Promise<string> {
+  const profileId = resolveProfileId();
+  if (!profileId) throw new Error("profileId is required");
+
+  const id = randomUUID();
+  const now = new Date();
+
+  await db.insert(readingSessions).values({
+    id,
+    profileId,
+    bookId,
+    startedAt: now,
+    startPosition: startPosition ?? null,
+  });
+
+  return id;
+}
+
+export async function endReadingSession(
+  sessionId: string,
+  endPosition?: string,
+  pagesRead?: number,
+): Promise<void> {
+  const profileId = resolveProfileId();
+  if (!profileId) return;
+
+  // Verify ownership before updating
+  const session = await db
+    .select()
+    .from(readingSessions)
+    .where(eq(readingSessions.id, sessionId))
+    .get();
+  if (!session || session.profileId !== profileId) return;
+
+  const now = new Date();
+  await db
+    .update(readingSessions)
+    .set({
+      endedAt: now,
+      endPosition: endPosition ?? null,
+      pagesRead: pagesRead ?? null,
+    })
+    .where(eq(readingSessions.id, sessionId));
 }
 
 // ============================================

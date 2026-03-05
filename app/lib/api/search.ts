@@ -1,8 +1,8 @@
-import { db, books } from "../db";
-import { eq, or, inArray, sql, asc, desc } from "drizzle-orm";
+import { db, books, userBookState } from "../db";
+import { eq, or, inArray, sql, asc, desc, and } from "drizzle-orm";
 import { searchBooks as searchBooksLib } from "../search";
 import { getRelatedBooks } from "../../actions/books";
-import type { Book } from "../db/schema";
+import type { Book, UserBookState } from "../db/schema";
 
 /**
  * Public API response format for a book
@@ -36,6 +36,9 @@ interface ApiBook {
   isRead: boolean;
   rating: number | null;
   review: string | null;
+  readingProgress: number | null;
+  lastReadAt: string | null;
+  lastPosition: string | null;
 }
 
 interface ApiChapter {
@@ -79,9 +82,11 @@ interface ApiErrorResponse {
 }
 
 /**
- * Transform internal Book to public API format
+ * Transform internal Book to public API format.
+ * When userState is provided, reading state fields (isRead, rating, review)
+ * come from userBookState instead of the deprecated columns on books.
  */
-function toApiBook(book: Book, baseUrl: string): ApiBook {
+function toApiBook(book: Book, baseUrl: string, userState?: Pick<UserBookState, "isRead" | "rating" | "review" | "readingProgress" | "lastReadAt" | "lastPosition"> | null): ApiBook {
   // Parse chapters JSON if present
   let chapters: ApiChapter[] | null = null;
   if (book.chapters) {
@@ -116,10 +121,44 @@ function toApiBook(book: Book, baseUrl: string): ApiBook {
     narrator: book.narrator,
     chapters,
     hasTranscript: !!book.transcriptPath,
-    isRead: book.isRead ?? false,
-    rating: book.rating ?? null,
-    review: book.review ?? null,
+    isRead: userState ? (userState.isRead ?? false) : (book.isRead ?? false),
+    rating: userState ? (userState.rating ?? null) : (book.rating ?? null),
+    review: userState ? (userState.review ?? null) : (book.review ?? null),
+    readingProgress: userState?.readingProgress ?? null,
+    lastReadAt: userState?.lastReadAt?.toISOString() ?? null,
+    lastPosition: userState?.lastPosition ?? null,
   };
+}
+
+/**
+ * Fetch user book states for a batch of book IDs.
+ * Returns a Map of bookId -> UserBookState for quick lookup.
+ */
+async function getUserBookStates(
+  bookIds: string[],
+  profileId: string,
+): Promise<Map<string, Pick<UserBookState, "isRead" | "rating" | "review" | "readingProgress" | "lastReadAt" | "lastPosition">>> {
+  if (bookIds.length === 0) return new Map();
+
+  const states = await db
+    .select({
+      bookId: userBookState.bookId,
+      isRead: userBookState.isRead,
+      rating: userBookState.rating,
+      review: userBookState.review,
+      readingProgress: userBookState.readingProgress,
+      lastReadAt: userBookState.lastReadAt,
+      lastPosition: userBookState.lastPosition,
+    })
+    .from(userBookState)
+    .where(
+      and(
+        eq(userBookState.profileId, profileId),
+        inArray(userBookState.bookId, bookIds),
+      ),
+    );
+
+  return new Map(states.map((s) => [s.bookId, s]));
 }
 
 /**
@@ -132,6 +171,7 @@ export async function apiSearchBooks(
     offset?: number;
   },
   baseUrl: string,
+  profileId?: string,
 ): Promise<ApiSearchResponse | ApiErrorResponse> {
   const { limit = 20, offset = 0 } = options;
 
@@ -158,6 +198,11 @@ export async function apiSearchBooks(
       offset,
     });
 
+    // Batch-fetch user book states when profileId is available
+    const stateMap = profileId
+      ? await getUserBookStates(results.map((r) => r.book.id), profileId)
+      : null;
+
     return {
       success: true,
       query,
@@ -165,7 +210,7 @@ export async function apiSearchBooks(
       limit,
       offset,
       results: results.map((r) => ({
-        book: toApiBook(r.book, baseUrl),
+        book: toApiBook(r.book, baseUrl, stateMap?.get(r.book.id)),
         relevance: r.relevance,
         highlights: r.highlights,
       })),
@@ -186,6 +231,7 @@ export async function apiSearchBooks(
 export async function apiLookupByIsbn(
   isbn: string,
   baseUrl: string,
+  profileId?: string,
 ): Promise<ApiBookResponse | ApiErrorResponse> {
   // Normalize ISBN - remove hyphens and spaces
   const normalizedIsbn = isbn.replace(/[-\s]/g, "");
@@ -221,10 +267,16 @@ export async function apiLookupByIsbn(
 
     const related = await getRelatedBooks(result);
 
+    // Batch-fetch user book states when profileId is available
+    const allBookIds = [result.id, ...related.map((b) => b.id)];
+    const stateMap = profileId
+      ? await getUserBookStates(allBookIds, profileId)
+      : null;
+
     return {
       success: true,
-      book: toApiBook(result, baseUrl),
-      relatedBooks: related.map((b) => toApiBook(b, baseUrl)),
+      book: toApiBook(result, baseUrl, stateMap?.get(result.id)),
+      relatedBooks: related.map((b) => toApiBook(b, baseUrl, stateMap?.get(b.id))),
     };
   } catch (error) {
     console.error("API ISBN lookup error:", error);
@@ -242,6 +294,7 @@ export async function apiLookupByIsbn(
 export async function apiGetBook(
   id: string,
   baseUrl: string,
+  profileId?: string,
 ): Promise<ApiBookResponse | ApiErrorResponse> {
   try {
     const result = await db.select().from(books).where(eq(books.id, id)).get();
@@ -256,10 +309,16 @@ export async function apiGetBook(
 
     const related = await getRelatedBooks(result);
 
+    // Batch-fetch user book states when profileId is available
+    const allBookIds = [result.id, ...related.map((b) => b.id)];
+    const stateMap = profileId
+      ? await getUserBookStates(allBookIds, profileId)
+      : null;
+
     return {
       success: true,
-      book: toApiBook(result, baseUrl),
-      relatedBooks: related.map((b) => toApiBook(b, baseUrl)),
+      book: toApiBook(result, baseUrl, stateMap?.get(result.id)),
+      relatedBooks: related.map((b) => toApiBook(b, baseUrl, stateMap?.get(b.id))),
     };
   } catch (error) {
     console.error("API get book error:", error);
@@ -284,6 +343,7 @@ export async function apiListBooks(
     series?: string;
   },
   baseUrl: string,
+  profileId?: string,
 ): Promise<ApiSearchResponse | ApiErrorResponse> {
   const { limit = 20, offset = 0, type, orderBy = "createdAt", order = "desc", series } = options;
 
@@ -336,6 +396,11 @@ export async function apiListBooks(
 
     const totalCount = countResult?.count ?? 0;
 
+    // Batch-fetch user book states when profileId is available
+    const stateMap = profileId
+      ? await getUserBookStates(results.map((b) => b.id), profileId)
+      : null;
+
     return {
       success: true,
       query: "",
@@ -344,7 +409,7 @@ export async function apiListBooks(
       limit,
       offset,
       results: results.map((book) => ({
-        book: toApiBook(book, baseUrl),
+        book: toApiBook(book, baseUrl, stateMap?.get(book.id)),
         relevance: 0,
         highlights: {},
       })),

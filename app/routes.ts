@@ -26,6 +26,7 @@ export const routes: RouteConfig[] = [
           { id: "admin-data", index: true, component: () => import("./routes/admin-data.js") },
           { id: "admin-batch-edit", path: "batch-edit", component: () => import("./routes/batch-edit.js") },
           { id: "admin-unmatched", path: "unmatched", component: () => import("./routes/unmatched.js") },
+          { id: "admin-profiles", path: "profiles", component: () => import("./routes/admin-profiles.js") },
         ],
       },
       {
@@ -38,6 +39,7 @@ export const routes: RouteConfig[] = [
           { id: "discover-series", path: "series", component: () => import("./routes/discover-series.js") },
         ],
       },
+      { id: "profiles", path: "profiles", component: () => import("./routes/profiles.js") },
       { id: "about", path: "about", component: () => import("./routes/about.js") },
       { id: "docs", path: "docs", component: () => import("./routes/docs.js") },
     ],

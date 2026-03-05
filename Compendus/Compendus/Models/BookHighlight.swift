@@ -20,6 +20,7 @@ final class BookHighlight {
     var progression: Double       // 0.0 - 1.0 position in book
     var chapterTitle: String?     // Chapter name for display
     var createdAt: Date
+    var profileId: String = ""        // Profile that created this highlight (empty = legacy/unassigned)
 
     init(
         id: String = UUID().uuidString,

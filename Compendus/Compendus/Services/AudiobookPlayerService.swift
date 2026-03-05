@@ -60,9 +60,19 @@ class AudiobookPlayer: NSObject {
         guard let fileURL = book.fileURL else { return }
         await load(url: fileURL, chapters: book.chapters)
 
-        // Restore last position
-        if let lastPosition = book.lastPosition, let time = Double(lastPosition) {
-            seek(to: time)
+        // Restore last position (universal JSON format or legacy plain number)
+        if let lastPosition = book.lastPosition {
+            var seekTime: Double?
+            if let data = lastPosition.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               json["type"] as? String == "audio" {
+                seekTime = json["timestamp"] as? Double
+            } else {
+                seekTime = Double(lastPosition)
+            }
+            if let time = seekTime {
+                seek(to: time)
+            }
         }
 
         setupNowPlayingInfo(
@@ -167,7 +177,17 @@ class AudiobookPlayer: NSObject {
             predicate: #Predicate { $0.id == bookId }
         )
         guard let dbBook = try? context.fetch(descriptor).first else { return }
-        dbBook.lastPosition = String(time)
+        let posDict: [String: Any] = [
+            "type": "audio",
+            "timestamp": time,
+            "progress": progress
+        ]
+        if let posData = try? JSONSerialization.data(withJSONObject: posDict),
+           let posStr = String(data: posData, encoding: .utf8) {
+            dbBook.lastPosition = posStr
+        } else {
+            dbBook.lastPosition = String(time) // fallback
+        }
         dbBook.readingProgress = progress
         dbBook.lastReadAt = Date()
         try? context.save()

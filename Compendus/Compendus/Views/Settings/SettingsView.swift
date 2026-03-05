@@ -25,6 +25,7 @@ struct SettingsView: View {
     @State private var showingDeleteAllConfirmation = false
     @State private var showingClearCacheConfirmation = false
     @State private var showingDisconnectConfirmation = false
+    @State private var showingSwitchProfileConfirmation = false
     @State private var showingStorageChart = false
 
     enum ConnectionStatus {
@@ -249,6 +250,49 @@ struct SettingsView: View {
                     Text("Actions")
                 }
 
+                // Profile section
+                if serverConfig.isProfileSelected {
+                    Section {
+                        HStack(spacing: 12) {
+                            // Avatar
+                            ZStack {
+                                Circle()
+                                    .fill(Color(.systemGray5))
+                                    .frame(width: 44, height: 44)
+                                if let avatar = serverConfig.selectedProfileAvatar, !avatar.isEmpty {
+                                    Text(avatar)
+                                        .font(.title2)
+                                } else {
+                                    Text(String(serverConfig.selectedProfileName?.prefix(1).uppercased() ?? "?"))
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(serverConfig.selectedProfileName ?? "Unknown")
+                                    .font(.headline)
+                                if serverConfig.selectedProfileIsAdmin {
+                                    Text("Admin")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+
+                        Button {
+                            showingSwitchProfileConfirmation = true
+                        } label: {
+                            Label("Switch Profile", systemImage: "person.2")
+                        }
+                    } header: {
+                        Text("Profile")
+                    }
+                }
+
                 // Account section
                 Section {
                     Button(role: .destructive) {
@@ -316,6 +360,14 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This will clear cached comic pages. They will be re-downloaded when you open comics.")
+            }
+            .confirmationDialog("Switch Profile?", isPresented: $showingSwitchProfileConfirmation, titleVisibility: .visible) {
+                Button("Switch Profile") {
+                    serverConfig.clearProfile()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("You will be returned to the profile picker. Your downloaded books and reading data will be preserved.")
             }
             .confirmationDialog("Disconnect from Server?", isPresented: $showingDisconnectConfirmation, titleVisibility: .visible) {
                 Button("Disconnect", role: .destructive) {

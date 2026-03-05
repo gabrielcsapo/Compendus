@@ -11,12 +11,15 @@ export async function getWantedBooks(options?: {
   series?: string;
   limit?: number;
   filterOwned?: boolean; // Default true - removes books now in library
-}): Promise<{ books: WantedBook[]; removed: number }> {
+}, profileId?: string): Promise<{ books: WantedBook[]; removed: number }> {
   const filterOwned = options?.filterOwned !== false;
 
   let query = db.select().from(wantedBooks).$dynamic();
 
   const conditions = [];
+  if (profileId) {
+    conditions.push(eq(wantedBooks.profileId, profileId));
+  }
   if (options?.status) {
     conditions.push(eq(wantedBooks.status, options.status));
   }
@@ -90,11 +93,15 @@ export async function getWantedBooks(options?: {
   return { books: filteredBooks, removed: idsToRemove.length };
 }
 
-async function getWantedBook(id: string): Promise<WantedBook | null> {
+async function getWantedBook(id: string, profileId?: string): Promise<WantedBook | null> {
+  const conditions = [eq(wantedBooks.id, id)];
+  if (profileId) {
+    conditions.push(eq(wantedBooks.profileId, profileId));
+  }
   const result = await db
     .select()
     .from(wantedBooks)
-    .where(eq(wantedBooks.id, id))
+    .where(and(...conditions))
     .get();
   return result || null;
 }
@@ -106,20 +113,24 @@ export async function addToWantedList(
     priority?: number;
     notes?: string;
   },
+  profileId?: string,
 ): Promise<WantedBook> {
   const id = uuid();
 
   // Check if already in wanted list by source
   if (metadata.sourceId) {
+    const sourceConditions = [
+      eq(wantedBooks.source, metadata.source),
+      eq(wantedBooks.sourceId, metadata.sourceId),
+    ];
+    if (profileId) {
+      sourceConditions.push(eq(wantedBooks.profileId, profileId));
+    }
+
     const existingBySource = await db
       .select()
       .from(wantedBooks)
-      .where(
-        and(
-          eq(wantedBooks.source, metadata.source),
-          eq(wantedBooks.sourceId, metadata.sourceId),
-        ),
-      )
+      .where(and(...sourceConditions))
       .get();
 
     if (existingBySource) {
@@ -147,6 +158,7 @@ export async function addToWantedList(
 
   await db.insert(wantedBooks).values({
     id,
+    profileId: profileId!,
     title: metadata.title,
     subtitle: metadata.subtitle,
     authors:
@@ -169,7 +181,7 @@ export async function addToWantedList(
     notes: options?.notes,
   });
 
-  return (await getWantedBook(id))!;
+  return (await getWantedBook(id, profileId))!;
 }
 
 export async function updateWantedBook(
@@ -179,39 +191,57 @@ export async function updateWantedBook(
     priority: number;
     notes: string;
   }>,
+  profileId?: string,
 ): Promise<WantedBook | null> {
+  const conditions = [eq(wantedBooks.id, id)];
+  if (profileId) {
+    conditions.push(eq(wantedBooks.profileId, profileId));
+  }
+
   await db
     .update(wantedBooks)
     .set({ ...data, updatedAt: sql`(unixepoch())` })
-    .where(eq(wantedBooks.id, id));
+    .where(and(...conditions));
 
-  return getWantedBook(id);
+  return getWantedBook(id, profileId);
 }
 
-export async function removeFromWantedList(id: string): Promise<boolean> {
-  await db.delete(wantedBooks).where(eq(wantedBooks.id, id));
+export async function removeFromWantedList(id: string, profileId?: string): Promise<boolean> {
+  const conditions = [eq(wantedBooks.id, id)];
+  if (profileId) {
+    conditions.push(eq(wantedBooks.profileId, profileId));
+  }
+  await db.delete(wantedBooks).where(and(...conditions));
   return true;
 }
 
-export async function clearWantedList(): Promise<number> {
+export async function clearWantedList(profileId?: string): Promise<number> {
+  if (profileId) {
+    const result = await db.delete(wantedBooks).where(eq(wantedBooks.profileId, profileId)).returning({ id: wantedBooks.id });
+    return result.length;
+  }
   const result = await db.delete(wantedBooks).returning({ id: wantedBooks.id });
   return result.length;
 }
 
 export async function isBookWanted(
   metadata: MetadataSearchResult,
+  profileId?: string,
 ): Promise<boolean> {
   // Check by source ID
   if (metadata.sourceId) {
+    const sourceConditions = [
+      eq(wantedBooks.source, metadata.source),
+      eq(wantedBooks.sourceId, metadata.sourceId),
+    ];
+    if (profileId) {
+      sourceConditions.push(eq(wantedBooks.profileId, profileId));
+    }
+
     const bySource = await db
       .select()
       .from(wantedBooks)
-      .where(
-        and(
-          eq(wantedBooks.source, metadata.source),
-          eq(wantedBooks.sourceId, metadata.sourceId),
-        ),
-      )
+      .where(and(...sourceConditions))
       .get();
 
     if (bySource) return true;
@@ -225,13 +255,23 @@ export async function isBookWanted(
     if (metadata.isbn10)
       conditions.push(eq(wantedBooks.isbn10, metadata.isbn10));
 
-    const byIsbn = await db
-      .select()
-      .from(wantedBooks)
-      .where(or(...conditions))
-      .get();
+    if (profileId) {
+      const byIsbn = await db
+        .select()
+        .from(wantedBooks)
+        .where(and(or(...conditions), eq(wantedBooks.profileId, profileId)))
+        .get();
 
-    if (byIsbn) return true;
+      if (byIsbn) return true;
+    } else {
+      const byIsbn = await db
+        .select()
+        .from(wantedBooks)
+        .where(or(...conditions))
+        .get();
+
+      if (byIsbn) return true;
+    }
   }
 
   return false;

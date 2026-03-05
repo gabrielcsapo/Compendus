@@ -86,6 +86,26 @@ const features = [
     ),
   },
   {
+    title: "User Profiles",
+    description:
+      "Support multiple readers on one server with PIN-protected profiles, per-user reading progress, and easy account switching on web and iOS.",
+    icon: (
+      <svg
+        className="w-6 h-6"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+        />
+      </svg>
+    ),
+  },
+  {
     title: "Full-Text Search",
     description:
       "Search across titles, authors, descriptions, and optionally within book content itself.",
@@ -273,6 +293,135 @@ export default function Landing() {
               </svg>
               GitHub
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Profile Picker Preview */}
+      <section className="pb-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-2xl font-semibold text-foreground text-center mb-2">
+            Multi-User Profiles
+          </h2>
+          <p className="text-foreground-muted text-center mb-8 max-w-xl mx-auto">
+            Share one server with the whole family. Each reader gets their own
+            library, reading progress, and highlights — with optional PIN
+            protection.
+          </p>
+
+          {/* Mock profile picker window */}
+          <div className="border border-border rounded-xl overflow-hidden shadow-xl bg-surface">
+            {/* Faux window chrome */}
+            <div className="border-b border-border bg-surface px-4 py-2.5 flex items-center gap-4">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-danger/60" />
+                <div className="w-3 h-3 rounded-full bg-warning/60" />
+                <div className="w-3 h-3 rounded-full bg-success/60" />
+              </div>
+              <div className="flex items-center gap-0.5 ml-4">
+                <CompendusLogo className="w-5 h-5 text-primary" />
+                <span className="text-sm font-bold text-primary ml-1.5">
+                  Compendus
+                </span>
+              </div>
+            </div>
+
+            {/* Profile picker content */}
+            <div className="bg-background px-6 py-16 sm:py-20 flex flex-col items-center">
+              <h3 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">
+                Who&apos;s reading?
+              </h3>
+              <p className="text-sm text-foreground-muted mb-10">
+                Select your profile to continue
+              </p>
+
+              {/* Profile cards */}
+              <div className="flex flex-wrap justify-center gap-8">
+                {/* Profile 1 — Admin */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-surface-elevated border-2 border-primary shadow-lg flex items-center justify-center text-4xl transition-transform hover:scale-105">
+                    <span>📚</span>
+                    {/* Admin badge */}
+                    <div className="absolute -top-1 -right-1 w-7 h-7 rounded-full bg-primary flex items-center justify-center">
+                      <svg
+                        className="w-3.5 h-3.5 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                  <span className="text-sm font-medium text-foreground">
+                    Bob
+                  </span>
+                </div>
+
+                {/* Profile 2 — PIN-protected */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-surface-elevated border-2 border-border flex items-center justify-center text-4xl transition-transform hover:scale-105 hover:border-primary hover:shadow-lg">
+                    <span>🌸</span>
+                    {/* Lock badge */}
+                    <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface border-2 border-border flex items-center justify-center">
+                      <svg
+                        className="w-3.5 h-3.5 text-foreground-muted"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+                  <span className="text-sm font-medium text-foreground-muted">
+                    Sarah
+                  </span>
+                </div>
+
+                {/* Profile 3 — plain */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-surface-elevated border-2 border-border flex items-center justify-center text-4xl transition-transform hover:scale-105 hover:border-primary hover:shadow-lg">
+                    <span>🚀</span>
+                  </div>
+                  <span className="text-sm font-medium text-foreground-muted">
+                    Alex
+                  </span>
+                </div>
+
+                {/* Add Profile */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-2 border-dashed border-border flex items-center justify-center transition-transform hover:scale-105 hover:border-primary">
+                    <svg
+                      className="w-10 h-10 text-foreground-muted"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                  </div>
+                  <span className="text-sm font-medium text-foreground-muted">
+                    Add Profile
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

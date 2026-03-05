@@ -104,6 +104,9 @@ class NativeEPUBEngine: ReaderEngine {
     // Deferred initial load (waits for view to have proper size)
     private var pendingInitialLoad: (spineIndex: Int, progression: Double?)?
 
+    // Pending character offset for cross-device position restoration (universal format)
+    private var pendingCharOffset: Int?
+
     /// Number of pages visible in a single spread (1 or 2).
     private var pagesPerSpread: Int {
         let settings = currentSettings ?? ReaderSettings()
@@ -341,19 +344,38 @@ class NativeEPUBEngine: ReaderEngine {
             if let positionJSON = initialPosition,
                let data = positionJSON.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let href = json["href"] as? String {
-                    for (index, spineItem) in parser.package.spine.enumerated() {
-                        if let manifest = parser.package.manifest[spineItem.idref],
-                           manifest.href == href || href.contains(manifest.href) {
-                            initialSpineIndex = index
-                            break
-                        }
+
+                // Universal position format: { type: "epub", spineIndex, charOffset, progress }
+                if json["type"] as? String == "epub",
+                   let spineIdx = json["spineIndex"] as? Int,
+                   spineIdx >= 0, spineIdx < parser.package.spine.count {
+                    initialSpineIndex = spineIdx
+                    // Prefer charOffset for precise cross-device restoration
+                    if let charOff = json["charOffset"] as? Int {
+                        pendingCharOffset = charOff
+                        // Use progress as fallback progression while chapter loads
+                        initialProgression = json["progress"] as? Double
+                    } else {
+                        // No charOffset — use progress to estimate within chapter
+                        initialProgression = json["progress"] as? Double
                     }
                 }
-                if let locations = json["locations"] as? [String: Any] {
-                    initialProgression = locations["progression"] as? Double
-                } else {
-                    initialProgression = json["progression"] as? Double
+                // Legacy format: { href, locations: { progression, totalProgression } }
+                else {
+                    if let href = json["href"] as? String {
+                        for (index, spineItem) in parser.package.spine.enumerated() {
+                            if let manifest = parser.package.manifest[spineItem.idref],
+                               manifest.href == href || href.contains(manifest.href) {
+                                initialSpineIndex = index
+                                break
+                            }
+                        }
+                    }
+                    if let locations = json["locations"] as? [String: Any] {
+                        initialProgression = locations["progression"] as? Double
+                    } else {
+                        initialProgression = json["progression"] as? Double
+                    }
                 }
             }
 
@@ -381,6 +403,12 @@ class NativeEPUBEngine: ReaderEngine {
                         // paginating the rest, so it won't be processed twice.
                         await self.chapterLoadTask?.value
                         guard !Task.isCancelled else { return }
+                        // If a charOffset was specified (universal position format),
+                        // navigate to the exact character position now that the chapter is loaded.
+                        if let charOffset = self.pendingCharOffset {
+                            self.pendingCharOffset = nil
+                            self.navigateToOffsetInCurrentChapter(charOffset)
+                        }
                         await self.paginateAllChapters()
                     }
                 }
@@ -2197,14 +2225,18 @@ class NativeEPUBEngine: ReaderEngine {
 
     func serializeLocation() -> String? {
         guard let location = currentLocation else { return nil }
-        let dict: [String: Any] = [
+        var dict: [String: Any] = [
+            "type": "epub",
+            "spineIndex": currentSpineIndex,
+            "progress": location.totalProgression,
+            // Keep href and title for display/fallback
             "href": location.href ?? "",
-            "locations": [
-                "progression": location.progression,
-                "totalProgression": location.totalProgression
-            ],
             "title": location.title ?? ""
         ]
+        // Add character offset for cross-device position restoration
+        if let charOffset = currentPagePlainTextOffset {
+            dict["charOffset"] = charOffset
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
         return String(data: data, encoding: .utf8)
     }

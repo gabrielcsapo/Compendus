@@ -16,6 +16,7 @@ final class PendingBookEdit {
     var payload: Data               // JSON-encoded operation data
     var createdAt: Date
     var retryCount: Int
+    var profileId: String = ""       // Profile that queued this edit (empty = legacy/unassigned)
 
     init(
         id: String = UUID().uuidString,

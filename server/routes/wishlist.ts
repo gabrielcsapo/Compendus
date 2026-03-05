@@ -7,6 +7,7 @@ const app = new Hono();
 // GET /api/wishlist - get wishlist items
 app.get("/api/wishlist", async (c) => {
   try {
+    const profileId = c.get("profileId");
     const status = c.req.query("status") as "wishlist" | "searching" | "ordered" | undefined;
     const series = c.req.query("series");
     const limitParam = c.req.query("limit");
@@ -16,7 +17,7 @@ app.get("/api/wishlist", async (c) => {
       status: status || undefined,
       series: series || undefined,
       limit,
-    });
+    }, profileId);
 
     return c.json({
       success: true,
@@ -61,6 +62,7 @@ app.get("/api/wishlist", async (c) => {
 // POST /api/wishlist/isbn/:isbn - add book to wishlist by ISBN
 app.post("/api/wishlist/isbn/:isbn", async (c) => {
   try {
+    const profileId = c.get("profileId");
     const isbn = c.req.param("isbn").replace(/[-\s]/g, "");
 
     // Validate ISBN format (10 or 13 digits)
@@ -152,7 +154,7 @@ app.post("/api/wishlist/isbn/:isbn", async (c) => {
     if (bodyData.notes) options.notes = bodyData.notes;
 
     // Add to wanted list
-    const wantedBook = await addToWantedList(metadata, options);
+    const wantedBook = await addToWantedList(metadata, options, profileId);
 
     return c.json({
       success: true,

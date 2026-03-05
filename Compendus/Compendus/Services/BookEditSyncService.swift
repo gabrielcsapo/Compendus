@@ -92,7 +92,9 @@ class BookEditSyncService {
             updatePendingStatus(modelContext: modelContext)
         }
 
+        let pid = apiService.config.selectedProfileId ?? ""
         let descriptor = FetchDescriptor<PendingBookEdit>(
+            predicate: #Predicate { $0.profileId == pid || $0.profileId.isEmpty },
             sortBy: [SortDescriptor(\.createdAt, order: .forward)]
         )
         guard let pendingEdits = try? modelContext.fetch(descriptor), !pendingEdits.isEmpty else {
@@ -163,8 +165,9 @@ class BookEditSyncService {
     }
 
     private func updateLocalBook(bookId: String, serverBook: Book, modelContext: ModelContext) {
+        let pid = apiService.config.selectedProfileId ?? ""
         let descriptor = FetchDescriptor<DownloadedBook>(
-            predicate: #Predicate { $0.id == bookId }
+            predicate: #Predicate { $0.id == bookId && ($0.profileId == pid || $0.profileId.isEmpty) }
         )
         if let downloadedBook = try? modelContext.fetch(descriptor).first {
             downloadedBook.updateMetadata(from: serverBook)
@@ -196,7 +199,10 @@ class BookEditSyncService {
     }
 
     private func updatePendingStatus(modelContext: ModelContext) {
-        let descriptor = FetchDescriptor<PendingBookEdit>()
+        let pid = apiService.config.selectedProfileId ?? ""
+        let descriptor = FetchDescriptor<PendingBookEdit>(
+            predicate: #Predicate { $0.profileId == pid || $0.profileId.isEmpty }
+        )
         let count = (try? modelContext.fetchCount(descriptor)) ?? 0
         hasPendingEdits = count > 0
     }

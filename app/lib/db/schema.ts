@@ -1,6 +1,56 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+// Profiles table - Netflix-style user profiles
+export const profiles = sqliteTable(
+  "profiles",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    avatar: text("avatar"), // emoji character or relative path to uploaded image
+    pinHash: text("pin_hash"), // "salt:sha256hash", null = no PIN
+    isAdmin: integer("is_admin", { mode: "boolean" }).default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    uniqueIndex("idx_profiles_name").on(table.name),
+  ],
+);
+
+// Per-user reading state for each book (replaces reading state columns on books table)
+export const userBookState = sqliteTable(
+  "user_book_state",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    readingProgress: real("reading_progress").default(0),
+    lastReadAt: integer("last_read_at", { mode: "timestamp" }),
+    lastPosition: text("last_position"), // JSON: {type, spineIndex, charOffset, progress} or {type, page, progress}
+    isRead: integer("is_read", { mode: "boolean" }).default(false),
+    rating: integer("rating"),       // 1-5, null = unrated
+    review: text("review"),          // free-text, null = no review
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    uniqueIndex("idx_ubs_profile_book").on(table.profileId, table.bookId),
+    index("idx_ubs_profile").on(table.profileId),
+    index("idx_ubs_book").on(table.bookId),
+    index("idx_ubs_last_read").on(table.lastReadAt),
+  ],
+);
+
 // Books table
 export const books = sqliteTable(
   "books",
@@ -102,6 +152,9 @@ export const collections = sqliteTable(
   "collections",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
     color: text("color"),
@@ -117,7 +170,8 @@ export const collections = sqliteTable(
   },
   (table) => [
     index("idx_collections_parent").on(table.parentId),
-    uniqueIndex("idx_collections_name").on(table.name),
+    uniqueIndex("idx_collections_name_profile").on(table.name, table.profileId),
+    index("idx_collections_profile").on(table.profileId),
   ],
 );
 
@@ -146,13 +200,19 @@ export const tags = sqliteTable(
   "tags",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     color: text("color"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
   },
-  (table) => [uniqueIndex("idx_tags_name").on(table.name)],
+  (table) => [
+    uniqueIndex("idx_tags_name_profile").on(table.name, table.profileId),
+    index("idx_tags_profile").on(table.profileId),
+  ],
 );
 
 // Books to Tags junction table
@@ -177,6 +237,9 @@ export const bookmarks = sqliteTable(
   "bookmarks",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
     bookId: text("book_id")
       .notNull()
       .references(() => books.id, { onDelete: "cascade" }),
@@ -187,8 +250,15 @@ export const bookmarks = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    deletedAt: integer("deleted_at", { mode: "timestamp" }),
   },
-  (table) => [index("idx_bookmarks_book").on(table.bookId)],
+  (table) => [
+    index("idx_bookmarks_book").on(table.bookId),
+    index("idx_bookmarks_profile").on(table.profileId),
+  ],
 );
 
 // Highlights table
@@ -196,6 +266,9 @@ export const highlights = sqliteTable(
   "highlights",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
     bookId: text("book_id")
       .notNull()
       .references(() => books.id, { onDelete: "cascade" }),
@@ -207,8 +280,15 @@ export const highlights = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    deletedAt: integer("deleted_at", { mode: "timestamp" }),
   },
-  (table) => [index("idx_highlights_book").on(table.bookId)],
+  (table) => [
+    index("idx_highlights_book").on(table.bookId),
+    index("idx_highlights_profile").on(table.profileId),
+  ],
 );
 
 // Reading sessions table (for statistics)
@@ -216,6 +296,9 @@ export const readingSessions = sqliteTable(
   "reading_sessions",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
     bookId: text("book_id")
       .notNull()
       .references(() => books.id, { onDelete: "cascade" }),
@@ -228,6 +311,7 @@ export const readingSessions = sqliteTable(
   (table) => [
     index("idx_sessions_book").on(table.bookId),
     index("idx_sessions_started").on(table.startedAt),
+    index("idx_sessions_profile").on(table.profileId),
   ],
 );
 
@@ -236,6 +320,9 @@ export const wantedBooks = sqliteTable(
   "wanted_books",
   {
     id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
 
     // Metadata from external APIs
     title: text("title").notNull(),
@@ -278,6 +365,7 @@ export const wantedBooks = sqliteTable(
     index("idx_wanted_books_series").on(table.series),
     index("idx_wanted_books_status").on(table.status),
     uniqueIndex("idx_wanted_books_source").on(table.source, table.sourceId),
+    index("idx_wanted_books_profile").on(table.profileId),
   ],
 );
 
@@ -314,6 +402,7 @@ export const bookEdits = sqliteTable(
     bookId: text("book_id")
       .notNull()
       .references(() => books.id, { onDelete: "cascade" }),
+    profileId: text("profile_id"), // nullable - who made the edit (null for system/metadata edits)
     editGroupId: text("edit_group_id").notNull(), // Groups fields changed in same operation
     field: text("field").notNull(), // Column name that changed
     oldValue: text("old_value"), // JSON-encoded previous value (null if was empty)
@@ -331,6 +420,10 @@ export const bookEdits = sqliteTable(
 );
 
 // Type exports
+export type Profile = typeof profiles.$inferSelect;
+export type NewProfile = typeof profiles.$inferInsert;
+export type UserBookState = typeof userBookState.$inferSelect;
+export type NewUserBookState = typeof userBookState.$inferInsert;
 export type BookEdit = typeof bookEdits.$inferSelect;
 export type NewBookEdit = typeof bookEdits.$inferInsert;
 export type BackgroundJob = typeof backgroundJobs.$inferSelect;

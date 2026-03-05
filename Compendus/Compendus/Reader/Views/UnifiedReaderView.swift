@@ -1301,11 +1301,25 @@ struct UnifiedReaderView: View {
         }
     }
 
+    /// Parse a position string to extract a page number.
+    /// Handles both universal JSON format ({"type":"pdf","page":N}) and legacy plain integers.
+    private func parsePageFromPosition(_ positionStr: String?) -> Int? {
+        guard let str = positionStr else { return nil }
+        // Try universal JSON format first
+        if let data = str.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let page = json["page"] as? Int {
+            return page
+        }
+        // Legacy: plain integer
+        return Int(str)
+    }
+
     private func initializePDFEngine(fileURL: URL) {
         let pdfEngine = PDFEngine(bookURL: fileURL)
         configureEngineCallbacks(pdfEngine)
 
-        let initialPage = (initialPosition ?? book.lastPosition).flatMap { Int($0) }
+        let initialPage = parsePageFromPosition(initialPosition ?? book.lastPosition)
         pdfEngine.load(initialPage: initialPage)
 
         if let error = pdfEngine.errorMessage {
@@ -1338,7 +1352,7 @@ struct UnifiedReaderView: View {
         )
         configureEngineCallbacks(comicEngine)
 
-        let initialPage = (initialPosition ?? book.lastPosition).flatMap { Int($0) }
+        let initialPage = parsePageFromPosition(initialPosition ?? book.lastPosition)
         await comicEngine.load(initialPage: initialPage)
 
         if let error = comicEngine.errorMessage {

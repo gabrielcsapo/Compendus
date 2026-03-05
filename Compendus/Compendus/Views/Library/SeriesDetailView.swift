@@ -15,10 +15,16 @@ struct SeriesDetailView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(ServerConfig.self) private var serverConfig
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    @Query private var downloadedBooks: [DownloadedBook]
+    @Query private var allDownloadedBooks: [DownloadedBook]
+
+    private var downloadedBooks: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allDownloadedBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var books: [Book] = []
     @State private var isLoading = false

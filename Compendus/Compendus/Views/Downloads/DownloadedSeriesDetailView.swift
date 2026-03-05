@@ -14,11 +14,17 @@ struct DownloadedSeriesDetailView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(ServerConfig.self) private var serverConfig
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
-    private var allBooks: [DownloadedBook]
+    private var allBooksQuery: [DownloadedBook]
+
+    private var allBooks: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allBooksQuery.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var selectedFilter: DownloadFilter = .all
     @State private var bookToRead: DownloadedBook?

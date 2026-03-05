@@ -15,9 +15,14 @@ struct BookGridItem: View {
     /// Standard book cover aspect ratio (2:3)
     private let bookAspectRatio: CGFloat = 2/3
 
+    /// Whether to show server-side reading progress (only for non-downloaded books)
+    private var showServerProgress: Bool {
+        !isDownloaded && book.hasServerProgress
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Cover image
+            // Cover image with overlays
             CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
             .aspectRatio(bookAspectRatio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -29,6 +34,33 @@ struct BookGridItem: View {
                         .foregroundStyle(.white)
                         .background(Circle().fill(Color.accentColor).padding(2))
                         .padding(6)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if !isDownloaded && book.isRead == true {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white)
+                        .background(Circle().fill(Color.green).padding(-2))
+                        .padding(6)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                // Thin progress bar at bottom of cover for undownloaded books with server progress
+                if showServerProgress, let progress = book.readingProgress {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.3))
+
+                            Rectangle()
+                                .fill(Color.accentColor)
+                                .frame(width: geometry.size.width * progress)
+                        }
+                    }
+                    .frame(height: 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                    .padding(4)
                 }
             }
 
@@ -62,13 +94,43 @@ struct BookGridItem: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+
+                    if showServerProgress {
+                        Text("\(book.readingProgressPercent)%")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !isDownloaded, let rating = book.rating, rating > 0 {
+                    HStack(spacing: 1) {
+                        ForEach(1...5, id: \.self) { star in
+                            Image(systemName: star <= rating ? "star.fill" : "star")
+                                .font(.system(size: 8))
+                                .foregroundStyle(star <= rating ? .yellow : .secondary.opacity(0.3))
+                        }
+                    }
                 }
             }
             .frame(height: 80, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format\(book.series != nil ? ", \(book.series!) series" : "")")
+        .accessibilityLabel(accessibilityText)
         .accessibilityHint("Double tap to view details")
+    }
+
+    private var accessibilityText: String {
+        var label = "\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format"
+        if let series = book.series {
+            label += ", \(series) series"
+        }
+        if showServerProgress {
+            label += ", \(book.readingProgressPercent)% complete"
+        }
+        if book.isRead == true {
+            label += ", finished"
+        }
+        return label
     }
 
     @ViewBuilder

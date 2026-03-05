@@ -1,6 +1,6 @@
 "use server";
 
-import { db, books, booksTags, booksCollections, tags, bookEdits } from "../lib/db";
+import { db, books, booksTags, booksCollections, tags, bookEdits, userBookState, profiles } from "../lib/db";
 import { eq, desc, asc, like, inArray, sql, and } from "drizzle-orm";
 import { deleteBookFile, deleteCoverImage, getBookFilePath, resolveStoragePath } from "../lib/storage";
 import { findBestMetadata, searchAllSources, type MetadataSearchResult } from "../lib/metadata";
@@ -9,7 +9,37 @@ import { writeMetadataToFile } from "../lib/processing/metadata-writer";
 import type { Book, NewBookEdit } from "../lib/db/schema";
 import type { BookFormat } from "../lib/types";
 import { v4 as uuid } from "uuid";
+import { randomUUID } from "crypto";
 import { getFormatsByType, type BookType } from "../lib/book-types";
+import { getRequest } from "react-flight-router/server";
+
+/**
+ * Resolve the current profileId from the request cookie.
+ * Falls back to auto-selecting if exactly one profile exists.
+ */
+function resolveProfileId(): string | undefined {
+  const request = getRequest();
+  if (request) {
+    const cookieHeader = request.headers.get("Cookie") ?? "";
+    const match = cookieHeader.match(/(?:^|;\s*)compendus-profile=([^;]+)/);
+    if (match) {
+      const id = decodeURIComponent(match[1]);
+      const profile = db.select().from(profiles).where(eq(profiles.id, id)).get();
+      if (profile) return profile.id;
+    }
+  }
+  // Fallback: auto-select if exactly one profile exists
+  const allProfiles = db.select().from(profiles).all();
+  if (allProfiles.length === 1) return allProfiles[0].id;
+  return undefined;
+}
+
+/**
+ * Book with per-profile reading state overlaid from userBookState.
+ * When profileId is provided, the reading state fields come from userBookState
+ * instead of the deprecated columns on books.
+ */
+export type BookWithState = Book;
 
 /**
  * Generate a clean filename from title and authors
@@ -43,9 +73,10 @@ interface GetBooksOptions {
   tagId?: string;
   search?: string;
   series?: string;
+  profileId?: string;
 }
 
-export async function getBooks(options: GetBooksOptions = {}): Promise<Book[]> {
+export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithState[]> {
   const {
     limit = 50,
     offset = 0,
@@ -57,8 +88,113 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<Book[]> {
     tagId,
     search,
     series,
+    profileId: explicitProfileId,
   } = options;
+  const profileId = explicitProfileId ?? resolveProfileId();
 
+  // When profileId is provided, LEFT JOIN userBookState to overlay per-profile reading state
+  if (profileId) {
+    let query = db
+      .select({
+        book: books,
+        ubsReadingProgress: userBookState.readingProgress,
+        ubsLastReadAt: userBookState.lastReadAt,
+        ubsLastPosition: userBookState.lastPosition,
+        ubsIsRead: userBookState.isRead,
+        ubsRating: userBookState.rating,
+        ubsReview: userBookState.review,
+      })
+      .from(books)
+      .leftJoin(
+        userBookState,
+        and(
+          eq(userBookState.bookId, books.id),
+          eq(userBookState.profileId, profileId),
+        ),
+      )
+      .$dynamic();
+
+    // Apply filters
+    const conditions = [];
+
+    if (format) {
+      const fmts = Array.isArray(format) ? format : [format];
+      conditions.push(inArray(books.format, fmts));
+    }
+
+    if (type) {
+      const formats = getFormatsByType(type);
+      conditions.push(
+        sql`(
+          (${books.format} IN (${sql.join(formats.map(f => sql`${f}`), sql`, `)}) AND ${books.bookTypeOverride} IS NULL)
+          OR ${books.bookTypeOverride} = ${type}
+        )`,
+      );
+    }
+
+    if (search) {
+      conditions.push(like(books.title, `%${search}%`));
+    }
+
+    if (series) {
+      conditions.push(eq(books.series, series));
+    }
+
+    if (collectionId) {
+      const bookIdsInCollection = db
+        .select({ bookId: booksCollections.bookId })
+        .from(booksCollections)
+        .where(eq(booksCollections.collectionId, collectionId));
+      conditions.push(inArray(books.id, bookIdsInCollection));
+    }
+
+    if (tagId) {
+      const bookIdsWithTag = db
+        .select({ bookId: booksTags.bookId })
+        .from(booksTags)
+        .where(eq(booksTags.tagId, tagId));
+      conditions.push(inArray(books.id, bookIdsWithTag));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    // Apply ordering
+    if (series) {
+      query = query.orderBy(asc(sql`CAST(${books.seriesNumber} AS REAL)`), asc(books.title));
+    } else {
+      if (orderBy === "lastReadAt") {
+        // Sort by userBookState.lastReadAt when profile is provided
+        const orderFn = order === "asc" ? asc : desc;
+        query = query.orderBy(orderFn(userBookState.lastReadAt));
+      } else {
+        const orderColumn = {
+          title: books.title,
+          createdAt: books.createdAt,
+        }[orderBy] || books.createdAt;
+        const orderFn = order === "asc" ? asc : desc;
+        query = query.orderBy(orderFn(orderColumn));
+      }
+    }
+
+    query = query.limit(limit).offset(offset);
+
+    const rows = await query;
+
+    // Overlay userBookState fields onto the book objects
+    return rows.map((row) => ({
+      ...row.book,
+      readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
+      lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
+      lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
+      isRead: row.ubsIsRead ?? row.book.isRead,
+      rating: row.ubsRating ?? row.book.rating,
+      review: row.ubsReview ?? row.book.review,
+    }));
+  }
+
+  // No profileId — legacy path, read from books table directly
   let query = db.select().from(books).$dynamic();
 
   // Apply filters
@@ -130,7 +266,43 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<Book[]> {
   return query;
 }
 
-export async function getBook(id: string): Promise<Book | null> {
+export async function getBook(id: string, explicitProfileId?: string): Promise<BookWithState | null> {
+  const profileId = explicitProfileId ?? resolveProfileId();
+  if (profileId) {
+    const row = await db
+      .select({
+        book: books,
+        ubsReadingProgress: userBookState.readingProgress,
+        ubsLastReadAt: userBookState.lastReadAt,
+        ubsLastPosition: userBookState.lastPosition,
+        ubsIsRead: userBookState.isRead,
+        ubsRating: userBookState.rating,
+        ubsReview: userBookState.review,
+      })
+      .from(books)
+      .leftJoin(
+        userBookState,
+        and(
+          eq(userBookState.bookId, books.id),
+          eq(userBookState.profileId, profileId),
+        ),
+      )
+      .where(eq(books.id, id))
+      .get();
+
+    if (!row) return null;
+
+    return {
+      ...row.book,
+      readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
+      lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
+      lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
+      isRead: row.ubsIsRead ?? row.book.isRead,
+      rating: row.ubsRating ?? row.book.rating,
+      review: row.ubsReview ?? row.book.review,
+    };
+  }
+
   const result = await db.select().from(books).where(eq(books.id, id)).get();
   return result || null;
 }
@@ -159,9 +331,24 @@ export async function updateBook(
     review: string | null;
   }>,
   source: "web" | "ios" | "api" | "metadata" = "web",
-): Promise<Book | null> {
+  explicitProfileId?: string,
+): Promise<BookWithState | null> {
+  const profileId = explicitProfileId ?? resolveProfileId();
   const book = await getBook(id);
   if (!book) return null;
+
+  // Separate reading state fields from metadata fields
+  const readingStateFields = ["readingProgress", "lastPosition", "isRead", "rating", "review"] as const;
+  const readingStateData: Record<string, unknown> = {};
+  const metadataData: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    if ((readingStateFields as readonly string[]).includes(key)) {
+      readingStateData[key] = value;
+    } else {
+      metadataData[key] = value;
+    }
+  }
 
   // Record audit trail for metadata field changes
   const auditableFields = [
@@ -174,9 +361,9 @@ export async function updateBook(
   const auditEntries: NewBookEdit[] = [];
 
   for (const field of auditableFields) {
-    if (field in data) {
+    if (field in metadataData) {
       const oldVal = book[field as keyof Book];
-      const newVal = data[field as keyof typeof data];
+      const newVal = metadataData[field as keyof typeof metadataData];
       const oldStr = oldVal != null ? JSON.stringify(oldVal) : null;
       const newStr = newVal != null ? JSON.stringify(newVal) : null;
       if (oldStr !== newStr) {
@@ -197,30 +384,43 @@ export async function updateBook(
     await db.insert(bookEdits).values(auditEntries);
   }
 
-  const updateData: Record<string, unknown> = { ...data };
-  updateData.updatedAt = sql`(unixepoch())`;
-
-  if ("readingProgress" in data || "lastPosition" in data) {
-    updateData.lastReadAt = sql`(unixepoch())`;
+  // Write reading state to userBookState when profileId is provided
+  if (profileId && Object.keys(readingStateData).length > 0) {
+    await upsertUserBookState(profileId, id, readingStateData);
   }
 
-  // If title or authors changed, update the filename
-  if ("title" in data || "authors" in data) {
-    const newTitle = data.title || book.title;
-    const newAuthors = data.authors
-      ? JSON.parse(data.authors)
-      : book.authors
-        ? JSON.parse(book.authors)
-        : [];
-    updateData.fileName = generateFileName(newTitle, newAuthors, book.format);
-  }
+  // Update metadata fields on books table (if any metadata fields changed)
+  if (Object.keys(metadataData).length > 0 || (!profileId && Object.keys(readingStateData).length > 0)) {
+    const updateData: Record<string, unknown> = { ...metadataData };
 
-  await db.update(books).set(updateData).where(eq(books.id, id));
+    // When no profileId, also write reading state to books table (legacy compat)
+    if (!profileId) {
+      Object.assign(updateData, readingStateData);
+      if ("readingProgress" in readingStateData || "lastPosition" in readingStateData) {
+        updateData.lastReadAt = sql`(unixepoch())`;
+      }
+    }
+
+    updateData.updatedAt = sql`(unixepoch())`;
+
+    // If title or authors changed, update the filename
+    if ("title" in metadataData || "authors" in metadataData) {
+      const newTitle = metadataData.title as string || book.title;
+      const newAuthors = metadataData.authors
+        ? JSON.parse(metadataData.authors as string)
+        : book.authors
+          ? JSON.parse(book.authors)
+          : [];
+      updateData.fileName = generateFileName(newTitle, newAuthors, book.format);
+    }
+
+    await db.update(books).set(updateData).where(eq(books.id, id));
+  }
 
   // Write metadata to the actual book file if title/authors changed (fire-and-forget)
   // This runs in the background so the response returns immediately.
   // Large audio files can take a long time to rewrite.
-  if ("title" in data || "authors" in data) {
+  if ("title" in metadataData || "authors" in metadataData) {
     const updatedBook = await getBook(id);
     if (updatedBook) {
       const format = updatedBook.format as BookFormat;
@@ -259,7 +459,48 @@ export async function updateBook(
     }
   }
 
-  return getBook(id);
+  return getBook(id, profileId);
+}
+
+/**
+ * Upsert a userBookState record for a given profile and book.
+ * If a record exists, updates the provided fields. Otherwise, inserts a new record.
+ */
+async function upsertUserBookState(
+  profileId: string,
+  bookId: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const existing = await db
+    .select()
+    .from(userBookState)
+    .where(
+      and(
+        eq(userBookState.profileId, profileId),
+        eq(userBookState.bookId, bookId),
+      ),
+    )
+    .get();
+
+  const updateFields: Record<string, unknown> = { ...data };
+  if ("readingProgress" in data || "lastPosition" in data) {
+    updateFields.lastReadAt = sql`(unixepoch())`;
+  }
+  updateFields.updatedAt = sql`(unixepoch())`;
+
+  if (existing) {
+    await db
+      .update(userBookState)
+      .set(updateFields)
+      .where(eq(userBookState.id, existing.id));
+  } else {
+    await db.insert(userBookState).values({
+      id: randomUUID(),
+      profileId,
+      bookId,
+      ...updateFields,
+    });
+  }
 }
 
 export async function deleteBook(id: string): Promise<boolean> {
@@ -333,7 +574,43 @@ export async function cancelBackgroundJob(jobId: string): Promise<{ success: boo
   return cancelJob(jobId);
 }
 
-export async function getRecentBooks(limit: number = 10): Promise<Book[]> {
+export async function getRecentBooks(limit: number = 10, explicitProfileId?: string): Promise<BookWithState[]> {
+  const profileId = explicitProfileId ?? resolveProfileId();
+  if (profileId) {
+    const rows = await db
+      .select({
+        book: books,
+        ubsReadingProgress: userBookState.readingProgress,
+        ubsLastReadAt: userBookState.lastReadAt,
+        ubsLastPosition: userBookState.lastPosition,
+        ubsIsRead: userBookState.isRead,
+        ubsRating: userBookState.rating,
+        ubsReview: userBookState.review,
+      })
+      .from(books)
+      .innerJoin(
+        userBookState,
+        and(
+          eq(userBookState.bookId, books.id),
+          eq(userBookState.profileId, profileId),
+        ),
+      )
+      .where(sql`${userBookState.lastReadAt} IS NOT NULL`)
+      .orderBy(desc(userBookState.lastReadAt))
+      .limit(limit);
+
+    return rows.map((row) => ({
+      ...row.book,
+      readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
+      lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
+      lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
+      isRead: row.ubsIsRead ?? row.book.isRead,
+      rating: row.ubsRating ?? row.book.rating,
+      review: row.ubsReview ?? row.book.review,
+    }));
+  }
+
+  // Legacy path: read from books table directly
   return db
     .select()
     .from(books)
@@ -788,23 +1065,24 @@ async function createTagsFromSubjects(bookId: string, subjects: string[]): Promi
         const tagId = uuid();
         await db.insert(tags).values({
           id: tagId,
+          profileId: "default",
           name: subject,
         });
-        tag = { id: tagId, name: subject, color: null, createdAt: new Date() };
+        tag = { id: tagId, profileId: "default", name: subject, color: null, createdAt: new Date() };
       }
 
       // Check if book already has this tag
       const existing = await db
         .select()
         .from(booksTags)
-        .where(and(eq(booksTags.bookId, bookId), eq(booksTags.tagId, tag.id)))
+        .where(and(eq(booksTags.bookId, bookId), eq(booksTags.tagId, tag!.id)))
         .get();
 
       // Add tag to book if not already associated
       if (!existing) {
         await db.insert(booksTags).values({
           bookId,
-          tagId: tag.id,
+          tagId: tag!.id,
         });
       }
     } catch (error) {
@@ -1079,17 +1357,24 @@ export async function extractCoverFromBook(
 export async function toggleBookReadStatus(
   bookId: string,
   isRead: boolean,
+  explicitProfileId?: string,
 ): Promise<{ isRead: boolean } | null> {
+  const profileId = explicitProfileId ?? resolveProfileId();
   const book = await getBook(bookId);
   if (!book) return null;
 
-  await db
-    .update(books)
-    .set({
-      isRead,
-      updatedAt: sql`(unixepoch())`,
-    })
-    .where(eq(books.id, bookId));
+  if (profileId) {
+    await upsertUserBookState(profileId, bookId, { isRead });
+  } else {
+    // Legacy path: write directly to books table
+    await db
+      .update(books)
+      .set({
+        isRead,
+        updatedAt: sql`(unixepoch())`,
+      })
+      .where(eq(books.id, bookId));
+  }
 
   return { isRead };
 }
@@ -1098,19 +1383,30 @@ export async function rateBook(
   bookId: string,
   rating: number | null,
   review?: string | null,
+  explicitProfileId?: string,
 ): Promise<{ rating: number | null; review: string | null } | null> {
+  const profileId = explicitProfileId ?? resolveProfileId();
   const book = await getBook(bookId);
   if (!book) return null;
 
-  const updateData: Record<string, unknown> = {
-    rating,
-    updatedAt: sql`(unixepoch())`,
-  };
-  if (review !== undefined) {
-    updateData.review = review;
-  }
+  if (profileId) {
+    const stateData: Record<string, unknown> = { rating };
+    if (review !== undefined) {
+      stateData.review = review;
+    }
+    await upsertUserBookState(profileId, bookId, stateData);
+  } else {
+    // Legacy path: write directly to books table
+    const updateData: Record<string, unknown> = {
+      rating,
+      updatedAt: sql`(unixepoch())`,
+    };
+    if (review !== undefined) {
+      updateData.review = review;
+    }
 
-  await db.update(books).set(updateData).where(eq(books.id, bookId));
+    await db.update(books).set(updateData).where(eq(books.id, bookId));
+  }
 
   return { rating, review: review !== undefined ? (review ?? null) : (book.review ?? null) };
 }

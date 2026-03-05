@@ -26,6 +26,7 @@ function getSortParams(sort: SortOption): {
 export const libraryRoutes = new Hono();
 
 libraryRoutes.get("/api/library", async (c) => {
+  const profileId = c.get("profileId");
   const offset = parseInt(c.req.query("offset") || "0", 10);
   const sort = (c.req.query("sort") as SortOption) || "recent";
   const typeParam = c.req.query("type") as BookType | null;
@@ -43,6 +44,7 @@ libraryRoutes.get("/api/library", async (c) => {
     type,
     format,
     series,
+    profileId,
   });
 
   // Serialize dates as ISO strings for JSON consistency

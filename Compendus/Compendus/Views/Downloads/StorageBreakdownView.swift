@@ -42,9 +42,15 @@ struct StorageBreakdownView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
+    @Environment(ServerConfig.self) private var serverConfig
 
     @Query(sort: \DownloadedBook.fileSize, order: .reverse)
-    private var books: [DownloadedBook]
+    private var allBooks: [DownloadedBook]
+
+    private var books: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var bookToDelete: DownloadedBook?
     @State private var cacheToDelete: String?

@@ -10,6 +10,7 @@ import SwiftData
 
 struct ReadingStreakView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(ServerConfig.self) private var serverConfig
     @State private var streakDays: Int = 0
     @State private var todayMinutes: Int = 0
     @State private var showingStats = false
@@ -77,7 +78,16 @@ struct ReadingStreakView: View {
         let descriptor = FetchDescriptor<ReadingSession>(
             sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
         )
-        guard let sessions = try? modelContext.fetch(descriptor), !sessions.isEmpty else {
+        guard let allSessions = try? modelContext.fetch(descriptor), !allSessions.isEmpty else {
+            streakDays = 0
+            todayMinutes = 0
+            isLoading = false
+            return
+        }
+
+        let pid = serverConfig.selectedProfileId ?? ""
+        let sessions = allSessions.filter { $0.profileId == pid || $0.profileId.isEmpty }
+        guard !sessions.isEmpty else {
             streakDays = 0
             todayMinutes = 0
             isLoading = false

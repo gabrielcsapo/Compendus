@@ -8,6 +8,7 @@ export default function AdminLayout() {
   const getActiveTab = () => {
     if (location.pathname === "/admin/batch-edit") return "batch-edit";
     if (location.pathname === "/admin/unmatched") return "unmatched";
+    if (location.pathname === "/admin/profiles") return "profiles";
     return "data";
   };
 
@@ -39,6 +40,9 @@ export default function AdminLayout() {
         </TabLink>
         <TabLink to="/admin/unmatched" active={activeTab === "unmatched"}>
           Unmatched Books
+        </TabLink>
+        <TabLink to="/admin/profiles" active={activeTab === "profiles"}>
+          Profiles
         </TabLink>
       </div>
 

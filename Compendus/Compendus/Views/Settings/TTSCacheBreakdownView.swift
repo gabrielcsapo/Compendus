@@ -10,9 +10,15 @@ import SwiftData
 
 struct TTSCacheBreakdownView: View {
     @Environment(StorageManager.self) private var storageManager
+    @Environment(ServerConfig.self) private var serverConfig
     @Environment(\.modelContext) private var modelContext
 
-    @Query private var books: [DownloadedBook]
+    @Query private var allBooks: [DownloadedBook]
+
+    private var books: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var ttsCachedBooks: [CachedBookInfo] = []
     @State private var transcribedBooks: [TranscribedBookInfo] = []

@@ -113,6 +113,7 @@ export async function getAllBooksWithTags(): Promise<{
     .select({
       bookId: booksTags.bookId,
       tagId: tags.id,
+      tagProfileId: tags.profileId,
       tagName: tags.name,
       tagColor: tags.color,
       tagCreatedAt: tags.createdAt,
@@ -128,6 +129,7 @@ export async function getAllBooksWithTags(): Promise<{
     }
     bookTagsMap[row.bookId].push({
       id: row.tagId,
+      profileId: row.tagProfileId,
       name: row.tagName,
       color: row.tagColor,
       createdAt: row.tagCreatedAt,

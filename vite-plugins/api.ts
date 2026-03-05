@@ -38,12 +38,57 @@ export function apiPlugin(): Plugin {
             res.statusCode = 500;
             res.end("Internal Server Error");
           }
-        } else {
-          next();
+          return;
         }
+
+        // Profile gate: redirect page requests to /profiles if no profile selected.
+        // In dev, page routes bypass Hono, so we need this check here too.
+        if (isPageRoute(url)) {
+          try {
+            const { app } = await server.ssrLoadModule("/server/index.ts");
+            // Run the profile gate through the full Hono app so profileMiddleware sets context
+            const webRequest = toWebRequest(req);
+            const response: Response = await app.fetch(webRequest);
+            if (response.status === 302) {
+              const location = response.headers.get("location");
+              if (location) {
+                res.writeHead(302, { Location: location });
+                res.end();
+                return;
+              }
+            }
+          } catch (error) {
+            // If profile gate check fails, let the page through
+            console.warn("[API Plugin] Profile gate check failed:", error);
+          }
+        }
+
+        next();
       });
     },
   };
+}
+
+/**
+ * Check if a URL is a page route that should be subject to profile gate.
+ * Excludes: static assets, flight internals, profiles page, about, docs.
+ */
+function isPageRoute(url: string): boolean {
+  const path = url.split("?")[0];
+  // Skip static assets (files with extensions)
+  if (/\.\w+$/.test(path)) return false;
+  // Skip flight router internals
+  if (path.startsWith("/_flight/")) return false;
+  // Skip profiles page itself (avoid redirect loop)
+  if (path.startsWith("/profiles")) return false;
+  // Skip public info pages
+  if (path.startsWith("/about") || path.startsWith("/docs")) return false;
+  // Skip Vite internals
+  if (path.startsWith("/@") || path.startsWith("/__")) return false;
+  // Skip node_modules
+  if (path.startsWith("/node_modules/")) return false;
+  // Everything else is a page route
+  return true;
 }
 
 /**

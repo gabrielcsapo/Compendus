@@ -125,7 +125,18 @@ class PDFEngine: ReaderEngine {
     }
 
     func serializeLocation() -> String? {
-        return String(currentPage)
+        let progress = totalPositions > 0
+            ? Double(currentPage) / Double(max(1, totalPositions - 1))
+            : 0.0
+        let dict: [String: Any] = [
+            "type": "pdf",
+            "page": currentPage,
+            "progress": min(1.0, progress)
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else {
+            return String(currentPage) // fallback
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     // MARK: - PDF View Management

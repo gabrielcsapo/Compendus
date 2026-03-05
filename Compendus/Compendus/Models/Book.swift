@@ -39,6 +39,9 @@ struct Book: Codable, Identifiable, Hashable {
     var isRead: Bool?               // Explicitly marked as read/completed
     var rating: Int?                // 1-5 star rating
     var review: String?             // Free-text review
+    var readingProgress: Double?    // 0-1 from server user_book_state
+    var lastReadAt: String?         // ISO8601 timestamp of last read
+    var lastPosition: String?       // JSON position from server user_book_state
 
     var hasEpubVersion: Bool {
         convertedEpubPath != nil
@@ -93,6 +96,20 @@ struct Book: Codable, Identifiable, Hashable {
         }
     }
 
+    /// Whether this book has server-side reading progress (user started reading)
+    var hasServerProgress: Bool {
+        if let progress = readingProgress, progress > 0 {
+            return true
+        }
+        return false
+    }
+
+    /// Reading progress percentage for display (0-100)
+    var readingProgressPercent: Int {
+        guard let progress = readingProgress else { return 0 }
+        return Int(progress * 100)
+    }
+
     var seriesNumberDouble: Double? {
         guard let num = seriesNumber else { return nil }
         return Double(num)
@@ -106,6 +123,7 @@ struct Book: Codable, Identifiable, Hashable {
         case fileSize, duration, narrator, chapters
         case convertedEpubPath, convertedEpubSize, hasTranscript
         case isRead, rating, review
+        case readingProgress, lastReadAt, lastPosition
     }
 
     init(from decoder: Decoder) throws {
@@ -137,6 +155,9 @@ struct Book: Codable, Identifiable, Hashable {
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead)
         rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         review = try container.decodeIfPresent(String.self, forKey: .review)
+        readingProgress = try container.decodeIfPresent(Double.self, forKey: .readingProgress)
+        lastReadAt = try container.decodeIfPresent(String.self, forKey: .lastReadAt)
+        lastPosition = try container.decodeIfPresent(String.self, forKey: .lastPosition)
     }
 
     init(

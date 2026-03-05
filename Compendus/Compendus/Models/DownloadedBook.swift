@@ -38,6 +38,7 @@ final class DownloadedBook {
     var transcriptData: Data?        // JSON encoded transcript for audiobooks
     var ttsTranscriptData: Data?      // JSON encoded transcript from TTS generation
     var ttsVoiceId: Int?              // Voice index used for TTS generation (cache invalidation key)
+    var profileId: String = ""        // Profile that owns this download (empty = legacy/unassigned)
 
     init(
         id: String,

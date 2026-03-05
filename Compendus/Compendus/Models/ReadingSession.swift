@@ -38,6 +38,8 @@ final class ReadingSession {
     // Audiobook tracking
     var audioPlaybackRate: Float?   // e.g. 1.0, 1.5, 2.0
 
+    var profileId: String = ""      // Profile that owns this session (empty = legacy/unassigned)
+
     /// Wall-clock duration of this session
     var durationSeconds: Int {
         Int(endedAt.timeIntervalSince(startedAt))

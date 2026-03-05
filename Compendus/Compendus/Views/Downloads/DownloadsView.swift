@@ -58,19 +58,35 @@ struct DownloadsView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ServerConfig.self) private var serverConfig
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
-    private var books: [DownloadedBook]
+    private var allBooks: [DownloadedBook]
 
     @Query(
         filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil },
         sort: \DownloadedBook.lastReadAt,
         order: .reverse
     )
-    private var recentlyReadBooks: [DownloadedBook]
+    private var allRecentlyReadBooks: [DownloadedBook]
 
     @Query(sort: \PendingDownload.queuedAt, order: .reverse)
-    private var pendingDownloads: [PendingDownload]
+    private var allPendingDownloads: [PendingDownload]
+
+    private var books: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
+
+    private var recentlyReadBooks: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allRecentlyReadBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
+
+    private var pendingDownloads: [PendingDownload] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allPendingDownloads.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var bookToDelete: DownloadedBook?
     @State private var showingDeleteConfirmation = false

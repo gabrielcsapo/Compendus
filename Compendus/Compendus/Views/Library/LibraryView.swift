@@ -92,7 +92,12 @@ struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
 
     // Query for all downloaded books (to check download status)
-    @Query private var downloadedBooks: [DownloadedBook]
+    @Query private var allDownloadedBooks: [DownloadedBook]
+
+    private var downloadedBooks: [DownloadedBook] {
+        let pid = serverConfig.selectedProfileId ?? ""
+        return allDownloadedBooks.filter { $0.profileId == pid || $0.profileId.isEmpty }
+    }
 
     @State private var books: [Book] = []
     @State private var isLoading = false
@@ -115,6 +120,8 @@ struct LibraryView: View {
     @State private var downloadError: String?
     @State private var seriesErrorMessage: String?
     @State private var paginationFailed = false
+    /// Book IDs that should auto-open in the reader once their download completes
+    @State private var pendingReadBookIds: Set<String> = []
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -323,10 +330,23 @@ struct LibraryView: View {
                     Button(role: .destructive) {
                         downloadManager.cancelDownload(bookId: book.id)
                         downloadingBooks.remove(book.id)
+                        pendingReadBookIds.remove(book.id)
                     } label: {
                         Label("Cancel Download", systemImage: "xmark.circle")
                     }
                 } else {
+                    // Show "Continue Reading" if the book has server-side reading progress
+                    if book.hasServerProgress {
+                        Button {
+                            downloadAndRead(book)
+                        } label: {
+                            Label(
+                                book.isAudiobook ? "Continue Listening" : "Continue Reading",
+                                systemImage: book.isAudiobook ? "headphones" : "book"
+                            )
+                        }
+                    }
+
                     Button {
                         downloadBook(book)
                     } label: {
@@ -572,11 +592,61 @@ struct LibraryView: View {
         }
     }
 
+    /// Download a book and automatically open the reader when the download completes
+    private func downloadAndRead(_ book: Book) {
+        pendingReadBookIds.insert(book.id)
+        downloadingBooks.insert(book.id)
+
+        Task {
+            do {
+                let result = try await downloadManager.downloadBook(book, modelContext: modelContext)
+                await MainActor.run {
+                    if let downloaded = result {
+                        // Already downloaded — open immediately
+                        downloadingBooks.remove(book.id)
+                        pendingReadBookIds.remove(book.id)
+                        openDownloadedBook(downloaded)
+                    }
+                    // If nil, download started in background — cleanupFinishedDownloads
+                    // will handle auto-opening when the download completes
+                }
+            } catch {
+                await MainActor.run {
+                    downloadingBooks.remove(book.id)
+                    pendingReadBookIds.remove(book.id)
+                    downloadError = error.localizedDescription
+                    showingDownloadError = true
+                }
+            }
+        }
+    }
+
+    /// Open a downloaded book in the appropriate reader/player
+    private func openDownloadedBook(_ downloaded: DownloadedBook) {
+        if downloaded.isAudiobook {
+            Task {
+                await audiobookPlayer.loadBook(downloaded)
+                audiobookPlayer.play()
+                audiobookPlayer.isFullPlayerPresented = true
+            }
+        } else {
+            bookToRead = downloaded
+        }
+    }
+
     private func cleanupFinishedDownloads() {
         for bookId in downloadingBooks {
             let download = downloadManager.activeDownloads[bookId]
             if download == nil || download?.state.isCompleted == true {
                 downloadingBooks.remove(bookId)
+
+                // Auto-open books that were queued via "Continue Reading"
+                if pendingReadBookIds.contains(bookId) {
+                    pendingReadBookIds.remove(bookId)
+                    if let downloaded = downloadedBook(for: bookId) {
+                        openDownloadedBook(downloaded)
+                    }
+                }
             }
         }
     }

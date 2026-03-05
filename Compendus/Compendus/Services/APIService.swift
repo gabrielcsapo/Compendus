@@ -14,6 +14,7 @@ enum APIError: LocalizedError {
     case invalidResponse
     case decodingError(Error)
     case serverError(Int, String?)
+    case profileRequired
 
     var errorDescription: String? {
         switch self {
@@ -29,6 +30,8 @@ enum APIError: LocalizedError {
             return "Failed to parse response: \(error.localizedDescription)"
         case .serverError(let code, let message):
             return "Server error (\(code)): \(message ?? "Unknown error")"
+        case .profileRequired:
+            return "Your profile is no longer available on the server. Please select a new profile."
         }
     }
 }
@@ -160,7 +163,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.convertToEpubURL(for: bookId) else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -197,7 +200,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(bookId)/transcribe") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -239,7 +242,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(bookId)/transcript") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -259,7 +262,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(bookId)/transcript") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -276,7 +279,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(id)") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(updates)
@@ -314,7 +317,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(bookId)/tags") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["name": name])
@@ -343,7 +346,7 @@ class APIService {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
         guard let url = config.apiURL("/api/books/\(bookId)/tags/\(tagId)") else { throw APIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -360,7 +363,113 @@ class APIService {
         config.bookFileURL(for: bookId, format: format)
     }
 
+    // MARK: - Profiles
+
+    /// Fetch all profiles from the server
+    func fetchProfiles() async throws -> [Profile] {
+        guard let url = config.apiURL("/api/profiles") else {
+            throw APIError.invalidURL
+        }
+        // Don't add profile header for this endpoint (it's pre-auth)
+        let request = URLRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfilesResponse.self, from: data)
+        return decoded.profiles
+    }
+
+    /// Select a profile, optionally providing a PIN
+    func selectProfile(id: String, pin: String? = nil) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/\(id)/select") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let pin = pin {
+            request.httpBody = try JSONEncoder().encode(ProfileSelectRequest(pin: pin))
+        } else {
+            request.httpBody = "{}".data(using: .utf8)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        if httpResponse.statusCode == 401 && decoded.code == "INVALID_PIN" {
+            throw APIError.serverError(401, "Invalid PIN")
+        }
+        guard (200...299).contains(httpResponse.statusCode), let profile = decoded.profile else {
+            throw APIError.serverError(httpResponse.statusCode, decoded.error)
+        }
+        return profile
+    }
+
+    /// Fetch the current profile info from the server (refreshes name/avatar)
+    func fetchCurrentProfile() async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/me") else {
+            throw APIError.invalidURL
+        }
+        let request = buildRequest(url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard let profile = decoded.profile else {
+            throw APIError.invalidResponse
+        }
+        return profile
+    }
+
+    /// Create a new profile
+    func createProfile(name: String, avatar: String? = nil, pin: String? = nil) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(ProfileCreateRequest(name: name, avatar: avatar, pin: pin))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard (200...299).contains(httpResponse.statusCode), let profile = decoded.profile else {
+            throw APIError.serverError(httpResponse.statusCode, decoded.error)
+        }
+        return profile
+    }
+
+    /// Delete a profile by ID
+    func deleteProfile(id: String) async throws {
+        guard let url = config.apiURL("/api/profiles/\(id)") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "DELETE"
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+    }
+
     // MARK: - Private Helpers
+
+    /// Build a URLRequest for the given URL, automatically adding the X-Profile-Id header
+    private func buildRequest(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let profileId = config.selectedProfileId {
+            request.setValue(profileId, forHTTPHeaderField: "X-Profile-Id")
+        }
+        return request
+    }
 
     private func fetch<T: Decodable>(_ url: URL) async throws -> T {
         let data = try await fetchData(url)
@@ -375,10 +484,22 @@ class APIService {
 
     private func fetchData(_ url: URL) async throws -> Data {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let request = buildRequest(url)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
+            }
+
+            // Detect stale profile: server says NO_PROFILE → invalidate and preserve old ID for migration
+            if httpResponse.statusCode == 401 {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   json["code"] as? String == "NO_PROFILE" {
+                    await MainActor.run {
+                        config.invalidateProfile()
+                    }
+                    throw APIError.profileRequired
+                }
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {

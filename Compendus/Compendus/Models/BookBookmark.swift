@@ -21,6 +21,7 @@ final class BookBookmark {
     var title: String?              // Chapter or page label for display
     var progression: Double         // 0.0–1.0 total progression at bookmark point
     var createdAt: Date
+    var profileId: String = ""        // Profile that created this bookmark (empty = legacy/unassigned)
 
     init(
         id: String = UUID().uuidString,

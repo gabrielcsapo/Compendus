@@ -163,7 +163,7 @@ export async function processBook(
     }
 
     // Queue heavy processing in background
-    queueBackgroundProcessing(bookId, processedBuffer, format, options);
+    queueBackgroundProcessing(bookId, processedBuffer, format);
 
     return {
       success: true,

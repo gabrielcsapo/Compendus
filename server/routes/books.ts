@@ -14,6 +14,7 @@ const app = new Hono();
 
 // GET /api/books - list all books
 app.get("/api/books", async (c) => {
+  const profileId = c.get("profileId");
   const limit = parseInt(c.req.query("limit") || "20", 10);
   const offset = parseInt(c.req.query("offset") || "0", 10);
   const type = c.req.query("type") as "ebook" | "audiobook" | "comic" | undefined;
@@ -25,28 +26,32 @@ app.get("/api/books", async (c) => {
   const result = await apiListBooks(
     { limit, offset, type: type || undefined, orderBy: orderBy || undefined, order: order || undefined, series: series || undefined },
     baseUrl,
+    profileId,
   );
   return c.json(result, result.success ? 200 : 400);
 });
 
 // GET /api/books/isbn/:isbn - lookup by ISBN (must be before :id route)
 app.get("/api/books/isbn/:isbn", async (c) => {
+  const profileId = c.get("profileId");
   const isbn = c.req.param("isbn");
   const baseUrl = new URL(c.req.url).origin;
-  const result = await apiLookupByIsbn(isbn, baseUrl);
+  const result = await apiLookupByIsbn(isbn, baseUrl, profileId);
   return c.json(result, result.success ? 200 : 404);
 });
 
 // GET /api/books/:id - get book by ID
 app.get("/api/books/:id", async (c) => {
+  const profileId = c.get("profileId");
   const id = c.req.param("id");
   const baseUrl = new URL(c.req.url).origin;
-  const result = await apiGetBook(id, baseUrl);
+  const result = await apiGetBook(id, baseUrl, profileId);
   return c.json(result, result.success ? 200 : 404);
 });
 
 // PUT /api/books/:id - update book metadata
 app.put("/api/books/:id", async (c) => {
+  const profileId = c.get("profileId");
   const id = c.req.param("id");
   let body: Record<string, unknown>;
   try {
@@ -90,13 +95,14 @@ app.put("/api/books/:id", async (c) => {
     id,
     updates as Parameters<typeof updateBook>[1],
     source as "web" | "ios" | "api" | "metadata",
+    profileId,
   );
   if (!updated) {
     return c.json({ success: false, error: "Book not found" }, 404);
   }
 
   const baseUrl = new URL(c.req.url).origin;
-  const result = await apiGetBook(id, baseUrl);
+  const result = await apiGetBook(id, baseUrl, profileId);
   return c.json(result, 200);
 });
 
@@ -119,19 +125,22 @@ app.get("/api/books/:id/edits", async (c) => {
 
 // GET /api/tags - list all tags
 app.get("/api/tags", async (c) => {
-  const allTags = await getTags();
+  const profileId = c.get("profileId");
+  const allTags = await getTags(profileId);
   return c.json({ success: true, tags: allTags });
 });
 
 // GET /api/books/:id/tags - get tags for a book
 app.get("/api/books/:id/tags", async (c) => {
+  const profileId = c.get("profileId");
   const id = c.req.param("id");
-  const bookTags = await getTagsForBook(id);
+  const bookTags = await getTagsForBook(id, profileId);
   return c.json({ success: true, tags: bookTags });
 });
 
 // POST /api/books/:id/tags - add tag to book by name
 app.post("/api/books/:id/tags", async (c) => {
+  const profileId = c.get("profileId");
   const id = c.req.param("id");
   let body: Record<string, unknown>;
   try {
@@ -145,7 +154,7 @@ app.post("/api/books/:id/tags", async (c) => {
     return c.json({ success: false, error: "Tag name is required" }, 400);
   }
 
-  const tag = await addTagToBookByName(id, name.trim());
+  const tag = await addTagToBookByName(id, name.trim(), profileId);
   if (!tag) {
     return c.json({ success: false, error: "Failed to add tag" }, 500);
   }
@@ -155,9 +164,10 @@ app.post("/api/books/:id/tags", async (c) => {
 
 // DELETE /api/books/:id/tags/:tagId - remove tag from book
 app.delete("/api/books/:id/tags/:tagId", async (c) => {
+  const profileId = c.get("profileId");
   const id = c.req.param("id");
   const tagId = c.req.param("tagId");
-  await removeTagFromBook(id, tagId);
+  await removeTagFromBook(id, tagId, profileId);
   return c.json({ success: true });
 });
 

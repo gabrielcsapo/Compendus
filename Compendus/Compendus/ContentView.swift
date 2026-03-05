@@ -17,11 +17,16 @@ struct ContentView: View {
     @Environment(\.deepLinkBookId) private var deepLinkBookId
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var deepLinkedBook: DownloadedBook?
+    @State private var showDataMigration = false
 
     var body: some View {
         Group {
             if !hasCompletedOnboarding {
                 OnboardingView()
+            } else if serverConfig.isConfigured && serverConfig.invalidatedProfileId != nil {
+                ProfileInvalidatedView()
+            } else if serverConfig.isConfigured && !serverConfig.isProfileSelected {
+                ProfilePickerView()
             } else if serverConfig.isConfigured {
                 @Bindable var nav = appNavigation
                 @Bindable var player = audiobookPlayer
@@ -66,6 +71,16 @@ struct ContentView: View {
                     ReaderContainerView(book: book)
                         .environment(readerSettings)
                 }
+                .sheet(isPresented: $showDataMigration) {
+                    DataMigrationView()
+                }
+                .task(id: serverConfig.selectedProfileId) {
+                    guard serverConfig.isProfileSelected else { return }
+                    let descriptor = FetchDescriptor<DownloadedBook>(predicate: #Predicate { $0.profileId == "" })
+                    if let count = try? modelContext.fetchCount(descriptor), count > 0 {
+                        showDataMigration = true
+                    }
+                }
             } else {
                 ServerSetupView()
             }
@@ -73,8 +88,9 @@ struct ContentView: View {
     }
 
     private func openBookFromDeepLink(_ bookId: String) {
+        let pid = serverConfig.selectedProfileId ?? ""
         let descriptor = FetchDescriptor<DownloadedBook>(
-            predicate: #Predicate { $0.id == bookId }
+            predicate: #Predicate { $0.id == bookId && ($0.profileId == pid || $0.profileId.isEmpty) }
         )
 
         if let book = try? modelContext.fetch(descriptor).first {

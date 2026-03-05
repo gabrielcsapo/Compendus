@@ -2,7 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
+import { createMiddleware } from "hono/factory";
 
+import { profileMiddleware, requireProfile, requireAdmin } from "./middleware/profile";
+import { profileRoutes } from "./routes/profiles";
+import { syncRoutes } from "./routes/sync";
 import { searchRoutes } from "./routes/search";
 import { booksRoutes } from "./routes/books";
 import { seriesRoutes } from "./routes/series";
@@ -27,9 +31,48 @@ app.use(
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
+    allowHeaders: ["Content-Type", "X-Profile-Id"],
+    credentials: true,
   }),
 );
+
+// Global profile middleware (reads profile from header/cookie, never blocks)
+app.use("*", profileMiddleware);
+
+/**
+ * Profile gate: redirect to /profiles if no profile is selected.
+ * Skips API routes, static assets, flight router internals, and the profiles page itself.
+ */
+export const profileGateMiddleware = createMiddleware(async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+
+  // Skip: API routes, static assets, flight router internals, profiles page
+  if (
+    path.startsWith("/api/") ||
+    path.startsWith("/_flight/") ||
+    path.startsWith("/profiles") ||
+    path.startsWith("/about") ||
+    path.startsWith("/docs") ||
+    // Static assets (files with extensions)
+    /\.\w+$/.test(path) ||
+    // Asset routes (books, covers, comics, mobi-images)
+    path.startsWith("/books/") ||
+    path.startsWith("/covers/") ||
+    path.startsWith("/comic/") ||
+    path.startsWith("/mobi-images/")
+  ) {
+    return next();
+  }
+
+  // If no profile is selected, redirect to profile picker
+  if (!c.get("profileId")) {
+    return c.redirect("/profiles", 302);
+  }
+
+  return next();
+});
+
+app.use("*", profileGateMiddleware);
 
 // Compression for API responses only (not binary file streams like audio/books/covers)
 app.use("/api/*", compress());
@@ -37,7 +80,26 @@ app.use("/api/*", compress());
 // ETag support for API routes (conditional 304 responses)
 app.use("/api/*", etag());
 
-// API routes
+// Profile routes (public — no profile required for listing/selecting)
+app.route("/", profileRoutes);
+
+// Sync routes (require profile)
+app.route("/", syncRoutes);
+
+// API routes that require a profile
+app.use("/api/search*", requireProfile);
+app.use("/api/books*", requireProfile);
+app.use("/api/series*", requireProfile);
+app.use("/api/library*", requireProfile);
+app.use("/api/wishlist*", requireProfile);
+app.use("/api/tags*", requireProfile);
+app.use("/api/reader*", requireProfile);
+app.use("/api/jobs*", requireProfile);
+
+// Admin-only routes
+app.use("/api/upload*", requireAdmin);
+app.use("/api/admin*", requireAdmin);
+
 app.route("/", searchRoutes);
 app.route("/", booksRoutes);
 app.route("/", seriesRoutes);

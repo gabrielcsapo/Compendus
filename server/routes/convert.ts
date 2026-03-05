@@ -4,10 +4,15 @@ import { resolve, extname } from "path";
 import { eq } from "drizzle-orm";
 import { db, books } from "../../app/lib/db";
 import { enqueueJob, getJob } from "../../app/lib/queue";
+import { requireAdmin } from "../middleware/profile";
 
 const app = new Hono();
 
 const CONVERTIBLE_FORMATS = ["pdf", "mobi", "azw3"];
+
+// Converting books affects the shared library — admin only
+app.use("/api/books/:id/convert-to-epub", requireAdmin);
+app.use("/api/books/:id/epub-status", requireAdmin);
 
 /**
  * POST /api/books/:id/convert-to-epub

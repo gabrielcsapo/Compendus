@@ -2,15 +2,20 @@
 
 import { v4 as uuid } from "uuid";
 import { db, collections, booksCollections, books } from "../lib/db";
-import { eq, asc, sql, inArray } from "drizzle-orm";
+import { eq, and, asc, sql, inArray } from "drizzle-orm";
 import type { Collection, Book } from "../lib/db/schema";
 
-export async function getCollections(): Promise<Collection[]> {
+export async function getCollections(profileId?: string): Promise<Collection[]> {
+  if (profileId) {
+    return db.select().from(collections).where(eq(collections.profileId, profileId)).orderBy(asc(collections.sortOrder));
+  }
   return db.select().from(collections).orderBy(asc(collections.sortOrder));
 }
 
-export async function getCollection(id: string): Promise<Collection | null> {
-  const result = await db.select().from(collections).where(eq(collections.id, id)).get();
+export async function getCollection(id: string, profileId?: string): Promise<Collection | null> {
+  const conditions = [eq(collections.id, id)];
+  if (profileId) conditions.push(eq(collections.profileId, profileId));
+  const result = await db.select().from(collections).where(and(...conditions)).get();
   return result || null;
 }
 
@@ -20,17 +25,20 @@ export async function createCollection(data: {
   color?: string;
   icon?: string;
   parentId?: string;
-}): Promise<Collection> {
+}, profileId?: string): Promise<Collection> {
   const id = uuid();
 
   // Get max sort order
-  const maxOrder = await db
+  const maxOrderQuery = db
     .select({ max: sql<number>`max(sort_order)` })
-    .from(collections)
-    .get();
+    .from(collections);
+  const maxOrder = profileId
+    ? await maxOrderQuery.where(eq(collections.profileId, profileId)).get()
+    : await maxOrderQuery.get();
 
   await db.insert(collections).values({
     id,
+    profileId: profileId || "default",
     name: data.name,
     description: data.description,
     color: data.color,
@@ -39,7 +47,7 @@ export async function createCollection(data: {
     sortOrder: (maxOrder?.max || 0) + 1,
   });
 
-  return (await getCollection(id))!;
+  return (await getCollection(id, profileId))!;
 }
 
 export async function updateCollection(
@@ -52,21 +60,31 @@ export async function updateCollection(
     sortOrder: number;
     parentId: string;
   }>,
+  profileId?: string,
 ): Promise<Collection | null> {
+  const conditions = [eq(collections.id, id)];
+  if (profileId) conditions.push(eq(collections.profileId, profileId));
+
   await db
     .update(collections)
     .set({ ...data, updatedAt: sql`(unixepoch())` })
-    .where(eq(collections.id, id));
+    .where(and(...conditions));
 
-  return getCollection(id);
+  return getCollection(id, profileId);
 }
 
-export async function deleteCollection(id: string): Promise<boolean> {
-  await db.delete(collections).where(eq(collections.id, id));
+export async function deleteCollection(id: string, profileId?: string): Promise<boolean> {
+  const conditions = [eq(collections.id, id)];
+  if (profileId) conditions.push(eq(collections.profileId, profileId));
+  await db.delete(collections).where(and(...conditions));
   return true;
 }
 
-export async function addBookToCollection(bookId: string, collectionId: string): Promise<boolean> {
+export async function addBookToCollection(bookId: string, collectionId: string, profileId?: string): Promise<boolean> {
+  // Verify collection belongs to this profile (if profileId provided)
+  const collection = await getCollection(collectionId, profileId);
+  if (!collection) return false;
+
   try {
     await db.insert(booksCollections).values({
       bookId,
@@ -82,7 +100,12 @@ export async function addBookToCollection(bookId: string, collectionId: string):
 export async function removeBookFromCollection(
   bookId: string,
   collectionId: string,
+  profileId?: string,
 ): Promise<boolean> {
+  // Verify collection belongs to this profile (if profileId provided)
+  const collection = await getCollection(collectionId, profileId);
+  if (!collection) return false;
+
   await db
     .delete(booksCollections)
     .where(
@@ -91,7 +114,11 @@ export async function removeBookFromCollection(
   return true;
 }
 
-export async function getBooksInCollection(collectionId: string): Promise<Book[]> {
+export async function getBooksInCollection(collectionId: string, profileId?: string): Promise<Book[]> {
+  // Verify collection belongs to this profile (if profileId provided)
+  const collection = await getCollection(collectionId, profileId);
+  if (!collection) return [];
+
   const bookIds = await db
     .select({ bookId: booksCollections.bookId })
     .from(booksCollections)
@@ -110,7 +137,7 @@ export async function getBooksInCollection(collectionId: string): Promise<Book[]
     );
 }
 
-export async function getCollectionsForBook(bookId: string): Promise<Collection[]> {
+export async function getCollectionsForBook(bookId: string, profileId?: string): Promise<Collection[]> {
   const collectionIds = await db
     .select({ collectionId: booksCollections.collectionId })
     .from(booksCollections)
@@ -118,18 +145,25 @@ export async function getCollectionsForBook(bookId: string): Promise<Collection[
 
   if (collectionIds.length === 0) return [];
 
+  const conditions = [
+    inArray(
+      collections.id,
+      collectionIds.map((c) => c.collectionId),
+    ),
+  ];
+  if (profileId) conditions.push(eq(collections.profileId, profileId));
+
   return db
     .select()
     .from(collections)
-    .where(
-      inArray(
-        collections.id,
-        collectionIds.map((c) => c.collectionId),
-      ),
-    );
+    .where(and(...conditions));
 }
 
-export async function getCollectionBookCount(collectionId: string): Promise<number> {
+export async function getCollectionBookCount(collectionId: string, profileId?: string): Promise<number> {
+  // Verify collection belongs to this profile (if profileId provided)
+  const collection = await getCollection(collectionId, profileId);
+  if (!collection) return 0;
+
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(booksCollections)

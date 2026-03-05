@@ -264,7 +264,18 @@ class ComicEngine: ReaderEngine {
     // MARK: - Serialization
 
     func serializeLocation() -> String? {
-        String(currentPage)
+        let progress = totalPositions > 1
+            ? Double(currentPage) / Double(totalPositions - 1)
+            : 0.0
+        let dict: [String: Any] = [
+            "type": "comic",
+            "page": currentPage,
+            "progress": min(1.0, progress)
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else {
+            return String(currentPage) // fallback
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     // MARK: - Snapshots (for carousel)

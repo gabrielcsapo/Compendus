@@ -34,6 +34,7 @@ final class PendingDownload {
     var narrator: String?
     var chaptersData: Data?
     var pageCount: Int?
+    var profileId: String = ""       // Profile that queued this download (empty = legacy/unassigned)
 
     init(
         id: String,
