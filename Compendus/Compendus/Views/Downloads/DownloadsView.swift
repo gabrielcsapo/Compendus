@@ -149,6 +149,11 @@ struct DownloadsView: View {
                         seriesSheet = DownloadSeriesSheet(id: seriesName)
                     }
                 }
+                .navigationDestination(for: String.self) { destination in
+                    if destination == "profile" {
+                        ProfileView()
+                    }
+                }
                 .searchable(text: $searchText, prompt: searchPrompt)
                 .confirmationDialog(
                     deleteDialogTitle,
@@ -373,6 +378,12 @@ struct DownloadsView: View {
 
     @ToolbarContentBuilder
     private var downloadsToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            NavigationLink(value: "profile") {
+                ProfileAvatarView(serverConfig: serverConfig, size: 28)
+            }
+        }
+
         if !books.isEmpty {
             ToolbarItem(placement: .topBarLeading) {
                 Picker("View", selection: $viewMode) {
@@ -493,25 +504,15 @@ struct DownloadsView: View {
             // Transcription row
             HStack(spacing: 12) {
                 // Cover thumbnail
-                if let coverData = transcriptionService.activeBookCoverData,
-                   let uiImage = UIImage(data: coverData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(.systemGray5))
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .overlay {
-                            Image(systemName: "headphones")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                }
+                LocalCoverImage(
+                    bookId: transcriptionService.activeBookId ?? "",
+                    coverData: transcriptionService.activeBookCoverData,
+                    format: "m4b"
+                )
+                .aspectRatio(2/3, contentMode: .fit)
+                .frame(width: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
 
                 // Info + progress
                 VStack(alignment: .leading, spacing: 4) {

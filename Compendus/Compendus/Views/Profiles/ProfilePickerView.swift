@@ -187,24 +187,14 @@ struct ProfilePickerView: View {
 
 private struct ProfileCard: View {
     let profile: Profile
+    @Environment(ServerConfig.self) private var serverConfig
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 10) {
                 ZStack {
-                    Circle()
-                        .fill(Color.accentColor.opacity(0.15))
-                        .frame(width: 80, height: 80)
-
-                    if let avatar = profile.avatar, !avatar.isEmpty {
-                        Text(avatar)
-                            .font(.system(size: 36))
-                    } else {
-                        Text(profile.name.prefix(1).uppercased())
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(.accent)
-                    }
+                    ProfileAvatarView(profile: profile, serverConfig: serverConfig, size: 80)
 
                     if profile.hasPin {
                         Image(systemName: "lock.fill")

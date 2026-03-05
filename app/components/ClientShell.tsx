@@ -8,6 +8,7 @@ import { GlobalUploadDropzone } from "./GlobalUploadDropzone";
 import { SearchInput } from "./SearchInput";
 import { Footer } from "./Footer";
 import { CompendusLogo } from "./CompendusLogo";
+import { ProfileAvatar } from "./ProfileAvatar";
 
 /** Paths that don't require a profile to be selected */
 const PROFILE_GATE_SKIP_PATHS = ["/profiles", "/about", "/docs"];
@@ -16,6 +17,7 @@ interface ProfileInfo {
   id: string;
   name: string;
   avatar: string | null;
+  avatarUrl: string | null;
   isAdmin: boolean;
 }
 
@@ -64,15 +66,7 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
         className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-elevated transition-colors"
         title={`Profile: ${profile.name}`}
       >
-        <div className="w-7 h-7 rounded-full bg-surface-elevated border border-border flex items-center justify-center text-sm flex-shrink-0">
-          {profile.avatar ? (
-            <span>{profile.avatar}</span>
-          ) : (
-            <span className="text-foreground-muted text-xs font-medium">
-              {profile.name.charAt(0).toUpperCase()}
-            </span>
-          )}
-        </div>
+        <ProfileAvatar profile={profile} size="sm" />
         <span className="text-sm font-medium text-foreground-muted hidden sm:inline">
           {profile.name}
         </span>
@@ -91,15 +85,7 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
           {/* Profile Info */}
           <div className="px-4 py-3 border-b border-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-surface-elevated border border-border flex items-center justify-center text-lg flex-shrink-0">
-                {profile.avatar ? (
-                  <span>{profile.avatar}</span>
-                ) : (
-                  <span className="text-foreground-muted font-medium">
-                    {profile.name.charAt(0).toUpperCase()}
-                  </span>
-                )}
-              </div>
+              <ProfileAvatar profile={profile} size="md" />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-foreground truncate">{profile.name}</p>
                 {profile.isAdmin && (
@@ -111,6 +97,17 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
 
           {/* Actions */}
           <div className="py-1">
+            <Link
+              to="/profile"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              Profile
+            </Link>
+
             <Link
               to="/profiles"
               onClick={() => setOpen(false)}

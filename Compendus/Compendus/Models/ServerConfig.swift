@@ -113,6 +113,22 @@ class ServerConfig {
         return URL(string: "\(base.absoluteString)\(cleanPath)")
     }
 
+    /// Whether the current profile's avatar is an uploaded image (vs emoji)
+    var hasImageAvatar: Bool {
+        selectedProfileAvatar?.hasPrefix("data/") ?? false
+    }
+
+    /// Build a URL for the current profile's avatar image (nil if emoji or no avatar)
+    var selectedProfileAvatarURL: URL? {
+        guard hasImageAvatar, let id = selectedProfileId else { return nil }
+        return avatarURL(for: id)
+    }
+
+    /// Build a URL for a profile avatar image
+    func avatarURL(for profileId: String) -> URL? {
+        apiURL("/avatars/\(profileId).jpg")
+    }
+
     /// Build a URL for a book cover (full size 600x900)
     func coverURL(for bookId: String) -> URL? {
         apiURL("/covers/\(bookId).jpg")

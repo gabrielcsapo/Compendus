@@ -11,9 +11,15 @@ struct Profile: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let avatar: String?
+    let avatarUrl: String?
     let hasPin: Bool
     let isAdmin: Bool
     let createdAt: String?
+
+    /// Whether the avatar is an uploaded image (vs emoji or nil)
+    var hasImageAvatar: Bool {
+        avatar?.hasPrefix("data/") ?? false
+    }
 }
 
 struct ProfilesResponse: Codable {

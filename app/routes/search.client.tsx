@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo, useMemo } from "react";
 import { Link, useSearchParams, useRouter } from "react-flight-router/client";
 import { searchBooks, searchBooksCount, type MissingField } from "../actions/search";
 import { getBooks, getBooksCount } from "../actions/books";
 import { AuthorLinks } from "../components/AuthorLink";
+import { BookCover } from "../components/BookCover";
 import type { BookType } from "../lib/book-types";
 
 const RESULTS_PER_PAGE = 20;
@@ -567,7 +568,7 @@ function SearchPagination({
   );
 }
 
-function SearchResultCard({
+const SearchResultCard = memo(function SearchResultCard({
   result,
 }: {
   result: {
@@ -590,7 +591,7 @@ function SearchResultCard({
   };
 }) {
   const { book, highlights } = result;
-  const authors = book.authors ? JSON.parse(book.authors) : [];
+  const authors = useMemo(() => book.authors ? JSON.parse(book.authors) : [], [book.authors]);
 
   return (
     <Link
@@ -602,9 +603,7 @@ function SearchResultCard({
         className="w-16 h-24 flex-shrink-0 rounded-lg overflow-hidden bg-surface-elevated"
         style={{ backgroundColor: book.coverColor || undefined }}
       >
-        {book.coverPath ? (
-          <img src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`} alt="" className="w-full h-full object-cover" />
-        ) : null}
+        <BookCover book={book} alt="" fallback={null} />
       </div>
 
       {/* Content */}
@@ -647,4 +646,4 @@ function SearchResultCard({
       </div>
     </Link>
   );
-}
+});

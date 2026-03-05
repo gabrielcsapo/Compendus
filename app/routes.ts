@@ -40,6 +40,7 @@ export const routes: RouteConfig[] = [
           { id: "discover-series", path: "series", component: () => import("./routes/discover-series.js") },
         ],
       },
+      { id: "profile", path: "profile", component: () => import("./routes/profile.js") },
       { id: "profiles", path: "profiles", component: () => import("./routes/profiles.js") },
       { id: "about", path: "about", component: () => import("./routes/about.js") },
       { id: "docs", path: "docs", component: () => import("./routes/docs.js") },

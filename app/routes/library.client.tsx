@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
+import { getCoverUrl } from "../lib/cover";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { SeriesCard } from "../components/SeriesCard";
+import { BookCover } from "../components/BookCover";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
@@ -76,7 +78,7 @@ export default function LibraryPage() {
           ...s,
           coverBooks: s.coverBooks.map(b => ({
             id: b.id,
-            coverUrl: b.coverPath ? `/covers/${b.id}.thumb.jpg?v=${b.updatedAt?.getTime() || ""}` : null,
+            coverUrl: getCoverUrl(b),
           })),
         }));
         return {
@@ -322,17 +324,14 @@ export default function LibraryPage() {
                 {otherFormatBooks.map((book) => (
                   <Link key={book.id} to={`/book/${book.id}`} className="group">
                     <div className="aspect-[2/3] rounded-lg overflow-hidden bg-surface-elevated shadow-md">
-                      {book.coverPath ? (
-                        <img
-                          src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                          alt={book.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
-                          <span className="text-xs text-foreground-muted">{book.title}</span>
-                        </div>
-                      )}
+                      <BookCover
+                        book={book}
+                        fallback={
+                          <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
+                            <span className="text-xs text-foreground-muted">{book.title}</span>
+                          </div>
+                        }
+                      />
                     </div>
                     <p className="text-xs font-medium mt-1 text-foreground line-clamp-1">{book.title}</p>
                     <p className="text-[10px] text-foreground-muted uppercase">{book.format}</p>

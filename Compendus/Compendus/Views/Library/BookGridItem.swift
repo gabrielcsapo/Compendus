@@ -155,25 +155,7 @@ struct DownloadedBookGridItem: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Cover image
-            Group {
-                if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                    Color.clear
-                        .overlay {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                        }
-                        .clipped()
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                        .overlay {
-                            Image(systemName: bookIcon)
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
-                        }
-                }
-            }
+            LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
             .aspectRatio(bookAspectRatio, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
@@ -234,16 +216,6 @@ struct DownloadedBookGridItem: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format, \(Int(book.readingProgress * 100))% complete\(book.series != nil ? ", \(book.series!) series" : "")")
         .accessibilityHint("Double tap to view details")
-    }
-
-    private var bookIcon: String {
-        if book.isAudiobook {
-            return "headphones"
-        } else if book.isComic {
-            return "book.pages"
-        } else {
-            return "book.closed"
-        }
     }
 
     @ViewBuilder

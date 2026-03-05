@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { db, readingSessions, userBookState, books } from "../../app/lib/db";
 
 const app = new Hono();
@@ -80,7 +80,7 @@ app.get("/api/stats", (c) => {
 
   // Current streak: count consecutive days backward from today
   let currentStreak = 0;
-  for (let i = 0; i < 365; i++) {
+  for (let i = 0; i <= allReadingDays.size; i++) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
@@ -126,9 +126,18 @@ app.get("/api/stats", (c) => {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10);
 
-  // Fetch book details for top books
+  // Batch-fetch book details for top books (single query instead of N)
+  const topBookIdList = topBookIds.map(([bookId]) => bookId);
+  const topBookRecords = topBookIdList.length > 0
+    ? db.select({ id: books.id, title: books.title, authors: books.authors, coverPath: books.coverPath, updatedAt: books.updatedAt })
+        .from(books)
+        .where(inArray(books.id, topBookIdList))
+        .all()
+    : [];
+  const bookLookup = new Map(topBookRecords.map(b => [b.id, b]));
+
   const topBooks = topBookIds.map(([bookId, minutes]) => {
-    const book = db.select().from(books).where(eq(books.id, bookId)).get();
+    const book = bookLookup.get(bookId);
     return {
       bookId,
       minutes: Math.round(minutes),

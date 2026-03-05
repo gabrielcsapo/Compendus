@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Link } from "react-flight-router/client";
+import { BookCover } from "../components/BookCover";
 import { addToWantedList, isBookWanted } from "../actions/wanted";
 import {
   getAllSeriesWithCounts,
@@ -52,14 +53,15 @@ export default function Component() {
       setSeriesDetails(details);
       setMissingBooks(missing);
 
-      // Check wanted status for missing books
-      const wantedStatus = new Map<string, boolean>();
-      for (const book of missing) {
-        const key = `${book.source}:${book.sourceId}`;
-        const wanted = await isBookWanted(book);
-        wantedStatus.set(key, wanted);
-      }
-      setWantedMap((prev) => new Map([...prev, ...wantedStatus]));
+      // Check wanted status for missing books (parallel instead of sequential)
+      const wantedEntries = await Promise.all(
+        missing.map(async (book) => {
+          const key = `${book.source}:${book.sourceId}`;
+          const wanted = await isBookWanted(book);
+          return [key, wanted] as const;
+        }),
+      );
+      setWantedMap((prev) => new Map([...prev, ...wantedEntries]));
     } catch (error) {
       setMessage({ type: "error", text: "Failed to load series details" });
     } finally {
@@ -178,17 +180,15 @@ export default function Component() {
                         className="w-16 h-24 rounded-lg overflow-hidden bg-surface-elevated border border-border hover:border-primary transition-colors"
                         title={book.title}
                       >
-                        {book.coverPath ? (
-                          <img
-                            src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                            alt=""
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-xs text-foreground-muted p-1 text-center">
-                            {book.seriesNumber || "?"}
-                          </div>
-                        )}
+                        <BookCover
+                          book={book}
+                          alt=""
+                          fallback={
+                            <div className="w-full h-full flex items-center justify-center text-xs text-foreground-muted p-1 text-center">
+                              {book.seriesNumber || "?"}
+                            </div>
+                          }
+                        />
                       </Link>
                     ))}
                   </div>

@@ -452,6 +452,88 @@ class APIService {
         return profile
     }
 
+    /// Update a profile (name, avatar emoji)
+    func updateProfile(id: String, name: String? = nil, avatar: String?? = nil) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/\(id)") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = [:]
+        if let name { body["name"] = name }
+        if let avatarValue = avatar {
+            if let av = avatarValue {
+                body["avatar"] = av
+            } else {
+                body["avatar"] = NSNull()
+            }
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard let profile = decoded.profile else {
+            throw APIError.invalidResponse
+        }
+        return profile
+    }
+
+    /// Upload a profile avatar image
+    func uploadProfileAvatar(profileId: String, imageData: Data) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/\(profileId)/avatar") else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"avatar\"; filename=\"avatar.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard let profile = decoded.profile else {
+            throw APIError.invalidResponse
+        }
+        return profile
+    }
+
+    /// Delete a profile avatar image
+    func deleteProfileAvatar(profileId: String) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/\(profileId)/avatar") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard let profile = decoded.profile else {
+            throw APIError.invalidResponse
+        }
+        return profile
+    }
+
     /// Delete a profile by ID
     func deleteProfile(id: String) async throws {
         guard let url = config.apiURL("/api/profiles/\(id)") else {

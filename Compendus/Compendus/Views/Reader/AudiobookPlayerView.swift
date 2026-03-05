@@ -53,7 +53,7 @@ struct AudiobookPlayerView: View {
         GeometryReader { geometry in
             ZStack {
                 // Background blur from cover art
-                if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+                if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -112,7 +112,7 @@ struct AudiobookPlayerView: View {
                             Spacer()
 
                             // Cover image — tap to show details
-                            if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+                            if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
                                 Image(uiImage: uiImage)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
@@ -125,7 +125,7 @@ struct AudiobookPlayerView: View {
                                     .fill(Color(.systemGray5))
                                     .frame(width: 280, height: 280)
                                     .overlay {
-                                        Image(systemName: "headphones")
+                                        Image(systemName: CoverImageDecoder.placeholderIcon(for: book.format))
                                             .font(.system(size: 50))
                                             .foregroundStyle(.secondary)
                                     }

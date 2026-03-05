@@ -158,6 +158,17 @@ app.get("/covers/:filename", async (c) => {
   });
 });
 
+// GET /avatars/:filename - serve profile avatar images
+app.get("/avatars/:filename", async (c) => {
+  const filename = c.req.param("filename");
+  const filePath = resolve(process.cwd(), "data", "avatars", filename);
+
+  return streamFileResponse(c, filePath, {
+    contentType: "image/jpeg",
+    cacheControl: "public, max-age=3600",
+  });
+});
+
 // GET /mobi-images/* - serve MOBI extracted images
 app.get("/mobi-images/:rest{.+}", async (c) => {
   const rest = c.req.param("rest");

@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { buttonStyles, badgeStyles } from "../lib/styles";
+import { getCoverUrl } from "../lib/cover";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
 import { getTagsForBook } from "../actions/tags";
 import { getCollectionsForBook } from "../actions/collections";
 import { CoverDropZone } from "../components/CoverDropZone";
+import { BookCover } from "../components/BookCover";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { EditBookButton } from "../components/EditBookButton";
 import { RematchButton } from "../components/RematchButton";
@@ -163,14 +165,14 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                   bookAuthors={authors}
                   bookFormat={book.format as BookFormat}
                   hasCover={!!book.coverPath}
-                  coverUrl={book.coverPath ? `/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : undefined}
+                  coverUrl={getCoverUrl(book, "full") ?? undefined}
                 />
                 <EditBookButton
                   book={book}
                   tags={tags}
                   bookFormat={book.format}
                   hasCover={!!book.coverPath}
-                  coverUrl={book.coverPath ? `/covers/${book.id}.jpg?v=${book.updatedAt?.getTime() || ""}` : undefined}
+                  coverUrl={getCoverUrl(book, "full") ?? undefined}
                   bookAuthors={authors}
                   hasConvertedEpub={!!book.convertedEpubPath}
                 />
@@ -429,29 +431,24 @@ async function RelatedBooksSection({ book }: { book: Awaited<ReturnType<typeof g
               return [];
             }
           })();
-          const coverUrl = related.coverPath
-            ? `/covers/${related.id}.jpg?v=${related.updatedAt?.getTime() || ""}`
-            : null;
-
           return (
             <Link
               key={related.id}
               to={`/book/${related.id}`}
               className="flex-shrink-0 w-[100px] group"
             >
-              {coverUrl ? (
-                <img
-                  src={coverUrl}
-                  alt={related.title}
-                  className="w-[100px] aspect-[2/3] object-cover rounded-lg shadow-md group-hover:shadow-lg transition-shadow"
+              <div className="w-[100px] aspect-[2/3] rounded-lg overflow-hidden shadow-md group-hover:shadow-lg transition-shadow">
+                <BookCover
+                  book={related}
+                  fallback={
+                    <div className="w-full h-full bg-surface-elevated border border-border flex items-center justify-center">
+                      <svg className="w-8 h-8 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                      </svg>
+                    </div>
+                  }
                 />
-              ) : (
-                <div className="w-[100px] aspect-[2/3] rounded-lg shadow-md bg-surface-elevated border border-border flex items-center justify-center">
-                  <svg className="w-8 h-8 text-foreground-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-              )}
+              </div>
               <p className="mt-2 text-sm font-medium text-foreground line-clamp-2 leading-tight group-hover:text-primary transition-colors">
                 {related.title}
               </p>

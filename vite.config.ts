@@ -7,9 +7,7 @@ import { apiPlugin } from "./vite-plugins/api.js";
 
 export default defineConfig({
   clearScreen: false,
-  build: {
-    minify: false,
-  },
+  build: {},
   plugins: [
     tailwindcss(),
     react(),

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getBooks } from "../actions/books";
 import { addBookToCollection, getBooksInCollection } from "../actions/collections";
+import { BookCover } from "./BookCover";
 import type { Book } from "../lib/db/schema";
 
 interface AddBooksToCollectionModalProps {
@@ -166,17 +167,14 @@ export function AddBooksToCollectionModal({
                   >
                     {/* Cover */}
                     <div className="w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-surface-elevated">
-                      {book.coverPath ? (
-                        <img
-                          src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                          alt={book.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-foreground-muted text-xs">
-                          No cover
-                        </div>
-                      )}
+                      <BookCover
+                        book={book}
+                        fallback={
+                          <div className="w-full h-full flex items-center justify-center text-foreground-muted text-xs">
+                            No cover
+                          </div>
+                        }
+                      />
                     </div>
 
                     {/* Info */}

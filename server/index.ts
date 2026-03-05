@@ -26,6 +26,9 @@ import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
 
+// Pre-compiled regex for static asset detection (used in profileGateMiddleware)
+const STATIC_ASSET_RE = /\.\w+$/;
+
 // Global CORS middleware
 app.use(
   "*",
@@ -55,10 +58,11 @@ export const profileGateMiddleware = createMiddleware(async (c, next) => {
     path.startsWith("/about") ||
     path.startsWith("/docs") ||
     // Static assets (files with extensions)
-    /\.\w+$/.test(path) ||
-    // Asset routes (books, covers, comics, mobi-images)
+    STATIC_ASSET_RE.test(path) ||
+    // Asset routes (books, covers, avatars, comics, mobi-images)
     path.startsWith("/books/") ||
     path.startsWith("/covers/") ||
+    path.startsWith("/avatars/") ||
     path.startsWith("/comic/") ||
     path.startsWith("/mobi-images/")
   ) {

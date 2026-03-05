@@ -190,25 +190,7 @@ struct ReadingDashboardView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             ZStack(alignment: .topLeading) {
                 // Cover
-                Group {
-                    if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                        Color.clear
-                            .overlay {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFill()
-                            }
-                            .clipped()
-                    } else {
-                        RoundedRectangle(cornerRadius: Radius.standard)
-                            .fill(Color(.systemGray5))
-                            .overlay {
-                                Image(systemName: formatIcon(book.format))
-                                    .font(.title)
-                                    .foregroundStyle(.secondary)
-                            }
-                    }
-                }
+                LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.standard))
                 .shadow(Shadow.light)
@@ -564,11 +546,6 @@ struct ReadingDashboardView: View {
     }
 
     private func formatIcon(_ format: String) -> String {
-        switch format.lowercased() {
-        case "epub", "pdf": return "book.closed"
-        case "audiobook", "m4b", "mp3": return "headphones"
-        case "comic", "cbr", "cbz": return "book.pages"
-        default: return "doc"
-        }
+        CoverImageDecoder.placeholderIcon(for: format)
     }
 }

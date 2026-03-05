@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import {
   db,
@@ -38,19 +38,22 @@ app.use("/api/sync/*", requireProfile);
 app.get("/api/sync/reading-progress", (c) => {
   const profileId = c.get("profileId");
   const since = c.req.query("since");
+  const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
+  const offset = parseInt(c.req.query("offset") || "0", 10);
 
-  let query = db
+  const conditions = [eq(userBookState.profileId, profileId)];
+  if (since) {
+    const sinceTs = Math.floor(new Date(since).getTime() / 1000);
+    conditions.push(sql`${userBookState.updatedAt} > ${sinceTs}`);
+  }
+
+  const results = db
     .select()
     .from(userBookState)
-    .where(eq(userBookState.profileId, profileId));
-
-  const results = query.all().filter((row) => {
-    if (since) {
-      const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-      return tsToUnixSeconds(row.updatedAt) > sinceTs;
-    }
-    return true;
-  });
+    .where(and(...conditions))
+    .limit(limit)
+    .offset(offset)
+    .all();
 
   return c.json({
     success: true,
@@ -176,24 +179,25 @@ app.get("/api/sync/highlights", (c) => {
   const profileId = c.get("profileId");
   const bookId = c.req.query("bookId");
   const since = c.req.query("since");
+  const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
+  const offset = parseInt(c.req.query("offset") || "0", 10);
 
-  let conditions = [eq(highlights.profileId, profileId)];
+  const conditions = [eq(highlights.profileId, profileId)];
   if (bookId) {
     conditions.push(eq(highlights.bookId, bookId));
+  }
+  if (since) {
+    const sinceTs = Math.floor(new Date(since).getTime() / 1000);
+    conditions.push(sql`${highlights.updatedAt} > ${sinceTs}`);
   }
 
   const results = db
     .select()
     .from(highlights)
     .where(and(...conditions))
-    .all()
-    .filter((row) => {
-      if (since) {
-        const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-        return tsToUnixSeconds(row.updatedAt) > sinceTs;
-      }
-      return true;
-    });
+    .limit(limit)
+    .offset(offset)
+    .all();
 
   return c.json({
     success: true,
@@ -232,13 +236,15 @@ app.post("/api/sync/highlights", async (c) => {
 
   const now = new Date();
 
+  // Batch-fetch existing highlights by ID (single query instead of N)
+  const highlightIds = body.highlights.map(h => h.id);
+  const existingHighlights = highlightIds.length > 0
+    ? new Map(db.select().from(highlights).where(inArray(highlights.id, highlightIds)).all().map(h => [h.id, h]))
+    : new Map();
+
   for (const h of body.highlights) {
     try {
-      const existing = db
-        .select()
-        .from(highlights)
-        .where(eq(highlights.id, h.id))
-        .get();
+      const existing = existingHighlights.get(h.id);
 
       if (existing) {
         // Conflict check
@@ -320,24 +326,25 @@ app.get("/api/sync/bookmarks", (c) => {
   const profileId = c.get("profileId");
   const bookId = c.req.query("bookId");
   const since = c.req.query("since");
+  const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
+  const offset = parseInt(c.req.query("offset") || "0", 10);
 
-  let conditions = [eq(bookmarks.profileId, profileId)];
+  const conditions = [eq(bookmarks.profileId, profileId)];
   if (bookId) {
     conditions.push(eq(bookmarks.bookId, bookId));
+  }
+  if (since) {
+    const sinceTs = Math.floor(new Date(since).getTime() / 1000);
+    conditions.push(sql`${bookmarks.updatedAt} > ${sinceTs}`);
   }
 
   const results = db
     .select()
     .from(bookmarks)
     .where(and(...conditions))
-    .all()
-    .filter((row) => {
-      if (since) {
-        const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-        return tsToUnixSeconds(row.updatedAt) > sinceTs;
-      }
-      return true;
-    });
+    .limit(limit)
+    .offset(offset)
+    .all();
 
   return c.json({
     success: true,
@@ -374,13 +381,15 @@ app.post("/api/sync/bookmarks", async (c) => {
 
   const now = new Date();
 
+  // Batch-fetch existing bookmarks by ID (single query instead of N)
+  const bookmarkIds = body.bookmarks.map(b => b.id);
+  const existingBookmarks = bookmarkIds.length > 0
+    ? new Map(db.select().from(bookmarks).where(inArray(bookmarks.id, bookmarkIds)).all().map(b => [b.id, b]))
+    : new Map();
+
   for (const b of body.bookmarks) {
     try {
-      const existing = db
-        .select()
-        .from(bookmarks)
-        .where(eq(bookmarks.id, b.id))
-        .get();
+      const existing = existingBookmarks.get(b.id);
 
       if (existing) {
         if (b.updatedAt) {
@@ -459,24 +468,25 @@ app.get("/api/sync/reading-sessions", (c) => {
   const profileId = c.get("profileId");
   const bookId = c.req.query("bookId");
   const since = c.req.query("since");
+  const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
+  const offset = parseInt(c.req.query("offset") || "0", 10);
 
-  let conditions = [eq(readingSessions.profileId, profileId)];
+  const conditions = [eq(readingSessions.profileId, profileId)];
   if (bookId) {
     conditions.push(eq(readingSessions.bookId, bookId));
+  }
+  if (since) {
+    const sinceTs = Math.floor(new Date(since).getTime() / 1000);
+    conditions.push(sql`${readingSessions.startedAt} > ${sinceTs}`);
   }
 
   const results = db
     .select()
     .from(readingSessions)
     .where(and(...conditions))
-    .all()
-    .filter((row) => {
-      if (since) {
-        const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-        return tsToUnixSeconds(row.startedAt) > sinceTs;
-      }
-      return true;
-    });
+    .limit(limit)
+    .offset(offset)
+    .all();
 
   return c.json({
     success: true,
@@ -507,16 +517,16 @@ app.post("/api/sync/reading-sessions", async (c) => {
     }>;
   }>();
 
+  // Batch-fetch existing session IDs (single query instead of N)
+  const sessionIds = body.sessions.map(s => s.id);
+  const existingSessionIds = sessionIds.length > 0
+    ? new Set(db.select({ id: readingSessions.id }).from(readingSessions).where(inArray(readingSessions.id, sessionIds)).all().map(s => s.id))
+    : new Set<string>();
+
   for (const s of body.sessions) {
     try {
       // Skip if already exists (dedupe by ID)
-      const existing = db
-        .select()
-        .from(readingSessions)
-        .where(eq(readingSessions.id, s.id))
-        .get();
-
-      if (existing) continue;
+      if (existingSessionIds.has(s.id)) continue;
 
       db.insert(readingSessions)
         .values({

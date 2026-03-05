@@ -1,10 +1,11 @@
-import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
-import { getCollections, getCollectionBookCount } from "../actions/collections";
+import { getCollections, getCollectionBookCounts } from "../actions/collections";
 import { CreateCollectionButton } from "../components/CreateCollectionModal";
 
 export default async function Collections() {
   const collections = await getCollections();
+  // Batch-fetch all book counts in a single query instead of N+1
+  const counts = await getCollectionBookCounts(collections.map(c => c.id));
 
   return (
     <main className="container my-8 px-6 mx-auto">
@@ -20,32 +21,35 @@ export default async function Collections() {
 
       {collections.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-          {collections.map((collection) => (
-            <Link
-              key={collection.id}
-              to={`/collection/${collection.id}`}
-              className="bg-surface border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
-            >
-              <div
-                className="h-2"
-                style={{ backgroundColor: collection.color || "var(--color-primary)" }}
-              />
-              <div className="p-5">
-                <div className="flex items-center gap-2 mb-2">
-                  {collection.icon && <span className="text-xl">{collection.icon}</span>}
-                  <h3 className="font-semibold text-foreground">{collection.name}</h3>
-                </div>
-                {collection.description && (
-                  <p className="text-sm text-foreground-muted line-clamp-2 mb-3">
-                    {collection.description}
+          {collections.map((collection) => {
+            const bookCount = counts.get(collection.id) ?? 0;
+            return (
+              <Link
+                key={collection.id}
+                to={`/collection/${collection.id}`}
+                className="bg-surface border border-border rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
+              >
+                <div
+                  className="h-2"
+                  style={{ backgroundColor: collection.color || "var(--color-primary)" }}
+                />
+                <div className="p-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    {collection.icon && <span className="text-xl">{collection.icon}</span>}
+                    <h3 className="font-semibold text-foreground">{collection.name}</h3>
+                  </div>
+                  {collection.description && (
+                    <p className="text-sm text-foreground-muted line-clamp-2 mb-3">
+                      {collection.description}
+                    </p>
+                  )}
+                  <p className="text-sm text-foreground-muted">
+                    {bookCount} {bookCount === 1 ? "book" : "books"}
                   </p>
-                )}
-                <Suspense fallback={<span className="text-sm text-foreground-muted">&hellip;</span>}>
-                  <CollectionBookCount collectionId={collection.id} />
-                </Suspense>
-              </div>
-            </Link>
-          ))}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-16 bg-surface border border-border rounded-xl">
@@ -71,14 +75,5 @@ export default async function Collections() {
         </div>
       )}
     </main>
-  );
-}
-
-async function CollectionBookCount({ collectionId }: { collectionId: string }) {
-  const bookCount = await getCollectionBookCount(collectionId);
-  return (
-    <p className="text-sm text-foreground-muted">
-      {bookCount} {bookCount === 1 ? "book" : "books"}
-    </p>
   );
 }

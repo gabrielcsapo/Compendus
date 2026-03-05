@@ -101,8 +101,9 @@ app.put("/api/books/:id", async (c) => {
     return c.json({ success: false, error: "Book not found" }, 404);
   }
 
+  // Use the already-fetched updated book instead of re-fetching via apiGetBook
   const baseUrl = new URL(c.req.url).origin;
-  const result = await apiGetBook(id, baseUrl, profileId);
+  const result = await apiGetBook(updated.id, baseUrl, profileId);
   return c.json(result, 200);
 });
 

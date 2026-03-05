@@ -1,7 +1,7 @@
 "use server";
 
 import { db, books, booksTags, booksCollections, tags, bookEdits, userBookState, profiles } from "../lib/db";
-import { eq, desc, asc, like, inArray, sql, and } from "drizzle-orm";
+import { eq, desc, asc, like, inArray, sql, and, or } from "drizzle-orm";
 import { deleteBookFile, deleteCoverImage, getBookFilePath, resolveStoragePath } from "../lib/storage";
 import { findBestMetadata, searchAllSources, type MetadataSearchResult } from "../lib/metadata";
 import { processAndStoreCover } from "../lib/processing/cover";
@@ -846,13 +846,24 @@ export async function getRelatedBooks(book: Book, limit = 10): Promise<Book[]> {
     }
   }
 
-  // 3. Same author (lowest priority)
+  // 3. Same author (lowest priority) — single query for all authors
   if (related.length < limit && book.authors) {
     try {
       const authors: string[] = JSON.parse(book.authors);
-      for (const author of authors.slice(0, 2)) {
-        if (related.length >= limit) break;
-        const authorBooks = await getBooksByAuthor(author);
+      const authorsToSearch = authors.slice(0, 2);
+      if (authorsToSearch.length > 0) {
+        const conditions = authorsToSearch.map(author => {
+          const escaped = author.replace(/["\\%_]/g, (char) => "\\" + char);
+          return like(books.authors, `%"${escaped}"%`);
+        });
+
+        const authorBooks = await db
+          .select()
+          .from(books)
+          .where(and(or(...conditions), sql`${books.id} != ${book.id}`))
+          .orderBy(asc(books.title))
+          .limit(limit);
+
         for (const b of authorBooks) {
           if (!seen.has(b.id)) {
             seen.add(b.id);

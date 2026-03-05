@@ -23,17 +23,21 @@ export default function Component() {
       const results = await searchAllSources(searchQuery);
       setSearchResults(results);
 
-      // Check which results are already wanted or owned
+      // Check which results are already wanted or owned (parallel instead of sequential)
+      const statusEntries = await Promise.all(
+        results.map(async (result) => {
+          const key = `${result.source}:${result.sourceId}`;
+          const [wanted, owned] = await Promise.all([isBookWanted(result), isBookOwned(result)]);
+          return { key, wanted, owned };
+        }),
+      );
+
       const wantedStatus = new Map<string, boolean>();
       const ownedStatus = new Map<string, boolean>();
-
-      for (const result of results) {
-        const key = `${result.source}:${result.sourceId}`;
-        const [wanted, owned] = await Promise.all([isBookWanted(result), isBookOwned(result)]);
+      for (const { key, wanted, owned } of statusEntries) {
         wantedStatus.set(key, wanted);
         ownedStatus.set(key, owned);
       }
-
       setWantedMap(wantedStatus);
       setOwnedMap(ownedStatus);
 

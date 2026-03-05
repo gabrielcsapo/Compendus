@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { BookGrid } from "./BookGrid";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { BookCard } from "./BookCard";
 import type { Book } from "../lib/db/schema";
 import type { SortOption } from "./SortDropdown";
 import type { TypeFilter } from "./TypeTabs";
 
 const BOOKS_PER_PAGE = 24;
+const GAP = 20; // matches gap-5 (1.25rem = 20px)
 
 function LoadingSpinner() {
   return (
@@ -18,6 +20,33 @@ function LoadingSpinner() {
       <span className="text-sm">Loading more books...</span>
     </div>
   );
+}
+
+function useColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
+  const [columns, setColumns] = useState(6);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    function update(width: number) {
+      // Match BookGrid breakpoints: grid-cols-2 sm:3 md:4 lg:5 xl:6
+      if (width >= 1280) setColumns(6);
+      else if (width >= 1024) setColumns(5);
+      else if (width >= 768) setColumns(4);
+      else if (width >= 640) setColumns(3);
+      else setColumns(2);
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      update(entry.contentRect.width);
+    });
+    observer.observe(el);
+    update(el.clientWidth);
+    return () => observer.disconnect();
+  }, [containerRef]);
+
+  return columns;
 }
 
 interface InfiniteBookGridProps {
@@ -37,12 +66,14 @@ export function InfiniteBookGrid({
   currentType,
   currentFormats,
   seriesFilter,
-  emptyMessage,
+  emptyMessage = "No books found",
 }: InfiniteBookGridProps) {
   const [books, setBooks] = useState<Book[]>(initialBooks);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialBooks.length < totalCount);
+  const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const columns = useColumns(containerRef);
 
   // Reset when loader data changes (filter/sort change triggers navigation)
   useEffect(() => {
@@ -103,9 +134,86 @@ export function InfiniteBookGrid({
     return () => observer.disconnect();
   }, [hasMore, loadMore]);
 
+  // Build rows from flat book list
+  const rows = useMemo(() => {
+    const result: Book[][] = [];
+    for (let i = 0; i < books.length; i += columns) {
+      result.push(books.slice(i, i + columns));
+    }
+    return result;
+  }, [books, columns]);
+
+  const virtualizer = useWindowVirtualizer({
+    count: rows.length,
+    estimateSize: () => 380, // approximate row height (card aspect-ratio 2/3 + info)
+    overscan: 3,
+  });
+
+  if (books.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-elevated flex items-center justify-center">
+          <svg
+            className="w-8 h-8 text-foreground-muted"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+            />
+          </svg>
+        </div>
+        <p className="text-foreground-muted">{emptyMessage}</p>
+      </div>
+    );
+  }
+
   return (
     <>
-      <BookGrid books={books} emptyMessage={emptyMessage} />
+      <div ref={containerRef}>
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            return (
+              <div
+                key={virtualRow.index}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                    gap: `${GAP}px`,
+                    paddingBottom: `${GAP}px`,
+                  }}
+                >
+                  {row.map((book) => (
+                    <BookCard key={book.id} book={book} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       {/* Infinite scroll sentinel */}
       {hasMore && (
         <div ref={sentinelRef} className="flex justify-center py-8">

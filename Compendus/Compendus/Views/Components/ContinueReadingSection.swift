@@ -84,25 +84,7 @@ struct ContinueReadingCard: View {
             // Cover with progress overlay
             ZStack(alignment: .bottom) {
                 // Cover image
-                Group {
-                    if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                        Color.clear
-                            .overlay {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFill()
-                            }
-                            .clipped()
-                    } else {
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.systemGray5))
-                            .overlay {
-                                Image(systemName: bookIcon)
-                                    .font(.title)
-                                    .foregroundStyle(.secondary)
-                            }
-                    }
-                }
+                LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
                 .frame(width: 100, height: 150)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
@@ -149,16 +131,6 @@ struct ContinueReadingCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title), \(Int(book.readingProgress * 100))% complete")
         .accessibilityHint(book.isAudiobook ? "Double tap to continue listening" : "Double tap to continue reading")
-    }
-
-    private var bookIcon: String {
-        if book.isAudiobook {
-            return "headphones"
-        } else if book.isComic {
-            return "book.pages"
-        } else {
-            return "book.closed"
-        }
     }
 
     @ViewBuilder

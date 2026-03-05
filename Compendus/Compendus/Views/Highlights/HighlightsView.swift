@@ -117,22 +117,9 @@ private struct BookHighlightRow: View {
     var body: some View {
         HStack(spacing: 12) {
             // Book cover thumbnail
-            if let coverData = book?.coverData, let uiImage = UIImage(data: coverData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 44, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(.systemGray5))
-                    .frame(width: 44, height: 64)
-                    .overlay {
-                        Image(systemName: "book.closed")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-            }
+            LocalCoverImage(bookId: book?.id ?? "", coverData: book?.coverData, format: book?.format ?? "epub")
+                .frame(width: 44, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(book?.title ?? "Unknown Book")

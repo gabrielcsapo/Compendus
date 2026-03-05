@@ -1,6 +1,8 @@
+import { memo, useMemo } from "react";
 import { Link } from "react-flight-router/client";
 import type { Book } from "../lib/db/schema";
 import { AuthorLinks } from "./AuthorLink";
+import { BookCover } from "./BookCover";
 import { getBookType, isConvertibleFormat, getConversionTarget, type BookType } from "../lib/book-types";
 
 interface BookCardProps {
@@ -36,8 +38,8 @@ function getBadgeStyles(type: BookType, convertible?: boolean): string {
   return "bg-primary-light text-primary";
 }
 
-export function BookCard({ book, size = "default" }: BookCardProps) {
-  const authors = book.authors ? JSON.parse(book.authors) : [];
+export const BookCard = memo(function BookCard({ book, size = "default" }: BookCardProps) {
+  const authors = useMemo(() => book.authors ? JSON.parse(book.authors) : [], [book.authors]);
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
   const bookType = getBookType(book.format, book.bookTypeOverride);
   const compact = size === "compact";
@@ -50,19 +52,10 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
         className="block aspect-[2/3] w-full overflow-hidden bg-surface-elevated relative"
         style={{ backgroundColor: book.coverColor || undefined }}
       >
-        {book.coverPath ? (
-          <img
-            src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-            alt={book.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center p-4 bg-gradient-to-br from-primary-light to-accent-light">
-            <span className="text-center text-foreground-muted text-sm font-medium line-clamp-4">
-              {book.title}
-            </span>
-          </div>
-        )}
+        <BookCover
+          book={book}
+          imgClassName="group-hover:scale-105 transition-transform duration-300"
+        />
 
         {/* Format badge overlay */}
         {book.convertedEpubPath && isConvertibleFormat(book.format) ? (
@@ -163,4 +156,4 @@ export function BookCard({ book, size = "default" }: BookCardProps) {
       </div>
     </div>
   );
-}
+});

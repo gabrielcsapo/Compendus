@@ -2,6 +2,7 @@
 
 import { Link } from "react-flight-router/client";
 import type { Book } from "../../lib/db/schema";
+import { BookCover } from "../BookCover";
 
 function timeAgo(date: Date | number | null): string {
   if (!date) return "";
@@ -46,19 +47,17 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
                 className="relative aspect-[2/3] w-full rounded-lg overflow-hidden shadow-md group-hover:shadow-xl transition-shadow duration-200"
                 style={{ backgroundColor: book.coverColor || undefined }}
               >
-                {book.coverPath ? (
-                  <img
-                    src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                    alt={book.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
-                    <span className="text-center text-foreground-muted text-xs font-medium line-clamp-3">
-                      {book.title}
-                    </span>
-                  </div>
-                )}
+                <BookCover
+                  book={book}
+                  imgClassName="group-hover:scale-105 transition-transform duration-300"
+                  fallback={
+                    <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
+                      <span className="text-center text-foreground-muted text-xs font-medium line-clamp-3">
+                        {book.title}
+                      </span>
+                    </div>
+                  }
+                />
 
                 {/* Progress bar at bottom of cover */}
                 {progressPercent > 0 && (

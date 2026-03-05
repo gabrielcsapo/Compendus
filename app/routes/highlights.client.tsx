@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from "react";
 import { Link } from "react-flight-router/client";
 import { getAllHighlights, deleteHighlight, updateHighlightNote } from "../actions/reader";
 import { HighlightNote } from "../components/HighlightNote";
+import { BookCover } from "../components/BookCover";
 
 type HighlightItem = Awaited<ReturnType<typeof getAllHighlights>>[number];
 
@@ -60,16 +61,47 @@ export default function Highlights() {
   }, []);
 
   const handleDelete = (highlightId: string) => {
+    // Optimistic: remove from local state immediately
+    setData(prev => {
+      if (!prev) return prev;
+      const newGroups = prev.groups
+        .map(g => ({
+          ...g,
+          highlights: g.highlights.filter(h => h.id !== highlightId),
+        }))
+        .filter(g => g.highlights.length > 0);
+      return { totalCount: prev.totalCount - 1, groups: newGroups };
+    });
+
     startTransition(async () => {
-      await deleteHighlight(highlightId);
-      await loadData();
+      try {
+        await deleteHighlight(highlightId);
+      } catch {
+        // Revert on error by refetching
+        await loadData();
+      }
     });
   };
 
   const handleUpdateNote = (highlightId: string, note: string | null) => {
+    // Optimistic: update in local state immediately
+    setData(prev => {
+      if (!prev) return prev;
+      const newGroups = prev.groups.map(g => ({
+        ...g,
+        highlights: g.highlights.map(h =>
+          h.id === highlightId ? { ...h, note: note ?? undefined } : h
+        ),
+      }));
+      return { ...prev, groups: newGroups };
+    });
+
     startTransition(async () => {
-      await updateHighlightNote(highlightId, note);
-      await loadData();
+      try {
+        await updateHighlightNote(highlightId, note);
+      } catch {
+        await loadData();
+      }
     });
   };
 
@@ -105,29 +137,16 @@ export default function Highlights() {
                 to={`/book/${group.bookId}`}
                 className="flex items-center gap-4 mb-4 group"
               >
-                {group.bookCoverPath ? (
-                  <img
-                    src={`${group.bookCoverPath}?v=${group.bookUpdatedAt ? new Date(group.bookUpdatedAt).getTime() : ""}`}
-                    alt={group.bookTitle}
-                    className="w-12 h-[4.5rem] object-cover rounded-md shadow-sm"
+                <div className="w-12 h-[4.5rem] rounded-md shadow-sm overflow-hidden">
+                  <BookCover
+                    book={{
+                      id: group.bookId,
+                      title: group.bookTitle,
+                      coverPath: group.bookCoverPath ?? null,
+                      updatedAt: group.bookUpdatedAt,
+                    }}
                   />
-                ) : (
-                  <div className="w-12 h-[4.5rem] rounded-md bg-surface-elevated flex items-center justify-center">
-                    <svg
-                      className="w-6 h-6 text-foreground-muted"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                      />
-                    </svg>
-                  </div>
-                )}
+                </div>
                 <div>
                   <h2 className="font-semibold text-foreground group-hover:text-primary transition-colors">
                     {group.bookTitle}

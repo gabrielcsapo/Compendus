@@ -5,50 +5,48 @@ import { Link, useSearchParams } from "react-flight-router/client";
 import { getTagsWithCounts, getBooksWithTag } from "../actions/tags";
 import { BookGrid } from "../components/BookGrid";
 
-type TagsData = {
-  tags: Awaited<ReturnType<typeof getTagsWithCounts>>;
-  selectedTag: Awaited<ReturnType<typeof getTagsWithCounts>>[number] | null;
-  books: Awaited<ReturnType<typeof getBooksWithTag>>;
-};
+type TagItem = Awaited<ReturnType<typeof getTagsWithCounts>>[number];
 
 export default function Tags() {
   const [searchParams] = useSearchParams();
-  const [data, setData] = useState<TagsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tags, setTags] = useState<TagItem[] | null>(null);
+  const [books, setBooks] = useState<Awaited<ReturnType<typeof getBooksWithTag>>>([]);
+  const [tagsLoading, setTagsLoading] = useState(true);
+  const [booksLoading, setBooksLoading] = useState(false);
 
   const selectedTagId = searchParams.get("tag");
+  const selectedTag = tags?.find((t) => t.id === selectedTagId) ?? null;
 
+  // Load tags once on mount (not on every tag selection)
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-
-    async function loadData(): Promise<TagsData> {
-      const tags = await getTagsWithCounts();
-
-      let books: Awaited<ReturnType<typeof getBooksWithTag>> = [];
-      let selectedTag = null;
-
-      if (selectedTagId) {
-        selectedTag = tags.find((t) => t.id === selectedTagId) || null;
-        if (selectedTag) {
-          books = await getBooksWithTag(selectedTagId);
-        }
-      }
-
-      return { tags, selectedTag, books };
-    }
-
-    loadData().then(result => {
+    getTagsWithCounts().then(result => {
       if (!cancelled) {
-        setData(result);
-        setLoading(false);
+        setTags(result);
+        setTagsLoading(false);
       }
     });
-
     return () => { cancelled = true; };
-  }, [selectedTagId]);
+  }, []);
 
-  if (loading || !data) {
+  // Load books only when selected tag changes
+  useEffect(() => {
+    if (!selectedTagId || !tags) {
+      setBooks([]);
+      return;
+    }
+    let cancelled = false;
+    setBooksLoading(true);
+    getBooksWithTag(selectedTagId).then(result => {
+      if (!cancelled) {
+        setBooks(result);
+        setBooksLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [selectedTagId, tags]);
+
+  if (tagsLoading || !tags) {
     return (
       <main className="container my-8 px-6 mx-auto">
         <div className="flex items-center justify-center py-16">
@@ -57,8 +55,6 @@ export default function Tags() {
       </main>
     );
   }
-
-  const { tags, selectedTag, books } = data;
 
   return (
     <main className="container my-8 px-6 mx-auto">
@@ -121,7 +117,13 @@ export default function Tags() {
               Clear selection
             </Link>
           </div>
-          <BookGrid books={books} emptyMessage={`No books tagged "${selectedTag.name}"`} />
+          {booksLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <BookGrid books={books} emptyMessage={`No books tagged "${selectedTag.name}"`} />
+          )}
         </section>
       )}
 

@@ -5,6 +5,7 @@ import type { BookFormat } from "../types";
 const DATA_DIR = resolve(process.cwd(), "data");
 const BOOKS_DIR = resolve(DATA_DIR, "books");
 const COVERS_DIR = resolve(DATA_DIR, "covers");
+const AVATARS_DIR = resolve(DATA_DIR, "avatars");
 
 /**
  * Resolve a relative path (stored in DB) to an absolute path.
@@ -22,6 +23,7 @@ export function resolveStoragePath(relativePath: string): string {
 // Ensure directories exist
 mkdirSync(BOOKS_DIR, { recursive: true });
 mkdirSync(COVERS_DIR, { recursive: true });
+mkdirSync(AVATARS_DIR, { recursive: true });
 
 const FORMAT_EXTENSIONS: Record<BookFormat, string> = {
   pdf: ".pdf",
@@ -106,6 +108,29 @@ export function getBookFileRelativePath(bookId: string, format: BookFormat): str
   const ext = FORMAT_EXTENSIONS[format];
   // Return relative path for database storage
   return `data/books/${bookId}${ext}`;
+}
+
+export function storeAvatarImage(buffer: Buffer, profileId: string): string {
+  const fileName = `${profileId}.jpg`;
+  const absolutePath = resolve(AVATARS_DIR, fileName);
+
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, buffer);
+
+  return `data/avatars/${fileName}`;
+}
+
+export function deleteAvatarImage(profileId: string): boolean {
+  try {
+    const absolutePath = resolve(AVATARS_DIR, `${profileId}.jpg`);
+    if (existsSync(absolutePath)) {
+      unlinkSync(absolutePath);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export { BOOKS_DIR };

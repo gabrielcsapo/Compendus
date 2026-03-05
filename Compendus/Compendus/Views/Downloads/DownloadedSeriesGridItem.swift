@@ -49,24 +49,7 @@ struct DownloadedSeriesGridItem: View {
 
     @ViewBuilder
     private func coverContent(_ book: DownloadedSeriesCoverBook) -> some View {
-        if let data = book.coverData, let uiImage = UIImage(data: data) {
-            Color.clear
-                .overlay {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFill()
-                }
-                .clipped()
-        } else {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(
-                    LinearGradient(
-                        colors: [.blue.opacity(0.3), .purple.opacity(0.3)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
+        LocalCoverImage(bookId: book.id, coverData: book.coverData)
     }
 }
 

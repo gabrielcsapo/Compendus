@@ -14,23 +14,13 @@ struct MiniPlayerView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 // Cover art
-                if let coverData = player.currentBook?.coverData,
-                   let uiImage = UIImage(data: coverData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 48, height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.systemGray5))
-                        .frame(width: 48, height: 48)
-                        .overlay {
-                            Image(systemName: "headphones")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                }
+                LocalCoverImage(
+                    bookId: player.currentBook?.id ?? "",
+                    coverData: player.currentBook?.coverData,
+                    format: player.currentBook?.format ?? "m4b"
+                )
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 // Title and author
                 VStack(alignment: .leading, spacing: 2) {

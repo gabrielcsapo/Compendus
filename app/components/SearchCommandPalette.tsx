@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "react-flight-router/client";
 import { createPortal } from "react-dom";
 import { quickSearch, type QuickSearchResult } from "../actions/search";
+import { BookCover } from "./BookCover";
 
 export function SearchCommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
@@ -48,7 +49,8 @@ export function SearchCommandPalette() {
     }
   }, [isOpen]);
 
-  // Debounced search
+  // Debounced search with stale result prevention
+  const searchVersionRef = useRef(0);
   useEffect(() => {
     if (!query || query.length < 2) {
       setResults([]);
@@ -56,15 +58,28 @@ export function SearchCommandPalette() {
     }
 
     setIsLoading(true);
+    const version = ++searchVersionRef.current;
     const timeout = setTimeout(async () => {
       const searchResults = await quickSearch(query);
-      setResults(searchResults);
-      setSelectedIndex(0);
-      setIsLoading(false);
+      // Only apply if this is still the latest request
+      if (version === searchVersionRef.current) {
+        setResults(searchResults);
+        setSelectedIndex(0);
+        setIsLoading(false);
+      }
     }, 200);
 
     return () => clearTimeout(timeout);
   }, [query]);
+
+  // Pre-parse authors for all results (once per result set, not per render)
+  const resultsWithAuthors = useMemo(
+    () => results.map(book => ({
+      ...book,
+      parsedAuthors: book.authors ? JSON.parse(book.authors) as string[] : [],
+    })),
+    [results],
+  );
 
   const close = useCallback(() => {
     setIsOpen(false);
@@ -163,9 +178,7 @@ export function SearchCommandPalette() {
             {results.length > 0 ? (
               <>
                 <ul className="py-2">
-                  {results.map((book, index) => {
-                    const authors = book.authors ? JSON.parse(book.authors) : [];
-                    return (
+                  {resultsWithAuthors.map((book, index) => (
                       <li key={book.id}>
                         <button
                           className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
@@ -183,20 +196,14 @@ export function SearchCommandPalette() {
                               backgroundColor: book.coverColor || undefined,
                             }}
                           >
-                            {book.coverPath && (
-                              <img
-                                src={`/covers/${book.id}.thumb.jpg?v=${book.updatedAt?.getTime() || ""}`}
-                                alt=""
-                                className="w-full h-full object-cover"
-                              />
-                            )}
+                            <BookCover book={book} alt="" fallback={null} />
                           </div>
                           {/* Book info */}
                           <div className="flex-1 min-w-0">
                             <div className="font-medium truncate text-foreground">{book.title}</div>
-                            {authors.length > 0 && (
+                            {book.parsedAuthors.length > 0 && (
                               <div className="text-sm text-foreground-muted truncate">
-                                {authors.join(", ")}
+                                {book.parsedAuthors.join(", ")}
                               </div>
                             )}
                           </div>
@@ -206,8 +213,7 @@ export function SearchCommandPalette() {
                           </span>
                         </button>
                       </li>
-                    );
-                  })}
+                    ))}
                 </ul>
                 {/* View all results link */}
                 <div className="border-t border-border px-4 py-3">

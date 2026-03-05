@@ -7,6 +7,71 @@
 
 import SwiftUI
 
+// MARK: - Cover Image Decoder (shared memory cache for local cover Data)
+
+/// Memory cache for decoded cover images from local Data.
+/// Avoids re-decoding UIImage(data:) on every SwiftUI render.
+enum CoverImageDecoder {
+    private static let cache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200
+        return c
+    }()
+
+    /// Decode and cache a cover image from raw Data.
+    static func decode(bookId: String, data: Data?) -> UIImage? {
+        let key = bookId as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached
+        }
+        guard let data, let image = UIImage(data: data) else { return nil }
+        cache.setObject(image, forKey: key)
+        return image
+    }
+
+    /// Format-appropriate SF Symbol for book cover placeholder.
+    static func placeholderIcon(for format: String) -> String {
+        switch format.lowercased() {
+        case "m4b", "mp3", "m4a": return "headphones"
+        case "cbr", "cbz": return "book.pages"
+        case "pdf": return "doc.richtext"
+        default: return "book.closed"
+        }
+    }
+}
+
+// MARK: - Local Cover Image (for downloaded/offline books)
+
+/// Cover image view for locally-stored cover Data with memory caching.
+/// Use for DownloadedBook, PendingDownload, or any local cover data.
+struct LocalCoverImage: View {
+    let bookId: String
+    let coverData: Data?
+    var format: String = "epub"
+
+    var body: some View {
+        if let image = CoverImageDecoder.decode(bookId: bookId, data: coverData) {
+            Color.clear
+                .overlay {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
+                .clipped()
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.systemGray5))
+                .overlay {
+                    Image(systemName: CoverImageDecoder.placeholderIcon(for: format))
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                }
+        }
+    }
+}
+
+// MARK: - Cached Cover Image (for server/online books)
+
 struct CachedCoverImage: View {
     let bookId: String
     let hasCover: Bool
@@ -90,15 +155,6 @@ struct CachedCoverImage: View {
     }
 
     private var iconForFormat: String {
-        switch format.lowercased() {
-        case "m4b", "mp3", "m4a":
-            return "headphones"
-        case "cbr", "cbz":
-            return "book.pages"
-        case "pdf":
-            return "doc.richtext"
-        default:
-            return "book.closed"
-        }
+        CoverImageDecoder.placeholderIcon(for: format)
     }
 }

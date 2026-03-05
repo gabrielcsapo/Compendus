@@ -140,7 +140,7 @@ struct DownloadedBookDetailView: View {
     @ViewBuilder
     private var heroCoverSection: some View {
         VStack {
-            if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+            if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -153,7 +153,7 @@ struct DownloadedBookDetailView: View {
                     .aspectRatio(2/3, contentMode: .fit)
                     .frame(width: 200)
                     .overlay {
-                        Image(systemName: "book.closed")
+                        Image(systemName: CoverImageDecoder.placeholderIcon(for: book.format))
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
                     }
@@ -170,7 +170,7 @@ struct DownloadedBookDetailView: View {
 
     @ViewBuilder
     private var heroCoverBackground: some View {
-        if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
+        if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
             Image(uiImage: uiImage)
                 .resizable()
                 .aspectRatio(contentMode: .fill)

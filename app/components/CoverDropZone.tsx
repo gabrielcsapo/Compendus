@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { BookCover } from "./BookCover";
 
 interface CoverDropZoneProps {
   bookId: string;
@@ -229,19 +230,17 @@ export function CoverDropZone({
         onDrop={handleDrop}
       >
         {/* Cover image or placeholder */}
-        {coverPath ? (
-          <img
-            src={`/covers/${bookId}.jpg?v=${updatedAt?.getTime() || ""}`}
-            alt={title}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center p-8 bg-gradient-to-br from-primary-light to-accent-light">
-            <span className="text-center text-foreground-muted text-lg font-medium">
-              {title}
-            </span>
-          </div>
-        )}
+        <BookCover
+          book={{ id: bookId, title, coverPath, updatedAt }}
+          size="full"
+          fallback={
+            <div className="w-full h-full flex items-center justify-center p-8 bg-gradient-to-br from-primary-light to-accent-light">
+              <span className="text-center text-foreground-muted text-lg font-medium">
+                {title}
+              </span>
+            </div>
+          }
+        />
 
         {/* Drag overlay */}
         {isDragging && (

@@ -124,31 +124,9 @@ struct ActiveDownloadRow: View {
 
     @ViewBuilder
     private var coverView: some View {
-        if let coverData = pending.coverData, let uiImage = UIImage(data: coverData) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(bookAspectRatio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-        } else {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.systemGray5))
-                .aspectRatio(bookAspectRatio, contentMode: .fit)
-                .overlay {
-                    Image(systemName: bookIcon)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-        }
-    }
-
-    private var bookIcon: String {
-        let fmt = pending.format.lowercased()
-        if ["m4b", "mp3", "m4a"].contains(fmt) {
-            return "headphones"
-        } else if ["cbr", "cbz"].contains(fmt) {
-            return "book.pages"
-        }
-        return "book.closed"
+        LocalCoverImage(bookId: pending.id, coverData: pending.coverData, format: pending.format)
+            .aspectRatio(bookAspectRatio, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
     }
 }

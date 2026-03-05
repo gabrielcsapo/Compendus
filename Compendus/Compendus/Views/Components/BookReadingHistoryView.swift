@@ -63,24 +63,11 @@ struct BookReadingHistoryView: View {
         VStack(spacing: 12) {
             // Book info
             HStack(spacing: 12) {
-                if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(.systemGray5))
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .overlay {
-                            Image(systemName: book.isAudiobook ? "headphones" : "book.closed")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                }
+                LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
+                    .aspectRatio(2/3, contentMode: .fit)
+                    .frame(width: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(book.title)

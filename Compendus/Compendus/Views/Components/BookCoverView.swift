@@ -31,41 +31,10 @@ struct DownloadedBookCoverView: View {
     private let bookAspectRatio: CGFloat = 2/3
 
     var body: some View {
-        Group {
-            if let coverData = book.coverData, let uiImage = UIImage(data: coverData) {
-                Color.clear
-                    .overlay {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                    }
-                    .clipped()
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemGray5))
-                    .overlay {
-                        Image(systemName: iconForFormat)
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                    }
-            }
-        }
-        .aspectRatio(bookAspectRatio, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
-    }
-
-    private var iconForFormat: String {
-        switch book.format.lowercased() {
-        case "m4b", "mp3", "m4a":
-            return "headphones"
-        case "cbr", "cbz":
-            return "book.pages"
-        case "pdf":
-            return "doc.richtext"
-        default:
-            return "book.closed"
-        }
+        LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
+            .aspectRatio(bookAspectRatio, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
     }
 }
 

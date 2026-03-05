@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-flight-router/client";
 import { buttonStyles } from "../lib/styles";
+import { BookCover } from "../components/BookCover";
 import {
   getUnmatchedBooks,
   getUnmatchedBooksCount,
@@ -601,10 +602,10 @@ export default function UnmatchedBooks() {
                   className="w-24 h-36 rounded-lg overflow-hidden border border-border bg-surface-elevated"
                   style={{ backgroundColor: currentBook.coverColor || undefined }}
                 >
-                  <img
-                    src={`/covers/${currentBook.id}.jpg?v=${currentBook.updatedAt?.getTime() || ""}`}
+                  <BookCover
+                    book={currentBook}
+                    size="full"
                     alt="Current cover"
-                    className="w-full h-full object-cover"
                   />
                 </div>
               </div>

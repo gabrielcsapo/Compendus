@@ -171,3 +171,22 @@ export async function getCollectionBookCount(collectionId: string, profileId?: s
     .get();
   return result?.count || 0;
 }
+
+/**
+ * Batch-fetch book counts for multiple collections in a single query.
+ * Returns a Map of collectionId -> count.
+ */
+export async function getCollectionBookCounts(
+  collectionIds: string[],
+): Promise<Map<string, number>> {
+  if (collectionIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      collectionId: booksCollections.collectionId,
+      count: sql<number>`count(*)`,
+    })
+    .from(booksCollections)
+    .where(inArray(booksCollections.collectionId, collectionIds))
+    .groupBy(booksCollections.collectionId);
+  return new Map(rows.map(r => [r.collectionId, r.count]));
+}

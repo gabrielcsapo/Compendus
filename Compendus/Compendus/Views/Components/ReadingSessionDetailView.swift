@@ -47,24 +47,11 @@ struct ReadingSessionDetailView: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 // Cover
-                if let coverData = bookCoverData, let uiImage = UIImage(data: coverData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                        .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(.systemGray5))
-                        .aspectRatio(2/3, contentMode: .fit)
-                        .frame(width: 50)
-                        .overlay {
-                            Image(systemName: formatIcon)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                }
+                LocalCoverImage(bookId: session.bookId, coverData: bookCoverData, format: session.format)
+                    .aspectRatio(2/3, contentMode: .fit)
+                    .frame(width: 50)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(resolvedBookTitle)
@@ -382,12 +369,7 @@ struct ReadingSessionDetailView: View {
     // MARK: - Helpers
 
     private var formatIcon: String {
-        switch session.format.lowercased() {
-        case "epub", "pdf": return "book.closed"
-        case "audiobook", "m4b", "mp3": return "headphones"
-        case "comic", "cbr", "cbz": return "book.pages"
-        default: return "doc"
-        }
+        CoverImageDecoder.placeholderIcon(for: session.format)
     }
 
     private var pageRangeText: String? {
