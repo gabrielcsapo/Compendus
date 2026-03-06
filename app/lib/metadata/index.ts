@@ -313,7 +313,7 @@ export async function searchBookMetadata(
       isbn10: doc.isbn?.find((i) => i.length === 10) || null,
       language: doc.language?.[0] || null,
       subjects: doc.subject?.slice(0, 15) || [],
-      series: doc.series?.[0] || null,
+      series: null,
       seriesNumber: null,
       coverUrl,
       coverUrlHQ: null, // Open Library doesn't have HQ covers
@@ -407,7 +407,7 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
     isbn10: book.isbn_10?.[0] || null,
     language,
     subjects: allSubjects,
-    series: book.series?.[0] || null,
+    series: null,
     seriesNumber: null,
     coverUrl,
     coverUrlHQ: null,
@@ -513,8 +513,8 @@ function mergeMetadata(
     language: primary.language || secondary.language,
     // Combine and dedupe subjects
     subjects: [...new Set([...primary.subjects, ...secondary.subjects])].slice(0, 20),
-    series: primary.series || secondary.series,
-    seriesNumber: primary.seriesNumber || secondary.seriesNumber,
+    series: null,
+    seriesNumber: null,
     // Prefer HQ cover from primary (Google), fallback to secondary
     coverUrl: primary.coverUrlHQ || primary.coverUrl || secondary.coverUrl,
     coverUrlHQ: primary.coverUrlHQ || secondary.coverUrlHQ,

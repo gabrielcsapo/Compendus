@@ -86,7 +86,7 @@ interface ApiErrorResponse {
  * When userState is provided, reading state fields (isRead, rating, review)
  * come from userBookState instead of the deprecated columns on books.
  */
-function toApiBook(
+export function toApiBook(
   book: Book,
   baseUrl: string,
   userState?: Pick<

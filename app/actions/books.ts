@@ -968,12 +968,6 @@ export async function refreshMetadata(
   if (newMetadata.isbn10 && !book.isbn10) {
     updateData.isbn10 = newMetadata.isbn10;
   }
-  if (newMetadata.series && !book.series) {
-    updateData.series = newMetadata.series;
-  }
-  if (newMetadata.seriesNumber && !book.seriesNumber) {
-    updateData.seriesNumber = newMetadata.seriesNumber;
-  }
 
   // Download and save cover if available and book doesn't have one
   // Try multiple URLs until one provides a valid cover image
@@ -1162,8 +1156,6 @@ export async function applyMetadata(
           isbn10: metadata.isbn10 || olResults[0].isbn10,
           // Also grab other fields if missing
           description: metadata.description || olResults[0].description,
-          series: metadata.series || olResults[0].series,
-          seriesNumber: metadata.seriesNumber || olResults[0].seriesNumber,
         };
       }
     }
@@ -1171,7 +1163,7 @@ export async function applyMetadata(
 
   // If we now have an ISBN but are missing other data, do a direct ISBN lookup
   const isbnToLookup = enrichedMetadata.isbn13 || enrichedMetadata.isbn10 || enrichedMetadata.isbn;
-  if (isbnToLookup && (!enrichedMetadata.description || !enrichedMetadata.series)) {
+  if (isbnToLookup && !enrichedMetadata.description) {
     const { lookupByISBN, lookupGoogleBooksByISBN } = await import("../lib/metadata");
 
     // Try both sources for the most complete data
@@ -1185,9 +1177,8 @@ export async function applyMetadata(
         ...enrichedMetadata,
         description:
           enrichedMetadata.description || olData?.description || googleData?.description || null,
-        series: enrichedMetadata.series || olData?.series || googleData?.series || null,
-        seriesNumber:
-          enrichedMetadata.seriesNumber || olData?.seriesNumber || googleData?.seriesNumber || null,
+        series: enrichedMetadata.series || null,
+        seriesNumber: enrichedMetadata.seriesNumber || null,
         publisher: enrichedMetadata.publisher || olData?.publisher || googleData?.publisher || null,
         pageCount: enrichedMetadata.pageCount || olData?.pageCount || googleData?.pageCount || null,
         language: enrichedMetadata.language || olData?.language || googleData?.language || null,
@@ -1223,8 +1214,8 @@ export async function applyMetadata(
     isbn13: enrichedMetadata.isbn13 || book.isbn13,
     isbn10: enrichedMetadata.isbn10 || book.isbn10,
     fileName: newFileName,
-    series: enrichedMetadata.series || book.series,
-    seriesNumber: enrichedMetadata.seriesNumber || book.seriesNumber,
+    series: book.series,
+    seriesNumber: book.seriesNumber,
     updatedAt: sql`(unixepoch())`,
   };
 
@@ -1285,8 +1276,8 @@ export async function applyMetadata(
           description: enrichedMetadata.description,
           isbn: enrichedMetadata.isbn13 || enrichedMetadata.isbn10 || enrichedMetadata.isbn,
           language: enrichedMetadata.language,
-          series: enrichedMetadata.series,
-          seriesNumber: enrichedMetadata.seriesNumber,
+          series: book.series,
+          seriesNumber: book.seriesNumber,
           publishedDate: enrichedMetadata.publishedDate,
           coverImage,
           coverMimeType: "image/jpeg",

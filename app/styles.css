@@ -25,6 +25,14 @@
   }
 }
 
+@utility scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* View Transitions */
 @utility vt-name {
   view-transition-name: var(--vt-name);

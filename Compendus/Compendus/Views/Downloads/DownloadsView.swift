@@ -59,6 +59,7 @@ struct DownloadsView: View {
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(ServerConfig.self) private var serverConfig
+    @Environment(SyncService.self) private var syncService
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
     private var allBooks: [DownloadedBook]
@@ -99,6 +100,7 @@ struct DownloadsView: View {
     @State private var showingDeleteError = false
     @State private var deleteError: String?
     @State private var navigationPath = NavigationPath()
+    @State private var selectedRemoteBook: Book? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -124,6 +126,20 @@ struct DownloadsView: View {
 
     private var hasActiveDownloads: Bool {
         !activePendingDownloads.isEmpty || !downloadManager.activeDownloads.isEmpty
+    }
+
+    /// Merge local recently-read books with remote books that have progress but aren't downloaded
+    private var continueReadingItems: [ContinueReadingItem] {
+        let localIds = Set(recentlyReadBooks.map(\.id))
+
+        let localItems = recentlyReadBooks.map { ContinueReadingItem.downloaded($0) }
+
+        let remoteItems = syncService.remoteBooksWithProgress
+            .filter { !localIds.contains($0.id) }
+            .map { ContinueReadingItem.remote($0) }
+
+        return (localItems + remoteItems)
+            .sorted { ($0.lastReadAt ?? .distantPast) > ($1.lastReadAt ?? .distantPast) }
     }
 
     var body: some View {
@@ -176,6 +192,22 @@ struct DownloadsView: View {
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
                 }
+                .sheet(item: $selectedRemoteBook) { book in
+                    BookDetailView(
+                        book: book,
+                        onRead: { downloaded in
+                            if downloaded.isAudiobook {
+                                Task {
+                                    await audiobookPlayer.loadBook(downloaded)
+                                    audiobookPlayer.play()
+                                    audiobookPlayer.isFullPlayerPresented = true
+                                }
+                            } else {
+                                bookToRead = downloaded
+                            }
+                        }
+                    )
+                }
                 .refreshable {
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext, force: true)
                 }
@@ -224,11 +256,11 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
+        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
             DownloadsEmptyStateView()
         } else if viewMode == .series {
             seriesGridContent
-        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive {
+        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -285,11 +317,11 @@ struct DownloadsView: View {
 
     private var booksScrollContent: some View {
         ScrollView {
-            // Continue Reading section
-            if !recentlyReadBooks.isEmpty && searchText.isEmpty && selectedFilter == .all {
+            // Continue Reading section (local + remote books with progress)
+            if !continueReadingItems.isEmpty && searchText.isEmpty && selectedFilter == .all {
                 ContinueReadingSection(
-                    books: recentlyReadBooks,
-                    onBookTap: { book in
+                    items: continueReadingItems,
+                    onLocalBookTap: { book in
                         if book.isAudiobook {
                             Task {
                                 await audiobookPlayer.loadBook(book)
@@ -299,6 +331,9 @@ struct DownloadsView: View {
                         } else {
                             bookToRead = book
                         }
+                    },
+                    onRemoteBookTap: { book in
+                        selectedRemoteBook = book
                     },
                     onMarkAsRead: { book in
                         toggleReadStatus(for: book)
@@ -654,5 +689,6 @@ struct DownloadsView: View {
         .environment(AudiobookPlayer())
         .environment(ReaderSettings())
         .environment(OnDeviceTranscriptionService())
+        .environment(SyncService(apiService: api))
         .modelContainer(for: [DownloadedBook.self, PendingDownload.self], inMemory: true)
 }

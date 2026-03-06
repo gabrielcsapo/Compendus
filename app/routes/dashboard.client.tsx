@@ -6,6 +6,8 @@ import { ContinueReadingCarousel } from "../components/dashboard/ContinueReading
 import { ReadingStreakCard } from "../components/dashboard/ReadingStreakCard";
 import { WeeklyReadingChart } from "../components/dashboard/WeeklyReadingChart";
 import { MonthlyHeatmap } from "../components/dashboard/MonthlyHeatmap";
+import { TopBooksCard } from "../components/dashboard/TopBooksCard";
+import { StatsDetailModal } from "../components/dashboard/StatsDetailModal";
 import type { StatsResponse } from "../actions/stats";
 
 type DashboardData = {
@@ -27,6 +29,7 @@ export default function DashboardPage({
   );
   const [loading, setLoading] = useState(!initialContinueReading);
   const hadInitialData = useRef(!!initialContinueReading);
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   useEffect(() => {
     if (hadInitialData.current) {
@@ -82,6 +85,19 @@ export default function DashboardPage({
             </div>
           </div>
 
+          {/* Top books skeleton */}
+          <div className="bg-surface border border-border rounded-xl p-5 animate-pulse">
+            <div className="h-4 bg-surface-elevated rounded w-20 mb-4" />
+            <div className="flex gap-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex-shrink-0 w-20">
+                  <div className="w-16 h-24 bg-surface-elevated rounded-md mx-auto" />
+                  <div className="h-2 bg-surface-elevated rounded w-14 mx-auto mt-2" />
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Continue reading skeleton */}
           <div>
             <div className="h-5 bg-surface-elevated rounded w-40 mb-4 animate-pulse" />
@@ -114,6 +130,7 @@ export default function DashboardPage({
             todayMinutes={stats.todayMinutes}
             booksRead={stats.booksRead}
             totalMinutes={stats.totalMinutes}
+            onClick={() => setShowStatsModal(true)}
           />
           <div className="md:col-span-2">
             <WeeklyReadingChart days={stats.last7Days} />
@@ -121,11 +138,28 @@ export default function DashboardPage({
         </div>
       )}
 
-      {/* Row 2: Continue Reading */}
+      {/* Row 2: Top Books */}
+      {stats && stats.topBooks.length > 0 && (
+        <TopBooksCard
+          books={stats.topBooks.slice(0, 5)}
+          onViewAll={() => setShowStatsModal(true)}
+        />
+      )}
+
+      {/* Row 3: Continue Reading */}
       {continueReading.length > 0 && <ContinueReadingCarousel books={continueReading} />}
 
-      {/* Row 3: Monthly heatmap */}
+      {/* Row 4: Monthly heatmap */}
       {stats && <MonthlyHeatmap dailyData={stats.last30Days} />}
+
+      {/* Stats Detail Modal */}
+      {stats && (
+        <StatsDetailModal
+          isOpen={showStatsModal}
+          onClose={() => setShowStatsModal(false)}
+          stats={stats}
+        />
+      )}
     </main>
   );
 }

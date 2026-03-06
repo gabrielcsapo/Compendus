@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { db, userBookState, highlights, bookmarks, readingSessions } from "../../app/lib/db";
+import { db, userBookState, highlights, bookmarks, readingSessions, books } from "../../app/lib/db";
 import { requireProfile } from "../middleware/profile";
+import { toApiBook } from "../../app/lib/api/search";
 
 const app = new Hono();
 
@@ -29,11 +30,13 @@ app.use("/api/sync/*", requireProfile);
 // --- Reading Progress ---
 
 // GET /api/sync/reading-progress — Get all reading progress for current profile
+// Includes full book metadata so clients can display books not yet downloaded
 app.get("/api/sync/reading-progress", (c) => {
   const profileId = c.get("profileId");
   const since = c.req.query("since");
   const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
   const offset = parseInt(c.req.query("offset") || "0", 10);
+  const baseUrl = new URL(c.req.url).origin;
 
   const conditions = [eq(userBookState.profileId, profileId)];
   if (since) {
@@ -42,8 +45,12 @@ app.get("/api/sync/reading-progress", (c) => {
   }
 
   const results = db
-    .select()
+    .select({
+      state: userBookState,
+      book: books,
+    })
     .from(userBookState)
+    .innerJoin(books, eq(userBookState.bookId, books.id))
     .where(and(...conditions))
     .limit(limit)
     .offset(offset)
@@ -51,7 +58,7 @@ app.get("/api/sync/reading-progress", (c) => {
 
   return c.json({
     success: true,
-    data: results.map((row) => ({
+    data: results.map(({ state: row, book }) => ({
       bookId: row.bookId,
       readingProgress: row.readingProgress,
       lastPosition: row.lastPosition,
@@ -60,6 +67,14 @@ app.get("/api/sync/reading-progress", (c) => {
       rating: row.rating,
       review: row.review,
       updatedAt: tsToISO(row.updatedAt),
+      book: toApiBook(book, baseUrl, {
+        isRead: row.isRead,
+        rating: row.rating,
+        review: row.review,
+        readingProgress: row.readingProgress,
+        lastReadAt: row.lastReadAt as Date | null,
+        lastPosition: row.lastPosition,
+      }),
     })),
   });
 });

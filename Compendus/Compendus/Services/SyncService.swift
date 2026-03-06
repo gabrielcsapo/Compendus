@@ -20,6 +20,9 @@ class SyncService {
     var modelContainer: ModelContainer?
     private(set) var isSyncing = false
 
+    /// Books with reading progress that are not downloaded locally (read on other devices)
+    private(set) var remoteBooksWithProgress: [Book] = []
+
     init(apiService: APIService) {
         self.apiService = apiService
     }
@@ -165,14 +168,13 @@ class SyncService {
     // MARK: - Pull: Reading Progress
 
     private func pullReadingProgress(since: Date?, profileId: String, modelContext: ModelContext) async throws {
-        guard var url = apiService.config.apiURL("/api/sync/reading-progress") else {
+        // Always fetch all reading progress (no `since` filter) so we can discover
+        // remote books with progress that aren't downloaded locally. The reading
+        // progress dataset is small (one record per book the user has interacted with).
+        // The `since`-based conflict resolution still applies for local book updates.
+        guard let url = apiService.config.apiURL("/api/sync/reading-progress") else {
             print("[Sync:Pull:Progress] Skipped — no API URL")
             return
-        }
-
-        if let since {
-            let sinceStr = ISO8601DateFormatter().string(from: since)
-            url = apiService.config.apiURL("/api/sync/reading-progress?since=\(sinceStr)") ?? url
         }
 
         print("[Sync:Pull:Progress] GET \(url)")
@@ -180,6 +182,7 @@ class SyncService {
         print("[Sync:Pull:Progress] Received \(response.data.count) records from server")
 
         var merged = 0, skipped = 0, notFound = 0
+        var remoteBooks: [Book] = []
         for record in response.data {
             let bookId = record.bookId
             let descriptor = FetchDescriptor<DownloadedBook>(
@@ -187,6 +190,12 @@ class SyncService {
             )
             guard let localBook = try? modelContext.fetch(descriptor).first else {
                 notFound += 1
+                // Collect books with progress that aren't downloaded locally
+                if let book = record.book,
+                   (record.readingProgress ?? 0) > 0,
+                   !(record.isRead ?? false) {
+                    remoteBooks.append(book)
+                }
                 continue
             }
 
@@ -213,7 +222,10 @@ class SyncService {
             }
         }
 
-        print("[Sync:Pull:Progress] Merged: \(merged), Skipped (local newer): \(skipped), Not downloaded: \(notFound)")
+        // Update remote books list (sorted by lastReadAt from server response)
+        remoteBooksWithProgress = remoteBooks
+
+        print("[Sync:Pull:Progress] Merged: \(merged), Skipped (local newer): \(skipped), Not downloaded: \(notFound), Remote: \(remoteBooks.count)")
         try? modelContext.save()
     }
 
@@ -776,6 +788,8 @@ private struct ServerReadingProgress: Codable {
     let rating: Int?
     let review: String?
     let updatedAt: Date
+    /// Full book metadata (only present in GET responses, not in PUT requests)
+    var book: Book? = nil
 }
 
 // MARK: - Server DTOs: Highlights

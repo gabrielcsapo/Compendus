@@ -6,6 +6,7 @@ interface ReadingStreakCardProps {
   todayMinutes: number;
   booksRead: number;
   totalMinutes: number;
+  onClick?: () => void;
 }
 
 function formatTime(minutes: number): string {
@@ -22,9 +23,16 @@ export function ReadingStreakCard({
   todayMinutes,
   booksRead,
   totalMinutes,
+  onClick,
 }: ReadingStreakCardProps) {
   return (
-    <div className="bg-surface border border-border rounded-xl p-5 flex flex-col h-full">
+    <div
+      className={`bg-surface border border-border rounded-xl p-5 flex flex-col h-full${onClick ? " cursor-pointer hover:border-primary/50 transition-colors" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}
+    >
       <div className="flex items-center gap-4 mb-4">
         {/* Flame icon */}
         <div className="flex-shrink-0">
@@ -80,6 +88,8 @@ export function ReadingStreakCard({
           <div className="text-[10px] text-foreground-muted">Total time</div>
         </div>
       </div>
+
+      {onClick && <div className="text-xs text-primary mt-3 text-center">View details &rarr;</div>}
     </div>
   );
 }

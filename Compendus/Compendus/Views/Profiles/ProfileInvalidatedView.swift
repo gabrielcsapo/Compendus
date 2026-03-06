@@ -20,11 +20,7 @@ struct ProfileInvalidatedView: View {
     @State private var errorMessage: String?
     @State private var isMigrating = false
 
-    @State private var showingPinEntry = false
     @State private var selectedLockedProfile: Profile?
-    @State private var pinInput = ""
-    @State private var pinError: String?
-    @State private var isSelectingProfile = false
 
     @State private var showingCreateSheet = false
 
@@ -95,28 +91,24 @@ struct ProfileInvalidatedView: View {
         .task {
             loadProfiles()
         }
-        .sheet(isPresented: $showingPinEntry) {
+        .sheet(item: $selectedLockedProfile) { (profile: Profile) in
             PinEntrySheet(
-                profileName: selectedLockedProfile?.name ?? "",
-                pin: $pinInput,
-                error: $pinError,
-                isLoading: $isSelectingProfile,
-                onSubmit: { submitPin() },
+                profile: profile,
+                onVerifyPin: { pin in
+                    await verifyPinAndMigrate(for: profile, pin: pin)
+                },
                 onCancel: {
-                    showingPinEntry = false
-                    pinInput = ""
-                    pinError = nil
                     selectedLockedProfile = nil
                 }
             )
-            .presentationDetents([.height(280)])
+            .presentationDetents([.height(560)])
         }
         .sheet(isPresented: $showingCreateSheet) {
             CreateProfileSheet(
                 onCreated: { profile in
                     profiles.append(profile)
                     showingCreateSheet = false
-                    selectAndMigrate(profile, pin: nil)
+                    selectAndMigrate(profile)
                 },
                 onCancel: {
                     showingCreateSheet = false
@@ -218,51 +210,43 @@ struct ProfileInvalidatedView: View {
     private func handleProfileTap(_ profile: Profile) {
         if profile.hasPin {
             selectedLockedProfile = profile
-            pinInput = ""
-            pinError = nil
-            showingPinEntry = true
         } else {
-            selectAndMigrate(profile, pin: nil)
+            selectAndMigrate(profile)
         }
     }
 
-    private func submitPin() {
-        guard let profile = selectedLockedProfile else { return }
-        selectAndMigrate(profile, pin: pinInput)
-    }
-
-    private func selectAndMigrate(_ profile: Profile, pin: String?) {
-        isSelectingProfile = true
-
+    private func selectAndMigrate(_ profile: Profile) {
         Task {
             do {
+                let pin: String? = nil
                 let selectedProfile = try await apiService.selectProfile(id: profile.id, pin: pin)
                 await MainActor.run {
                     serverConfig.selectProfile(selectedProfile)
-                    isSelectingProfile = false
-                    showingPinEntry = false
-                    pinInput = ""
-                    pinError = nil
-                    selectedLockedProfile = nil
                 }
-                // Migrate data from old profile to new
                 await migrateData(to: selectedProfile.id)
-            } catch let error as APIError {
-                await MainActor.run {
-                    isSelectingProfile = false
-                    if case .serverError(401, _) = error {
-                        pinError = "Incorrect PIN. Please try again."
-                        pinInput = ""
-                    } else {
-                        pinError = error.localizedDescription
-                    }
-                }
             } catch {
-                await MainActor.run {
-                    isSelectingProfile = false
-                    pinError = "Something went wrong. Please try again."
-                }
+                // Non-PIN profiles shouldn't fail auth
             }
+        }
+    }
+
+    private func verifyPinAndMigrate(for profile: Profile, pin: String) async -> PinEntrySheet.PinVerificationResult {
+        do {
+            let selectedProfile = try await apiService.selectProfile(id: profile.id, pin: pin)
+            await MainActor.run {
+                serverConfig.selectProfile(selectedProfile)
+                selectedLockedProfile = nil
+            }
+            await migrateData(to: selectedProfile.id)
+            return .success
+        } catch let error as APIError {
+            if case .serverError(401, _) = error {
+                return .failure("Incorrect PIN. Please try again.")
+            } else {
+                return .failure(error.localizedDescription)
+            }
+        } catch {
+            return .failure("Something went wrong. Please try again.")
         }
     }
 

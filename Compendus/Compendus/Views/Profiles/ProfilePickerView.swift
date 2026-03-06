@@ -15,11 +15,7 @@ struct ProfilePickerView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    @State private var showingPinEntry = false
     @State private var selectedLockedProfile: Profile?
-    @State private var pinInput = ""
-    @State private var pinError: String?
-    @State private var isSelectingProfile = false
 
     @State private var showingCreateSheet = false
 
@@ -84,21 +80,17 @@ struct ProfilePickerView: View {
         .task {
             loadProfiles()
         }
-        .sheet(isPresented: $showingPinEntry) {
+        .sheet(item: $selectedLockedProfile) { (profile: Profile) in
             PinEntrySheet(
-                profileName: selectedLockedProfile?.name ?? "",
-                pin: $pinInput,
-                error: $pinError,
-                isLoading: $isSelectingProfile,
-                onSubmit: { submitPin() },
+                profile: profile,
+                onVerifyPin: { pin in
+                    await verifyPin(for: profile, pin: pin)
+                },
                 onCancel: {
-                    showingPinEntry = false
-                    pinInput = ""
-                    pinError = nil
                     selectedLockedProfile = nil
                 }
             )
-            .presentationDetents([.height(280)])
+            .presentationDetents([.height(560)])
         }
         .sheet(isPresented: $showingCreateSheet) {
             CreateProfileSheet(
@@ -137,49 +129,41 @@ struct ProfilePickerView: View {
     private func handleProfileTap(_ profile: Profile) {
         if profile.hasPin {
             selectedLockedProfile = profile
-            pinInput = ""
-            pinError = nil
-            showingPinEntry = true
         } else {
-            selectProfile(profile, pin: nil)
+            selectProfile(profile)
         }
     }
 
-    private func submitPin() {
-        guard let profile = selectedLockedProfile else { return }
-        selectProfile(profile, pin: pinInput)
-    }
-
-    private func selectProfile(_ profile: Profile, pin: String?) {
-        isSelectingProfile = true
-
+    private func selectProfile(_ profile: Profile) {
         Task {
             do {
+                let pin: String? = nil
                 let selectedProfile = try await apiService.selectProfile(id: profile.id, pin: pin)
                 await MainActor.run {
                     serverConfig.selectProfile(selectedProfile)
-                    isSelectingProfile = false
-                    showingPinEntry = false
-                    pinInput = ""
-                    pinError = nil
-                    selectedLockedProfile = nil
-                }
-            } catch let error as APIError {
-                await MainActor.run {
-                    isSelectingProfile = false
-                    if case .serverError(401, _) = error {
-                        pinError = "Incorrect PIN. Please try again."
-                        pinInput = ""
-                    } else {
-                        pinError = error.localizedDescription
-                    }
                 }
             } catch {
-                await MainActor.run {
-                    isSelectingProfile = false
-                    pinError = "Something went wrong. Please try again."
-                }
+                // Non-PIN profiles shouldn't fail auth
             }
+        }
+    }
+
+    private func verifyPin(for profile: Profile, pin: String) async -> PinEntrySheet.PinVerificationResult {
+        do {
+            let selectedProfile = try await apiService.selectProfile(id: profile.id, pin: pin)
+            await MainActor.run {
+                serverConfig.selectProfile(selectedProfile)
+                selectedLockedProfile = nil
+            }
+            return .success
+        } catch let error as APIError {
+            if case .serverError(401, _) = error {
+                return .failure("Incorrect PIN. Please try again.")
+            } else {
+                return .failure(error.localizedDescription)
+            }
+        } catch {
+            return .failure("Something went wrong. Please try again.")
         }
     }
 }
@@ -249,56 +233,206 @@ private struct AddProfileCard: View {
 // MARK: - PIN Entry Sheet
 
 struct PinEntrySheet: View {
-    let profileName: String
-    @Binding var pin: String
-    @Binding var error: String?
-    @Binding var isLoading: Bool
-    let onSubmit: () -> Void
+    enum PinVerificationResult {
+        case success
+        case failure(String)
+    }
+
+    let profile: Profile
+    let onVerifyPin: (String) async -> PinVerificationResult
     let onCancel: () -> Void
+
+    @Environment(ServerConfig.self) private var serverConfig
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var enteredPIN: String = ""
+    @State private var isLoading: Bool = false
+    @State private var shakeOffset: CGFloat = 0
+    @State private var showError: Bool = false
+    @State private var errorMessage: String = ""
+
+    private enum NumberPadKey: Hashable {
+        case digit(Int)
+        case delete
+        case blank
+    }
+
+    private var numberPadRows: [[NumberPadKey]] {
+        [
+            [.digit(1), .digit(2), .digit(3)],
+            [.digit(4), .digit(5), .digit(6)],
+            [.digit(7), .digit(8), .digit(9)],
+            [.blank,    .digit(0), .delete]
+        ]
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Text("Enter PIN for \(profileName)")
+            VStack(spacing: 0) {
+                Spacer()
+                    .frame(height: 20)
+
+                ProfileAvatarView(profile: profile, serverConfig: serverConfig, size: 64)
+                    .padding(.bottom, 8)
+
+                Text(profile.name)
                     .font(.headline)
+                    .padding(.bottom, 24)
 
-                SecureField("PIN", text: $pin)
-                    .textFieldStyle(.roundedBorder)
-                    .keyboardType(.numberPad)
-                    .padding(.horizontal)
+                pinDotsView
+                    .offset(x: shakeOffset)
+                    .padding(.bottom, showError ? 12 : 32)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("PIN entry, \(enteredPIN.count) of 4 digits entered")
 
-                if let error = error {
-                    Text(error)
+                if showError {
+                    Text(errorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .transition(.opacity)
+                        .padding(.bottom, 16)
                 }
 
-                Button {
-                    onSubmit()
-                } label: {
-                    HStack {
-                        if isLoading {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        }
-                        Text(isLoading ? "Verifying..." : "Continue")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(pin.isEmpty ? Color.gray : Color.accentColor)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                if isLoading {
+                    ProgressView()
+                        .padding(.bottom, 32)
+                } else {
+                    numberPadView
                 }
-                .disabled(pin.isEmpty || isLoading)
-                .padding(.horizontal)
+
+                Spacer()
             }
-            .padding(.vertical)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
                 }
             }
+        }
+    }
+
+    // MARK: - PIN Dots
+
+    private var pinDotsView: some View {
+        HStack(spacing: 16) {
+            ForEach(0..<4, id: \.self) { index in
+                Circle()
+                    .fill(index < enteredPIN.count ? Color.primary : Color.clear)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.primary.opacity(0.3), lineWidth: 1.5)
+                    )
+                    .frame(width: 14, height: 14)
+            }
+        }
+        .animation(.easeInOut(duration: 0.1), value: enteredPIN.count)
+    }
+
+    // MARK: - Number Pad
+
+    private var numberPadView: some View {
+        VStack(spacing: 12) {
+            ForEach(numberPadRows, id: \.self) { row in
+                HStack(spacing: 24) {
+                    ForEach(row, id: \.self) { key in
+                        numberPadButton(key)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func numberPadButton(_ key: NumberPadKey) -> some View {
+        switch key {
+        case .digit(let n):
+            Button {
+                appendDigit(n)
+            } label: {
+                Text("\(n)")
+                    .font(.system(size: 28, weight: .regular))
+                    .frame(width: 72, height: 72)
+                    .background(Color.secondary.opacity(0.2))
+                    .clipShape(Circle())
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+
+        case .delete:
+            Button {
+                deleteLastDigit()
+            } label: {
+                Image(systemName: "delete.backward")
+                    .font(.system(size: 22))
+                    .frame(width: 72, height: 72)
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(enteredPIN.isEmpty)
+            .opacity(enteredPIN.isEmpty ? 0.3 : 1.0)
+            .accessibilityLabel("Delete")
+
+        case .blank:
+            Color.clear
+                .frame(width: 72, height: 72)
+        }
+    }
+
+    // MARK: - Input Logic
+
+    private func appendDigit(_ digit: Int) {
+        guard enteredPIN.count < 4, !isLoading else { return }
+
+        if showError {
+            withAnimation { showError = false }
+        }
+
+        enteredPIN.append(String(digit))
+        HapticFeedback.lightImpact()
+
+        if enteredPIN.count == 4 {
+            verifyPIN()
+        }
+    }
+
+    private func deleteLastDigit() {
+        guard !enteredPIN.isEmpty, !isLoading else { return }
+        enteredPIN.removeLast()
+    }
+
+    private func verifyPIN() {
+        isLoading = true
+
+        Task {
+            let result = await onVerifyPin(enteredPIN)
+
+            await MainActor.run {
+                switch result {
+                case .success:
+                    HapticFeedback.success()
+                case .failure(let message):
+                    isLoading = false
+                    errorMessage = message
+                    triggerErrorShake()
+                    HapticFeedback.error()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showError = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        enteredPIN = ""
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Shake Animation
+
+    private func triggerErrorShake() {
+        guard !reduceMotion else { return }
+        shakeOffset = 10
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.15, blendDuration: 0)) {
+            shakeOffset = 0
         }
     }
 }
