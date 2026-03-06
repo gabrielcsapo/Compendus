@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { buttonStyles, inputStyles, badgeStyles } from "../lib/styles";
+import { ProfileAvatar } from "../components/ProfileAvatar";
 
 interface Profile {
   id: string;
   name: string;
   avatar: string | null;
+  avatarUrl?: string | null;
   hasPin: boolean;
   isAdmin: boolean;
   createdAt: string | null;
@@ -291,15 +293,7 @@ export default function AdminProfilesClient({
                   className="flex items-center gap-4 px-5 py-4 hover:bg-surface-elevated/50 transition-colors"
                 >
                   {/* Avatar */}
-                  <div className="w-12 h-12 rounded-full bg-surface-elevated border border-border flex items-center justify-center text-xl flex-shrink-0">
-                    {profile.avatar ? (
-                      <span>{profile.avatar}</span>
-                    ) : (
-                      <span className="text-foreground-muted">
-                        {profile.name.charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                  </div>
+                  <ProfileAvatar profile={profile} size="md" className="!w-12 !h-12 text-xl" />
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">

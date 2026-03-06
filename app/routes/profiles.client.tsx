@@ -3,11 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "react-flight-router/client";
 import { buttonStyles, inputStyles } from "../lib/styles";
+import { ProfileAvatar } from "../components/ProfileAvatar";
 
 interface Profile {
   id: string;
   name: string;
   avatar: string | null;
+  avatarUrl?: string | null;
   hasPin: boolean;
   isAdmin: boolean;
   createdAt: string | null;
@@ -182,14 +184,12 @@ export default function ProfilePickerClient({ initialProfiles }: { initialProfil
               className="group flex flex-col items-center gap-3 focus:outline-none disabled:opacity-50"
             >
               {/* Avatar */}
-              <div className="relative w-28 h-28 rounded-full bg-surface-elevated border-2 border-border group-hover:border-primary group-focus-visible:border-primary transition-all duration-200 flex items-center justify-center text-4xl group-hover:scale-105 group-hover:shadow-lg">
-                {profile.avatar ? (
-                  <span>{profile.avatar}</span>
-                ) : (
-                  <span className="text-foreground-muted">
-                    {profile.name.charAt(0).toUpperCase()}
-                  </span>
-                )}
+              <div className="relative group-hover:scale-105 group-hover:shadow-lg transition-all duration-200">
+                <ProfileAvatar
+                  profile={profile}
+                  size="xl"
+                  className="border-2 !border-border group-hover:!border-primary group-focus-visible:!border-primary"
+                />
                 {/* Lock icon for PIN-protected profiles */}
                 {profile.hasPin && (
                   <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-surface border-2 border-border flex items-center justify-center">
@@ -266,14 +266,8 @@ export default function ProfilePickerClient({ initialProfiles }: { initialProfil
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-surface border border-border rounded-xl shadow-xl w-full max-w-sm mx-4 p-6">
             <div className="text-center mb-6">
-              <div className="w-20 h-20 rounded-full bg-surface-elevated border-2 border-border mx-auto mb-3 flex items-center justify-center text-3xl">
-                {pinProfile.avatar ? (
-                  <span>{pinProfile.avatar}</span>
-                ) : (
-                  <span className="text-foreground-muted">
-                    {pinProfile.name.charAt(0).toUpperCase()}
-                  </span>
-                )}
+              <div className="mx-auto mb-3">
+                <ProfileAvatar profile={pinProfile} size="lg" className="border-2" />
               </div>
               <h2 className="text-lg font-semibold text-foreground">{pinProfile.name}</h2>
               <p className="text-sm text-foreground-muted mt-1">Enter your PIN to continue</p>
