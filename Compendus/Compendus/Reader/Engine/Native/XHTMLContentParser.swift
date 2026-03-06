@@ -123,10 +123,10 @@ class XHTMLContentParser {
         for child in element.getChildNodes() {
             if let textNode = child as? TextNode {
                 let text = collapseWhitespace(textNode.getWholeText())
-                if !text.isEmpty && text != " " || !pendingRuns.isEmpty {
-                    if !text.isEmpty {
-                        pendingRuns.append(TextRun(text: text))
-                    }
+                // Append non-empty text. Skip lone whitespace only when no prior
+                // inline content exists (avoids spurious leading spaces between blocks).
+                if !text.isEmpty && (text != " " || !pendingRuns.isEmpty) {
+                    pendingRuns.append(TextRun(text: text))
                 }
             } else if let el = child as? Element {
                 let tag = el.tagName().lowercased()
@@ -145,10 +145,14 @@ class XHTMLContentParser {
                         nodes.append(node)
                     }
                 } else {
-                    // Inline element — resolve its own styles/link/color, then collect children
-                    let (styles, link, color, family) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
+                    // Inline element — check display:none, then resolve styles and collect children
+                    let cssProps = resolveCSSProperties(for: el)
+                    if cssProps.display == CSSDisplay.none { continue }
+
+                    let (styles, link, color, family, sizeScale) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
                     let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link,
-                                                 inheritedColor: color, inheritedFontFamily: family)
+                                                 inheritedColor: color, inheritedFontFamily: family,
+                                                 inheritedFontSizeScale: sizeScale)
                     pendingRuns.append(contentsOf: runs)
                 }
             }
@@ -281,8 +285,9 @@ class XHTMLContentParser {
     /// Resolve an inline element's tag-based and CSS-based styles and link.
     /// Returns the merged styles, link, textColor, and fontFamily to pass to child content.
     private func resolveInlineStyles(for el: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?,
-                                     inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil)
-        -> (styles: Set<TextStyle>, link: URL?, textColor: UIColor?, fontFamily: String?) {
+                                     inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil,
+                                     inheritedFontSizeScale: CGFloat? = nil)
+        -> (styles: Set<TextStyle>, link: URL?, textColor: UIColor?, fontFamily: String?, fontSizeScale: CGFloat?) {
         let tag = el.tagName().lowercased()
         var styles = inheritedStyles
         var link = inheritedLink
@@ -320,6 +325,23 @@ class XHTMLContentParser {
         let textColor = cssProps.color ?? inheritedColor
         let fontFamily = cssProps.fontFamily ?? inheritedFontFamily
 
+        // Font-size: resolve em/% relative to inherited scale, producing a cumulative multiplier
+        var fontSizeScale = inheritedFontSizeScale
+        if let cssFontSize = cssProps.fontSize {
+            switch cssFontSize {
+            case .em(let v):
+                // em is relative to parent — multiply with inherited scale
+                fontSizeScale = (inheritedFontSizeScale ?? 1.0) * v
+            case .percent(let v):
+                fontSizeScale = (inheritedFontSizeScale ?? 1.0) * (v / 100.0)
+            case .px(let v):
+                // Absolute px — approximate as fraction of typical 16px base
+                fontSizeScale = v / 16.0
+            case .zero:
+                break // ignore zero font-size
+            }
+        }
+
         // Link handling
         if tag == "a" {
             if let href = try? el.attr("href"), !href.isEmpty {
@@ -335,13 +357,14 @@ class XHTMLContentParser {
             }
         }
 
-        return (styles, link, textColor, fontFamily)
+        return (styles, link, textColor, fontFamily, fontSizeScale)
     }
 
     /// Recursively collect TextRuns from an element's inline content.
     /// If a block element is encountered inside inline context, it gets collected separately.
     private func collectInlineRuns(from element: Element, inheritedStyles: Set<TextStyle>, inheritedLink: URL?,
-                                   inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil) -> [TextRun] {
+                                   inheritedColor: UIColor? = nil, inheritedFontFamily: String? = nil,
+                                   inheritedFontSizeScale: CGFloat? = nil) -> [TextRun] {
         var runs: [TextRun] = []
 
         for child in element.getChildNodes() {
@@ -350,7 +373,8 @@ class XHTMLContentParser {
                 let text = isPreformatted ? textNode.getWholeText() : collapseWhitespace(textNode.getWholeText())
                 if !text.isEmpty {
                     runs.append(TextRun(text: text, styles: inheritedStyles, link: inheritedLink,
-                                        textColor: inheritedColor, fontFamily: inheritedFontFamily))
+                                        textColor: inheritedColor, fontFamily: inheritedFontFamily,
+                                        fontSizeScale: inheritedFontSizeScale))
                 }
             } else if let el = child as? Element {
                 let tag = el.tagName().lowercased()
@@ -365,7 +389,8 @@ class XHTMLContentParser {
                 // Handle <br> as newline
                 if tag == "br" {
                     runs.append(TextRun(text: "\n", styles: inheritedStyles, link: inheritedLink,
-                                        textColor: inheritedColor, fontFamily: inheritedFontFamily))
+                                        textColor: inheritedColor, fontFamily: inheritedFontFamily,
+                                        fontSizeScale: inheritedFontSizeScale))
                     continue
                 }
 
@@ -374,7 +399,8 @@ class XHTMLContentParser {
                     let alt = try? el.attr("alt")
                     if let alt, !alt.isEmpty {
                         runs.append(TextRun(text: "[\(alt)]", styles: inheritedStyles, link: inheritedLink,
-                                            textColor: inheritedColor, fontFamily: inheritedFontFamily))
+                                            textColor: inheritedColor, fontFamily: inheritedFontFamily,
+                                            fontSizeScale: inheritedFontSizeScale))
                     }
                     continue
                 }
@@ -382,15 +408,17 @@ class XHTMLContentParser {
                 // If it's a block tag inside inline context, extract inline content
                 if isBlockTag(tag) && !Self.inlineTags.contains(tag) {
                     let blockRuns = collectInlineRuns(from: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink,
-                                                     inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily)
+                                                     inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily,
+                                                     inheritedFontSizeScale: inheritedFontSizeScale)
                     runs.append(contentsOf: blockRuns)
                     continue
                 }
 
-                // Inline element — resolve styles, link, color, fontFamily
-                let (newStyles, newLink, newColor, newFontFamily) = resolveInlineStyles(
+                // Inline element — resolve styles, link, color, fontFamily, fontSizeScale
+                let (newStyles, newLink, newColor, newFontFamily, newFontSizeScale) = resolveInlineStyles(
                     for: el, inheritedStyles: inheritedStyles, inheritedLink: inheritedLink,
-                    inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily)
+                    inheritedColor: inheritedColor, inheritedFontFamily: inheritedFontFamily,
+                    inheritedFontSizeScale: inheritedFontSizeScale)
 
                 // CSS display: none check
                 let cssProps = resolveCSSProperties(for: el)
@@ -399,22 +427,49 @@ class XHTMLContentParser {
                 }
 
                 let childRuns = collectInlineRuns(from: el, inheritedStyles: newStyles, inheritedLink: newLink,
-                                                  inheritedColor: newColor, inheritedFontFamily: newFontFamily)
+                                                  inheritedColor: newColor, inheritedFontFamily: newFontFamily,
+                                                  inheritedFontSizeScale: newFontSizeScale)
                 runs.append(contentsOf: childRuns)
             }
         }
 
-        return runs
+        return ensureSubSupSpacing(runs)
+    }
+
+    /// Ensure whitespace separation between adjacent sub/sup runs and normal text runs.
+    /// Prevents words from concatenating when <sub>/<sup> elements are adjacent
+    /// without whitespace text nodes (common in Calibre-generated EPUBs).
+    private func ensureSubSupSpacing(_ runs: [TextRun]) -> [TextRun] {
+        guard runs.count > 1 else { return runs }
+        var result: [TextRun] = [runs[0]]
+        for i in 1..<runs.count {
+            let prev = runs[i - 1]
+            let curr = runs[i]
+            let prevIsSS = prev.styles.contains(.subscript) || prev.styles.contains(.superscript)
+            let currIsSS = curr.styles.contains(.subscript) || curr.styles.contains(.superscript)
+
+            let transitioning = (prevIsSS != currIsSS) ||
+                (prevIsSS && currIsSS &&
+                 prev.styles.intersection([.subscript, .superscript]) != curr.styles.intersection([.subscript, .superscript]))
+            if transitioning,
+               let lastChar = prev.text.last, !lastChar.isWhitespace,
+               let firstChar = curr.text.first, !firstChar.isWhitespace {
+                result.append(TextRun(text: " "))
+            }
+            result.append(curr)
+        }
+        return result
     }
 
     /// Check if an element has block-level children, and collect them as ContentNodes.
     /// Recurses through inline wrappers (e.g. <span>, <a>) to find nested block content like <img>.
+    /// Skips <br> since it's already handled as "\n" in collectInlineRuns.
     private func collectBlockChildNodes(from element: Element) -> [ContentNode] {
         var nodes: [ContentNode] = []
         for child in element.getChildNodes() {
             guard let el = child as? Element else { continue }
             let tag = el.tagName().lowercased()
-            if isBlockTag(tag) {
+            if isBlockTag(tag) && tag != "br" {
                 if let node = processBlockElement(el) {
                     nodes.append(node)
                 }
@@ -476,9 +531,10 @@ class XHTMLContentParser {
                     }
                 } else {
                     // Resolve inline element's own styles/link/color before recursing
-                    let (styles, link, color, family) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
+                    let (styles, link, color, family, sizeScale) = resolveInlineStyles(for: el, inheritedStyles: [], inheritedLink: nil)
                     let runs = collectInlineRuns(from: el, inheritedStyles: styles, inheritedLink: link,
-                                                 inheritedColor: color, inheritedFontFamily: family)
+                                                 inheritedColor: color, inheritedFontFamily: family,
+                                                 inheritedFontSizeScale: sizeScale)
                     pendingRuns.append(contentsOf: runs)
                 }
             }
@@ -752,11 +808,19 @@ class XHTMLContentParser {
     // MARK: - CSS Resolution
 
     private func resolveCSSProperties(for element: Element) -> CSSProperties {
-        guard let stylesheet else { return .empty }
         let tag = element.tagName().lowercased()
         let classes = (try? element.className())?.split(separator: " ").map(String.init).filter { !$0.isEmpty } ?? []
         let id = (try? element.attr("id")).flatMap { $0.isEmpty ? nil : $0 }
-        return stylesheet.resolve(element: tag, classes: classes, id: id)
+
+        var result: CSSProperties = stylesheet?.resolve(element: tag, classes: classes, id: id) ?? .empty
+
+        // Inline style attribute overrides (highest specificity)
+        if let inlineStyle = try? element.attr("style"), !inlineStyle.isEmpty {
+            let inlineProps = CSSParser.parseDeclarations(inlineStyle)
+            result = result.merging(with: inlineProps)
+        }
+
+        return result
     }
 
     private func resolveMediaStyle(for element: Element) -> MediaStyle {
@@ -821,12 +885,24 @@ class XHTMLContentParser {
         let blockColor = cssProps.color
         let blockFontFamily = cssProps.fontFamily
 
-        if !additionalStyles.isEmpty || blockColor != nil || blockFontFamily != nil {
+        // Resolve block-level font-size into a scale factor
+        var blockFontSizeScale: CGFloat?
+        if let cssFontSize = cssProps.fontSize {
+            switch cssFontSize {
+            case .em(let v): blockFontSizeScale = v
+            case .percent(let v): blockFontSizeScale = v / 100.0
+            case .px(let v): blockFontSizeScale = v / 16.0
+            case .zero: break
+            }
+        }
+
+        if !additionalStyles.isEmpty || blockColor != nil || blockFontFamily != nil || blockFontSizeScale != nil {
             runs = runs.map { run in
                 var newRun = run
                 newRun.styles = newRun.styles.union(additionalStyles)
                 if newRun.textColor == nil, let c = blockColor { newRun.textColor = c }
                 if newRun.fontFamily == nil, let f = blockFontFamily { newRun.fontFamily = f }
+                if newRun.fontSizeScale == nil, let s = blockFontSizeScale { newRun.fontSizeScale = s }
                 return newRun
             }
         }

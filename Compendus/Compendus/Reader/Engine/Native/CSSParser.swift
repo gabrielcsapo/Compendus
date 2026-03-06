@@ -72,6 +72,7 @@ struct CSSProperties: Equatable {
     var paddingRight: CSSLength?
     var borderWidth: CSSLength?
     var fontFamily: String?
+    var fontSize: CSSLength?
 
     static let empty = CSSProperties()
 
@@ -103,6 +104,7 @@ struct CSSProperties: Equatable {
         if let v = other.paddingRight { result.paddingRight = v }
         if let v = other.borderWidth { result.borderWidth = v }
         if let v = other.fontFamily { result.fontFamily = v }
+        if let v = other.fontSize { result.fontSize = v }
         return result
     }
 }
@@ -387,10 +389,15 @@ enum CSSParser {
     }
 
     /// Parse a single selector (no commas).
-    /// For descendant selectors like "div.x p", we only use the rightmost part.
+    /// For descendant selectors like "div.x p", we use the rightmost part but
+    /// skip bare-element matches when an ancestor has a class/ID constraint,
+    /// since we cannot verify the ancestor context and misapplying display:none
+    /// to all elements of a type would silently drop content.
     private static func parseSingleSelector(_ text: String) -> CSSRule.SelectorKind? {
-        // Take the last segment of descendant selectors
-        let segments = text.split(separator: " ").map(String.init)
+        // Take the last segment of descendant selectors, filtering out combinators
+        let allSegments = text.split(separator: " ").map(String.init)
+        let combinators: Set<String> = [">", "+", "~"]
+        let segments = allSegments.filter { !combinators.contains($0) }
         guard let last = segments.last else { return nil }
 
         // Handle #id selectors
@@ -412,19 +419,41 @@ enum CSSParser {
         }
 
         // Pure element selector
-        let trimmed = last.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed: String = last.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         // Skip pseudo-selectors and complex selectors
         if trimmed.contains(":") || trimmed.contains("[") || trimmed.contains(">") ||
            trimmed.contains("+") || trimmed.contains("~") {
             return nil
         }
+
+        // For descendant selectors where an ancestor segment has a class or ID
+        // constraint, skip bare-element matches — we cannot verify the ancestor
+        // context and misapplying properties (especially display:none) to ALL
+        // elements of that type would silently drop content.
+        // e.g. ".sidebar span { display:none }" must NOT become "span { display:none }"
+        if segments.count > 1 {
+            let ancestorParts = Array(segments.dropLast())
+            var hasAncestorConstraint = false
+            for part in ancestorParts {
+                if part.contains(".") || part.contains("#") {
+                    hasAncestorConstraint = true
+                    break
+                }
+            }
+            if hasAncestorConstraint {
+                return nil
+            }
+        }
+
         return trimmed.isEmpty ? nil : .element(trimmed)
     }
 
     // MARK: - Declaration Parsing
 
     /// Parse a declaration block into CSSProperties.
-    private static func parseDeclarations(_ text: String) -> CSSProperties {
+    /// Parse a CSS declaration block (without braces) into CSSProperties.
+    /// Also used for inline style attributes.
+    static func parseDeclarations(_ text: String) -> CSSProperties {
         var props = CSSProperties()
         let declarations = text.split(separator: ";")
 
@@ -544,6 +573,9 @@ enum CSSParser {
                 parseBorderShorthand(value, into: &props)
             case "border-width":
                 if let length = parseLength(value) { props.borderWidth = length }
+
+            case "font-size":
+                if let length = parseLength(value) { props.fontSize = length }
 
             case "font-family":
                 let family = value.split(separator: ",").first?

@@ -101,14 +101,17 @@ struct TextRun {
     var link: URL?
     var textColor: UIColor?
     var fontFamily: String?
+    /// Relative font size multiplier (e.g. 0.625 for font-size: 0.625em). nil = inherit base size.
+    var fontSizeScale: CGFloat?
 
     init(text: String, styles: Set<TextStyle> = [], link: URL? = nil,
-         textColor: UIColor? = nil, fontFamily: String? = nil) {
+         textColor: UIColor? = nil, fontFamily: String? = nil, fontSizeScale: CGFloat? = nil) {
         self.text = text
         self.styles = styles
         self.link = link
         self.textColor = textColor
         self.fontFamily = fontFamily
+        self.fontSizeScale = fontSizeScale
     }
 }
 

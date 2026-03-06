@@ -1007,10 +1007,14 @@ class AttributedStringBuilder {
                 // Render cell content with proper styles
                 let cellFont = cell.isHeader ? boldFont : font
                 for run in cell.runs {
-                    let runFont = fontForRun(run, baseFont: cellFont)
+                    var effectiveCellFont = cellFont
+                    if let scale = run.fontSizeScale, scale > 0, scale != 1.0 {
+                        effectiveCellFont = cellFont.withSize(max(8, cellFont.pointSize * scale))
+                    }
+                    let runFont = fontForRun(run, baseFont: effectiveCellFont)
                     var attrs: [NSAttributedString.Key: Any] = [
                         .font: runFont,
-                        .foregroundColor: run.textColor ?? textColor,
+                        .foregroundColor: readableColor(for: run.textColor),
                         .paragraphStyle: paraStyle
                     ]
                     if run.styles.contains(.bold) || cell.isHeader {
@@ -1064,19 +1068,27 @@ class AttributedStringBuilder {
                             baseFont: UIFont, paragraphStyle: NSParagraphStyle) {
         for run in runs {
             var displayText = run.text
+
+            // Apply CSS font-size scaling
+            var effectiveBaseFont = baseFont
+            if let scale = run.fontSizeScale, scale > 0, scale != 1.0 {
+                let scaledSize = max(8, baseFont.pointSize * scale) // floor at 8pt
+                effectiveBaseFont = baseFont.withSize(scaledSize)
+            }
+
             var runFont: UIFont
 
             // Handle small-caps: uppercase text + smaller font
             if run.styles.contains(.smallCaps) {
                 displayText = displayText.uppercased()
-                let smallCapSize = baseFont.pointSize * 0.8
-                let smallCapBase = baseFont.withSize(smallCapSize)
+                let smallCapSize = effectiveBaseFont.pointSize * 0.8
+                let smallCapBase = effectiveBaseFont.withSize(smallCapSize)
                 runFont = fontForRun(run, baseFont: smallCapBase)
             } else if run.styles.contains(.uppercase) {
                 displayText = displayText.uppercased()
-                runFont = fontForRun(run, baseFont: baseFont)
+                runFont = fontForRun(run, baseFont: effectiveBaseFont)
             } else {
-                runFont = fontForRun(run, baseFont: baseFont)
+                runFont = fontForRun(run, baseFont: effectiveBaseFont)
             }
 
             // Embedded font override
@@ -1099,8 +1111,9 @@ class AttributedStringBuilder {
             ]
 
             // CSS color override (applied after default, before link override)
-            if let cssColor = run.textColor {
-                attrs[.foregroundColor] = cssColor
+            // Ensure the color is readable against the current theme background
+            if run.textColor != nil {
+                attrs[.foregroundColor] = readableColor(for: run.textColor)
             }
 
             if run.styles.contains(.strikethrough) {
@@ -1129,6 +1142,39 @@ class AttributedStringBuilder {
 
             result.append(NSAttributedString(string: displayText, attributes: attrs))
         }
+    }
+
+    // MARK: - Color Helpers
+
+    /// Returns the CSS color only if it has sufficient contrast against the theme background.
+    /// If the contrast is too low (e.g. dark text on dark background), returns the theme textColor instead.
+    private func readableColor(for cssColor: UIColor?) -> UIColor {
+        guard let cssColor else { return textColor }
+        let contrast = contrastRatio(between: cssColor, and: backgroundColor)
+        // WCAG AA large-text minimum is 3:1; use 2.5 as a lenient threshold
+        if contrast < 2.5 {
+            return textColor
+        }
+        return cssColor
+    }
+
+    /// Computes the WCAG contrast ratio between two colors (1:1 to 21:1).
+    private func contrastRatio(between c1: UIColor, and c2: UIColor) -> CGFloat {
+        let l1 = relativeLuminance(of: c1)
+        let l2 = relativeLuminance(of: c2)
+        let lighter = max(l1, l2)
+        let darker = min(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    /// Relative luminance per WCAG 2.0 (0.0 = black, 1.0 = white).
+    private func relativeLuminance(of color: UIColor) -> CGFloat {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        func linearize(_ c: CGFloat) -> CGFloat {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
     }
 
     // MARK: - Font Helpers
