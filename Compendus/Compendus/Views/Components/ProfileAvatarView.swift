@@ -13,6 +13,9 @@ struct ProfileAvatarView: View {
     let name: String
     let size: CGFloat
 
+    @State private var loadedImage: UIImage?
+    @State private var loadFailed = false
+
     /// Initialize with a Profile model and ServerConfig
     init(profile: Profile, serverConfig: ServerConfig, size: CGFloat = 44) {
         self.avatar = profile.avatar
@@ -40,21 +43,22 @@ struct ProfileAvatarView: View {
                 .frame(width: size, height: size)
 
             if let url = avatarURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        fallbackContent
-                    default:
-                        ProgressView()
-                            .controlSize(.small)
-                    }
+                if let loadedImage {
+                    Image(uiImage: loadedImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(Circle())
+                } else if loadFailed {
+                    fallbackContent
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: size, height: size)
+                        .task(id: url) {
+                            await loadAvatar(from: url)
+                        }
                 }
-                .frame(width: size, height: size)
-                .clipShape(Circle())
             } else if let avatar, !avatar.isEmpty, !avatar.hasPrefix("data/") {
                 Text(avatar)
                     .font(.system(size: size * 0.5))
@@ -68,5 +72,23 @@ struct ProfileAvatarView: View {
         Text(String(name.prefix(1).uppercased()))
             .font(.system(size: size * 0.35, weight: .semibold))
             .foregroundStyle(.secondary)
+    }
+
+    private func loadAvatar(from url: URL) async {
+        let session = URLSession(
+            configuration: .default,
+            delegate: LocalNetworkSessionDelegate.shared,
+            delegateQueue: nil
+        )
+        do {
+            let (data, _) = try await session.data(from: url)
+            if let image = UIImage(data: data) {
+                loadedImage = image
+            } else {
+                loadFailed = true
+            }
+        } catch {
+            loadFailed = true
+        }
     }
 }

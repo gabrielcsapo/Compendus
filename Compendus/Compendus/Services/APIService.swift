@@ -47,7 +47,7 @@ class APIService {
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 120
         configuration.waitsForConnectivity = true
-        self.session = URLSession(configuration: configuration)
+        self.session = URLSession(configuration: configuration, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
     }
 
     // MARK: - Books

@@ -205,7 +205,8 @@ class ServerConfig {
         guard let url = apiURL("/api/books?limit=1") else { return false }
 
         do {
-            let (_, response) = try await URLSession.shared.data(from: url)
+            let session = URLSession(configuration: .default, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+            let (_, response) = try await session.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse else { return false }
             return (200...299).contains(httpResponse.statusCode)
         } catch {

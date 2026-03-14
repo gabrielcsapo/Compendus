@@ -18,7 +18,7 @@ class ImageCache {
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
-        return URLSession(configuration: config)
+        return URLSession(configuration: config, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
     }()
 
     /// Cover cache directory URL

@@ -219,7 +219,7 @@ class DownloadManager: NSObject {
 
         // EPUB version downloads use a simple foreground data task since they're
         // typically small and the user is actively waiting in the reader
-        let (data, _) = try await URLSession.shared.data(from: downloadURL)
+        let (data, _) = try await apiService.session.data(from: downloadURL)
 
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
@@ -627,6 +627,16 @@ extension DownloadManager: URLSessionDownloadDelegate {
         DispatchQueue.main.async {
             self.activeDownloads[bookId]?.state = .failed(error)
             HapticFeedback.error()
+        }
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let serverTrust = challenge.protectionSpace.serverTrust,
+           LocalNetworkSessionDelegate.isLocalNetworkHost(challenge.protectionSpace.host) {
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
         }
     }
 
