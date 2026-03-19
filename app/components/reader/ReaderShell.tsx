@@ -9,6 +9,7 @@ import { ReaderSidebar } from "./ReaderSidebar";
 import { ReaderSettings } from "./ReaderSettings";
 import { ReadAloudBar } from "./ReadAloudBar";
 import { PageJumpSlider } from "./PageJumpSlider";
+import { PdfReaderView, type PdfReaderViewHandle } from "./PdfReaderView";
 import { THEMES } from "@/lib/reader/settings";
 
 interface ReaderShellProps {
@@ -16,6 +17,7 @@ interface ReaderShellProps {
   initialPosition?: number;
   returnUrl?: string;
   formatOverride?: string;
+  bookFormat?: string;
 }
 
 /**
@@ -26,16 +28,42 @@ export function ReaderShell({
   initialPosition = 0,
   returnUrl = "/",
   formatOverride: formatOverrideProp,
+  bookFormat,
 }: ReaderShellProps) {
   const { navigate } = useRouter();
   const [searchParams] = useSearchParams();
   const formatOverride = formatOverrideProp || searchParams.get("format") || undefined;
 
+  // Native PDF mode: when the book is a PDF and no format override (epub) is requested
+  const isNativePdf = bookFormat === "pdf" && !formatOverride;
+
+  // For native PDF, read ?page=N from URL so refresh lands on the right page.
+  // This is read once at mount; the URL is kept up-to-date as the page changes below.
+  const urlPageParam = isNativePdf ? parseInt(searchParams.get("page") || "0", 10) : 0;
+  const pdfInitialPage = urlPageParam > 0 ? urlPageParam : undefined;
+
   const handleClose = useCallback(() => {
     navigate(returnUrl);
   }, [navigate, returnUrl]);
 
-  const reader = useReader({ bookId, initialPosition, formatOverride });
+  const reader = useReader({ bookId, initialPosition, formatOverride, nativePdfMode: isNativePdf });
+  const pdfViewerRef = useRef<PdfReaderViewHandle | null>(null);
+
+  // Keep ?page=N in the URL in sync with the current page for native PDF.
+  // This lets refresh (and back/forward) restore the exact page.
+  useEffect(() => {
+    if (!isNativePdf || reader.currentPage <= 0) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("page", String(reader.currentPage));
+    history.replaceState(null, "", `${window.location.pathname}?${params}`);
+  }, [isNativePdf, reader.currentPage]);
+
+  // Sync reader page → PDF viewer when navigation comes from toolbar/slider/TOC
+  useEffect(() => {
+    if (isNativePdf && pdfViewerRef.current) {
+      pdfViewerRef.current.goToPage(reader.currentPage);
+    }
+  }, [isNativePdf, reader.currentPage]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"toc" | "bookmarks" | "highlights" | "search">(
     "toc",
@@ -346,7 +374,10 @@ export function ReaderShell({
           title={reader.bookInfo?.title || ""}
           currentPage={reader.currentPage}
           totalPages={reader.totalPages}
-          onGoToPage={reader.goToPage}
+          onGoToPage={(page) => {
+            reader.goToPage(page);
+            pdfViewerRef.current?.goToPage(page);
+          }}
           onClose={handleClose}
           onToggleSidebar={() => toggleSidebar()}
           onToggleSettings={() => setSettingsOpen((prev) => !prev)}
@@ -389,43 +420,68 @@ export function ReaderShell({
 
         {/* Content area with viewport measurement */}
         <div ref={reader.viewport.containerRef} className="flex-1 relative overflow-hidden">
-          <ReaderContent
-            content={reader.pageContent}
-            rightContent={reader.rightPageContent}
-            settings={reader.settings}
-            isSpreadMode={reader.isSpreadMode}
-            isJumpNavigation={reader.isJumpNavigation}
-            onPrevPage={handlePrevPage}
-            onNextPage={handleNextPage}
-            onCenterTap={handleCenterTap}
-            bookId={reader.bookInfo?.id}
-            hasTranscript={reader.bookInfo?.hasTranscript}
-            formatOverride={formatOverride}
-            fullTextContent={reader.fullTextContent}
-            textPageIndex={reader.textPageIndex}
-            onTextTotalPagesChange={reader.setClientTotalPages}
-            onChapterChange={reader.setChapterTitle}
-            onNavigateToPosition={(pos) => reader.goToPosition(pos)}
-            audioChapters={reader.bookInfo?.chapters}
-            audioDuration={reader.bookInfo?.duration}
-            highlights={reader.highlights}
-            onAddHighlight={reader.addHighlight}
-            onRemoveHighlight={reader.removeHighlight}
-            onUpdateHighlightColor={reader.updateHighlightColor}
-            onUpdateHighlightNote={reader.updateHighlightNote}
-            textContentRef={textContentRef}
-          />
-
-          {/* Read Aloud bar */}
-          {readAloudActive && isTextContent && reader.pageContent?.html && (
-            <ReadAloudBar
-              htmlContent={reader.pageContent.html}
-              contentRef={textContentRef}
-              onPageComplete={() => reader.nextPage()}
-              isActive={readAloudActive}
-              onClose={() => setReadAloudActive(false)}
+          {isNativePdf ? (
+            <PdfReaderView
+              ref={pdfViewerRef}
+              bookId={bookId}
+              initialPage={pdfInitialPage ?? reader.currentPage}
+              onPageChange={(page, total) => {
+                reader.goToPage(page);
+                // Set total pages from PDF.js so toolbar is accurate
+                if (reader.totalPages !== total) {
+                  reader.setClientTotalPages(total);
+                }
+              }}
+              onCenterTap={handleCenterTap}
+              className="h-full"
+              highlights={reader.highlights}
+              onAddHighlight={reader.addHighlight}
+              onRemoveHighlight={reader.removeHighlight}
+              onUpdateHighlightColor={reader.updateHighlightColor}
+              onUpdateHighlightNote={reader.updateHighlightNote}
               theme={theme}
             />
+          ) : (
+            <>
+              <ReaderContent
+                content={reader.pageContent}
+                rightContent={reader.rightPageContent}
+                settings={reader.settings}
+                isSpreadMode={reader.isSpreadMode}
+                isJumpNavigation={reader.isJumpNavigation}
+                onPrevPage={handlePrevPage}
+                onNextPage={handleNextPage}
+                onCenterTap={handleCenterTap}
+                bookId={reader.bookInfo?.id}
+                hasTranscript={reader.bookInfo?.hasTranscript}
+                formatOverride={formatOverride}
+                fullTextContent={reader.fullTextContent}
+                textPageIndex={reader.textPageIndex}
+                onTextTotalPagesChange={reader.setClientTotalPages}
+                onChapterChange={reader.setChapterTitle}
+                onNavigateToPosition={(pos) => reader.goToPosition(pos)}
+                audioChapters={reader.bookInfo?.chapters}
+                audioDuration={reader.bookInfo?.duration}
+                highlights={reader.highlights}
+                onAddHighlight={reader.addHighlight}
+                onRemoveHighlight={reader.removeHighlight}
+                onUpdateHighlightColor={reader.updateHighlightColor}
+                onUpdateHighlightNote={reader.updateHighlightNote}
+                textContentRef={textContentRef}
+              />
+
+              {/* Read Aloud bar */}
+              {readAloudActive && isTextContent && reader.pageContent?.html && (
+                <ReadAloudBar
+                  htmlContent={reader.pageContent.html}
+                  contentRef={textContentRef}
+                  onPageComplete={() => reader.nextPage()}
+                  isActive={readAloudActive}
+                  onClose={() => setReadAloudActive(false)}
+                  theme={theme}
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -436,6 +492,7 @@ export function ReaderShell({
           settings={reader.settings}
           onUpdateSetting={reader.updateGlobalSetting}
           theme={theme}
+          contentType={isNativePdf ? "pdf" : "epub"}
         />
       </div>
 
@@ -444,7 +501,10 @@ export function ReaderShell({
         currentPage={reader.currentPage}
         totalPages={reader.totalPages}
         chapterTitle={reader.pageContent?.chapterTitle}
-        onJump={(page) => reader.goToPage(page)}
+        onJump={(page) => {
+          reader.goToPage(page);
+          pdfViewerRef.current?.goToPage(page);
+        }}
         theme={theme}
         visible={showOverlay}
       />

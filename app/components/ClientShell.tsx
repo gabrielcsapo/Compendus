@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Link, useNavigation, useRouter, useLocation } from "react-flight-router/client";
 import { SearchCommandPalette } from "./SearchCommandPalette";
 import { DarkModeToggle } from "./DarkModeToggle";
@@ -224,9 +224,24 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
 
   const isAdmin = profile?.isAdmin ?? true; // Default to showing admin UI when no profile system
 
+  const headerRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const update = () =>
+      document.documentElement.style.setProperty("--header-height", `${header.offsetHeight}px`);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <>
-      <header className="sticky top-0 z-40 backdrop-blur-md bg-background/80 border-b border-border">
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-40 backdrop-blur-md bg-background/80 border-b border-border"
+      >
         <nav className="container px-6 py-4 mx-auto">
           <ul className="flex gap-2 flex-wrap items-center">
             <li className="font-bold text-xl mr-4">

@@ -314,15 +314,21 @@ export function HighlightEditToolbar({
             key={color.value}
             onClick={(e) => {
               e.stopPropagation();
-              onChangeColor(highlight.id, color.value);
+              if (highlight.color === color.value) {
+                onDelete(highlight.id);
+              } else {
+                onChangeColor(highlight.id, color.value);
+              }
             }}
             className="w-7 h-7 rounded-full border-2 hover:scale-110 transition-all"
             style={{
               backgroundColor: color.value,
               borderColor: highlight.color === color.value ? theme.foreground : "transparent",
             }}
-            aria-label={`Change to ${color.name}`}
-            title={color.name}
+            aria-label={
+              highlight.color === color.value ? `Remove highlight` : `Change to ${color.name}`
+            }
+            title={highlight.color === color.value ? "Remove highlight" : color.name}
           />
         ))}
 

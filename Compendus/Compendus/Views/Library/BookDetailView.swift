@@ -31,6 +31,7 @@ struct BookDetailView: View {
     @State private var isDescriptionExpanded = false
 
     @State private var readAsEpub = false
+    @State private var isDownloadingEpub = false
     @State private var isLoadingAudiobook = false
     @State private var relatedBooks: [Book] = []
     @State private var isLoadingRelated = true
@@ -54,9 +55,12 @@ struct BookDetailView: View {
                     metadataRow
                         .padding(.top, 12)
 
-                    actionButton
-                        .padding(.top, 20)
-                        .padding(.horizontal, 20)
+                    VStack(spacing: 12) {
+                        actionButton
+                        epubReadingOption
+                    }
+                    .padding(.top, 20)
+                    .padding(.horizontal, 20)
 
                     if let description = displayBook.description, !description.isEmpty {
                         descriptionSection(description)
@@ -281,6 +285,60 @@ struct BookDetailView: View {
                 isDownloading = false
             }
         )
+    }
+
+    /// Secondary option shown for downloaded PDFs when the server has a converted EPUB available.
+    @ViewBuilder
+    private var epubReadingOption: some View {
+        let isPdf = book.format.lowercased() == "pdf"
+        let serverHasEpub = book.hasEpubVersion
+        if isPdf && isDownloaded && serverHasEpub, let downloaded = downloadedBook {
+            if downloaded.hasEpubVersion {
+                // EPUB already downloaded locally — offer direct read
+                Button {
+                    readAsEpub = true
+                    bookToRead = downloaded
+                } label: {
+                    Label(
+                        "Read as EPUB",
+                        systemImage: "doc.text"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            } else {
+                // EPUB not downloaded yet — offer download + read
+                Button {
+                    isDownloadingEpub = true
+                    Task {
+                        do {
+                            try await downloadManager.downloadEpubVersion(bookId: book.id, modelContext: modelContext)
+                            // Refresh downloaded state so hasEpubVersion reflects the new file
+                            checkIfDownloaded()
+                            if let refreshed = downloadedBook {
+                                readAsEpub = true
+                                bookToRead = refreshed
+                            }
+                        } catch {
+                            // Silently fail — user can retry
+                        }
+                        isDownloadingEpub = false
+                    }
+                } label: {
+                    if isDownloadingEpub {
+                        Label("Downloading EPUB…", systemImage: "arrow.down.doc")
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Download & Read as EPUB", systemImage: "arrow.down.doc")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(isDownloadingEpub)
+            }
+        }
     }
 
     private var downloadButtonState: AnimatedDownloadButton.State {

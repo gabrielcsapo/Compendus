@@ -13,6 +13,7 @@ export default async function BookReader({ params }: { params?: Record<string, s
       bookId={book.id}
       initialPosition={book.readingProgress || 0}
       returnUrl={`/book/${book.id}`}
+      bookFormat={book.format}
     />
   );
 }

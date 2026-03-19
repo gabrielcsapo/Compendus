@@ -45,8 +45,11 @@ export default async function BookDetail({ params }: { params?: Record<string, s
     <main className="max-w-5xl my-8 px-4 sm:px-6 mx-auto">
       {heroGradient && (
         <div
-          className="absolute inset-x-0 top-0 h-[420px] -z-10 pointer-events-none"
-          style={{ background: heroGradient }}
+          className="absolute inset-x-0 h-[420px] -z-10 pointer-events-none"
+          style={{
+            top: "var(--header-height, 64px)",
+            background: heroGradient,
+          }}
         />
       )}
       <div className="mb-8">
@@ -71,9 +74,17 @@ export default async function BookDetail({ params }: { params?: Record<string, s
         </Link>
       </div>
 
+      {/* Mobile-only primary CTA — visible before scrolling to the cover */}
+      <div className="md:hidden mb-4">
+        <PrimaryAction book={book} progressPercent={progressPercent} />
+      </div>
+
       <div className="grid md:grid-cols-[280px_1fr] gap-6 md:gap-8 items-start">
         {/* Cover & Actions */}
-        <aside className="space-y-4 md:sticky md:top-8 md:self-start max-w-xs mx-auto md:max-w-none md:mx-0">
+        <aside
+          className="space-y-4 md:sticky md:self-start max-w-xs mx-auto md:max-w-none md:mx-0"
+          style={{ top: "calc(var(--header-height, 64px) + 1.5rem)" }}
+        >
           {/* Cover */}
           <div>
             <div className="shadow-paper rounded-xl overflow-hidden">
@@ -85,11 +96,6 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 updatedAt={book.updatedAt}
               />
             </div>
-            <p className="text-xs text-foreground-muted text-center mt-2">
-              Drop image or{" "}
-              <kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">⌘/Ctrl</kbd>+
-              <kbd className="px-1 py-0.5 bg-surface-elevated rounded text-[10px]">V</kbd> to paste
-            </p>
           </div>
 
           {/* Progress - show prominently if reading */}
@@ -110,44 +116,15 @@ export default async function BookDetail({ params }: { params?: Record<string, s
 
           {/* Primary Actions */}
           <div className="space-y-2">
-            {["pdf", "mobi", "azw3"].includes(book.format) ? (
+            <PrimaryAction book={book} progressPercent={progressPercent} />
+            {/* For PDF books: offer EPUB as an optional better-experience alternative */}
+            {book.format === "pdf" && (
               <ConvertToEpubButton
                 bookId={book.id}
                 hasEpub={!!book.convertedEpubPath}
                 progressPercent={progressPercent}
+                variant="secondary"
               />
-            ) : (
-              <Link
-                to={`/book/${book.id}/read`}
-                className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
-              >
-                {["m4b", "m4a", "mp3"].includes(book.format) ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z"
-                    />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                    />
-                  </svg>
-                )}
-                {["m4b", "m4a", "mp3"].includes(book.format)
-                  ? progressPercent > 0
-                    ? "Continue Listening"
-                    : "Start Listening"
-                  : progressPercent > 0
-                    ? "Continue Reading"
-                    : "Start Reading"}
-              </Link>
             )}
             <a
               href={`/books/${book.id}.${book.format}`}
@@ -554,6 +531,59 @@ function SectionSkeleton({ title }: { title: string }) {
         <div className="h-4 bg-surface-elevated rounded w-1/2" />
       </div>
     </section>
+  );
+}
+
+function PrimaryAction({
+  book,
+  progressPercent,
+}: {
+  book: Awaited<ReturnType<typeof getBook>>;
+  progressPercent: number;
+}) {
+  if (!book) return null;
+  if (["mobi", "azw3"].includes(book.format)) {
+    return (
+      <ConvertToEpubButton
+        bookId={book.id}
+        hasEpub={!!book.convertedEpubPath}
+        progressPercent={progressPercent}
+      />
+    );
+  }
+  const isAudio = ["m4b", "m4a", "mp3"].includes(book.format);
+  return (
+    <Link
+      to={`/book/${book.id}/read`}
+      className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+    >
+      {isAudio ? (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707A1 1 0 0112 5v14a1 1 0 01-1.707.707L5.586 15z"
+          />
+        </svg>
+      ) : (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+          />
+        </svg>
+      )}
+      {isAudio
+        ? progressPercent > 0
+          ? "Continue Listening"
+          : "Start Listening"
+        : progressPercent > 0
+          ? "Continue Reading"
+          : "Start Reading"}
+    </Link>
   );
 }
 

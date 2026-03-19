@@ -8,6 +8,8 @@ interface ConvertToEpubButtonProps {
   bookId: string;
   hasEpub: boolean;
   progressPercent?: number;
+  /** "primary" (default) shows as main CTA; "secondary" shows as an optional alternative */
+  variant?: "primary" | "secondary";
 }
 
 type ConversionState =
@@ -21,6 +23,7 @@ export function ConvertToEpubButton({
   bookId,
   hasEpub,
   progressPercent = 0,
+  variant = "primary",
 }: ConvertToEpubButtonProps) {
   const { navigate } = useRouter();
   const [state, setState] = useState<ConversionState>(
@@ -110,14 +113,23 @@ export function ConvertToEpubButton({
     }
   };
 
-  const readLabel = progressPercent > 0 ? "Continue Reading" : "Start Reading";
+  const readLabel =
+    variant === "secondary"
+      ? progressPercent > 0
+        ? "Continue Reading as EPUB"
+        : "Read as EPUB"
+      : progressPercent > 0
+        ? "Continue Reading"
+        : "Start Reading";
+  const convertLabel = variant === "secondary" ? "Convert to EPUB" : readLabel;
+  const btnStyle = variant === "secondary" ? buttonStyles.secondary : buttonStyles.primary;
 
   // Already converted — just a read link
   if (state.type === "completed") {
     return (
       <Link
         to={`/book/${bookId}/read?format=epub`}
-        className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+        className={`${buttonStyles.base} ${btnStyle} w-full text-center justify-center gap-2`}
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -159,7 +171,7 @@ export function ConvertToEpubButton({
         </div>
         <button
           onClick={() => startConversion()}
-          className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+          className={`${buttonStyles.base} ${btnStyle} w-full text-center justify-center gap-2`}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -169,22 +181,22 @@ export function ConvertToEpubButton({
               d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
             />
           </svg>
-          Retry Reading
+          Retry Conversion
         </button>
       </div>
     );
   }
 
-  // Idle / Starting — primary read button that triggers conversion
+  // Idle / Starting — button that triggers conversion
   return (
     <button
       onClick={() => startConversion()}
       disabled={state.type === "starting"}
-      className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+      className={`${buttonStyles.base} ${btnStyle} w-full text-center justify-center gap-2`}
     >
       {state.type === "starting" ? (
         <>
-          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
           <span>Converting...</span>
         </>
       ) : (
@@ -197,7 +209,7 @@ export function ConvertToEpubButton({
               d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
             />
           </svg>
-          <span>{readLabel}</span>
+          <span>{convertLabel}</span>
         </>
       )}
     </button>

@@ -27,6 +27,8 @@ interface ReaderSettingsProps {
     muted: string;
     accent: string;
   };
+  /** Determines which settings sections are shown */
+  contentType?: "epub" | "pdf" | "comic" | "audio";
 }
 
 export function ReaderSettings({
@@ -35,7 +37,12 @@ export function ReaderSettings({
   settings,
   onUpdateSetting,
   theme,
+  contentType = "epub",
 }: ReaderSettingsProps) {
+  const isEpub = contentType === "epub";
+  const isPdf = contentType === "pdf";
+  const isComic = contentType === "comic";
+  const isAudio = contentType === "audio";
   if (!isOpen) return null;
 
   return (
@@ -72,7 +79,7 @@ export function ReaderSettings({
 
         {/* Settings content */}
         <div className="flex-1 p-4 space-y-6">
-          {/* Theme */}
+          {/* Theme — always shown */}
           <SettingSection title="Theme">
             <div className="grid grid-cols-4 gap-2">
               {(Object.keys(THEMES) as ThemeName[]).map((themeName) => (
@@ -100,249 +107,271 @@ export function ReaderSettings({
             </div>
           </SettingSection>
 
-          {/* Font */}
-          <SettingSection title="Font">
-            <div className="space-y-2">
-              {(Object.keys(FONTS) as FontFamily[]).map((fontKey) => (
+          {/* Font — EPUB / text only */}
+          {isEpub && (
+            <SettingSection title="Font">
+              <div className="space-y-2">
+                {(Object.keys(FONTS) as FontFamily[]).map((fontKey) => (
+                  <button
+                    key={fontKey}
+                    onClick={() => onUpdateSetting("fontFamily", fontKey)}
+                    className="w-full text-left px-3 py-2 rounded-md border transition-colors"
+                    style={{
+                      fontFamily: FONTS[fontKey].value,
+                      borderColor:
+                        settings.fontFamily === fontKey ? theme.accent : `${theme.foreground}20`,
+                      backgroundColor:
+                        settings.fontFamily === fontKey ? `${theme.accent}10` : "transparent",
+                    }}
+                  >
+                    <div className="font-medium">{FONTS[fontKey].name}</div>
+                    <div className="text-xs" style={{ color: theme.muted }}>
+                      {FONTS[fontKey].description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Font Size — EPUB only */}
+          {isEpub && (
+            <SettingSection title={`Font Size: ${settings.fontSize}px`}>
+              <input
+                type="range"
+                min={SETTINGS_CONSTRAINTS.fontSize.min}
+                max={SETTINGS_CONSTRAINTS.fontSize.max}
+                step={SETTINGS_CONSTRAINTS.fontSize.step}
+                value={settings.fontSize}
+                onChange={(e) => onUpdateSetting("fontSize", parseInt(e.target.value, 10))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
+                <span>{SETTINGS_CONSTRAINTS.fontSize.min}px</span>
+                <span>{SETTINGS_CONSTRAINTS.fontSize.max}px</span>
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Line Height — EPUB only */}
+          {isEpub && (
+            <SettingSection title={`Line Height: ${settings.lineHeight}`}>
+              <input
+                type="range"
+                min={SETTINGS_CONSTRAINTS.lineHeight.min}
+                max={SETTINGS_CONSTRAINTS.lineHeight.max}
+                step={SETTINGS_CONSTRAINTS.lineHeight.step}
+                value={settings.lineHeight}
+                onChange={(e) => onUpdateSetting("lineHeight", parseFloat(e.target.value))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
+                <span>Tight</span>
+                <span>Loose</span>
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Max Width — EPUB only */}
+          {isEpub && (
+            <SettingSection title={`Max Width: ${settings.maxWidth}px`}>
+              <input
+                type="range"
+                min={SETTINGS_CONSTRAINTS.maxWidth.min}
+                max={SETTINGS_CONSTRAINTS.maxWidth.max}
+                step={SETTINGS_CONSTRAINTS.maxWidth.step}
+                value={settings.maxWidth}
+                onChange={(e) => onUpdateSetting("maxWidth", parseInt(e.target.value, 10))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
+                <span>Narrow</span>
+                <span>Wide</span>
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Text Align — EPUB only */}
+          {isEpub && (
+            <SettingSection title="Text Alignment">
+              <div className="flex gap-2">
                 <button
-                  key={fontKey}
-                  onClick={() => onUpdateSetting("fontFamily", fontKey)}
-                  className="w-full text-left px-3 py-2 rounded-md border transition-colors"
+                  onClick={() => onUpdateSetting("textAlign", "left")}
+                  className="flex-1 px-3 py-2 rounded-md border transition-colors"
                   style={{
-                    fontFamily: FONTS[fontKey].value,
                     borderColor:
-                      settings.fontFamily === fontKey ? theme.accent : `${theme.foreground}20`,
+                      settings.textAlign === "left" ? theme.accent : `${theme.foreground}20`,
                     backgroundColor:
-                      settings.fontFamily === fontKey ? `${theme.accent}10` : "transparent",
+                      settings.textAlign === "left" ? `${theme.accent}10` : "transparent",
                   }}
                 >
-                  <div className="font-medium">{FONTS[fontKey].name}</div>
-                  <div className="text-xs" style={{ color: theme.muted }}>
-                    {FONTS[fontKey].description}
-                  </div>
+                  Left
                 </button>
-              ))}
-            </div>
-          </SettingSection>
-
-          {/* Font Size */}
-          <SettingSection title={`Font Size: ${settings.fontSize}px`}>
-            <input
-              type="range"
-              min={SETTINGS_CONSTRAINTS.fontSize.min}
-              max={SETTINGS_CONSTRAINTS.fontSize.max}
-              step={SETTINGS_CONSTRAINTS.fontSize.step}
-              value={settings.fontSize}
-              onChange={(e) => onUpdateSetting("fontSize", parseInt(e.target.value, 10))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
-              <span>{SETTINGS_CONSTRAINTS.fontSize.min}px</span>
-              <span>{SETTINGS_CONSTRAINTS.fontSize.max}px</span>
-            </div>
-          </SettingSection>
-
-          {/* Line Height */}
-          <SettingSection title={`Line Height: ${settings.lineHeight}`}>
-            <input
-              type="range"
-              min={SETTINGS_CONSTRAINTS.lineHeight.min}
-              max={SETTINGS_CONSTRAINTS.lineHeight.max}
-              step={SETTINGS_CONSTRAINTS.lineHeight.step}
-              value={settings.lineHeight}
-              onChange={(e) => onUpdateSetting("lineHeight", parseFloat(e.target.value))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
-              <span>Tight</span>
-              <span>Loose</span>
-            </div>
-          </SettingSection>
-
-          {/* Max Width */}
-          <SettingSection title={`Max Width: ${settings.maxWidth}px`}>
-            <input
-              type="range"
-              min={SETTINGS_CONSTRAINTS.maxWidth.min}
-              max={SETTINGS_CONSTRAINTS.maxWidth.max}
-              step={SETTINGS_CONSTRAINTS.maxWidth.step}
-              value={settings.maxWidth}
-              onChange={(e) => onUpdateSetting("maxWidth", parseInt(e.target.value, 10))}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs" style={{ color: theme.muted }}>
-              <span>Narrow</span>
-              <span>Wide</span>
-            </div>
-          </SettingSection>
-
-          {/* Text Align */}
-          <SettingSection title="Text Alignment">
-            <div className="flex gap-2">
-              <button
-                onClick={() => onUpdateSetting("textAlign", "left")}
-                className="flex-1 px-3 py-2 rounded-md border transition-colors"
-                style={{
-                  borderColor:
-                    settings.textAlign === "left" ? theme.accent : `${theme.foreground}20`,
-                  backgroundColor:
-                    settings.textAlign === "left" ? `${theme.accent}10` : "transparent",
-                }}
-              >
-                Left
-              </button>
-              <button
-                onClick={() => onUpdateSetting("textAlign", "justify")}
-                className="flex-1 px-3 py-2 rounded-md border transition-colors"
-                style={{
-                  borderColor:
-                    settings.textAlign === "justify" ? theme.accent : `${theme.foreground}20`,
-                  backgroundColor:
-                    settings.textAlign === "justify" ? `${theme.accent}10` : "transparent",
-                }}
-              >
-                Justify
-              </button>
-            </div>
-          </SettingSection>
-
-          {/* Publisher Styles */}
-          <SettingSection title="Publisher Styles">
-            <button
-              onClick={() => onUpdateSetting("usePublisherStyles", !settings.usePublisherStyles)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-md border transition-colors"
-              style={{
-                borderColor: settings.usePublisherStyles ? theme.accent : `${theme.foreground}20`,
-                backgroundColor: settings.usePublisherStyles ? `${theme.accent}10` : "transparent",
-              }}
-            >
-              <div className="text-left">
-                <div className="font-medium">Use EPUB Styles</div>
-                <div className="text-xs" style={{ color: theme.muted }}>
-                  Apply the book's own CSS formatting
-                </div>
-              </div>
-              <div
-                className="w-10 h-6 rounded-full relative transition-colors"
-                style={{
-                  backgroundColor: settings.usePublisherStyles
-                    ? theme.accent
-                    : `${theme.foreground}30`,
-                }}
-              >
-                <div
-                  className="w-4 h-4 rounded-full bg-white absolute top-1 transition-all"
+                <button
+                  onClick={() => onUpdateSetting("textAlign", "justify")}
+                  className="flex-1 px-3 py-2 rounded-md border transition-colors"
                   style={{
-                    left: settings.usePublisherStyles ? "22px" : "4px",
+                    borderColor:
+                      settings.textAlign === "justify" ? theme.accent : `${theme.foreground}20`,
+                    backgroundColor:
+                      settings.textAlign === "justify" ? `${theme.accent}10` : "transparent",
                   }}
-                />
+                >
+                  Justify
+                </button>
               </div>
-            </button>
-          </SettingSection>
+            </SettingSection>
+          )}
 
-          {/* Page Layout */}
-          <SettingSection title="Page Layout">
-            <div className="space-y-2">
-              {(["single", "spread", "auto"] as PdfPageLayout[]).map((mode) => {
-                const labels: Record<PdfPageLayout, { name: string; desc: string }> = {
-                  single: { name: "Single Page", desc: "Show one page at a time" },
-                  spread: { name: "Two-Page Spread", desc: "Show two pages side by side" },
-                  auto: { name: "Auto", desc: "Single on mobile, spread on desktop" },
-                };
-                return (
+          {/* Publisher Styles — EPUB only */}
+          {isEpub && (
+            <SettingSection title="Publisher Styles">
+              <button
+                onClick={() => onUpdateSetting("usePublisherStyles", !settings.usePublisherStyles)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-md border transition-colors"
+                style={{
+                  borderColor: settings.usePublisherStyles ? theme.accent : `${theme.foreground}20`,
+                  backgroundColor: settings.usePublisherStyles
+                    ? `${theme.accent}10`
+                    : "transparent",
+                }}
+              >
+                <div className="text-left">
+                  <div className="font-medium">Use EPUB Styles</div>
+                  <div className="text-xs" style={{ color: theme.muted }}>
+                    Apply the book's own CSS formatting
+                  </div>
+                </div>
+                <div
+                  className="w-10 h-6 rounded-full relative transition-colors"
+                  style={{
+                    backgroundColor: settings.usePublisherStyles
+                      ? theme.accent
+                      : `${theme.foreground}30`,
+                  }}
+                >
+                  <div
+                    className="w-4 h-4 rounded-full bg-white absolute top-1 transition-all"
+                    style={{
+                      left: settings.usePublisherStyles ? "22px" : "4px",
+                    }}
+                  />
+                </div>
+              </button>
+            </SettingSection>
+          )}
+
+          {/* Page Layout — PDF (server-rendered) only; native PDF viewer handles single page */}
+          {!isPdf && !isComic && !isAudio && (
+            <SettingSection title="Page Layout">
+              <div className="space-y-2">
+                {(["single", "spread", "auto"] as PdfPageLayout[]).map((mode) => {
+                  const labels: Record<PdfPageLayout, { name: string; desc: string }> = {
+                    single: { name: "Single Page", desc: "Show one page at a time" },
+                    spread: { name: "Two-Page Spread", desc: "Show two pages side by side" },
+                    auto: { name: "Auto", desc: "Single on mobile, spread on desktop" },
+                  };
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => onUpdateSetting("pdfPageLayout", mode)}
+                      className="w-full text-left px-3 py-2 rounded-md border transition-colors"
+                      style={{
+                        borderColor:
+                          settings.pdfPageLayout === mode ? theme.accent : `${theme.foreground}20`,
+                        backgroundColor:
+                          settings.pdfPageLayout === mode ? `${theme.accent}10` : "transparent",
+                      }}
+                    >
+                      <div className="font-medium">{labels[mode].name}</div>
+                      <div className="text-xs" style={{ color: theme.muted }}>
+                        {labels[mode].desc}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Comic Fit Mode — comics only */}
+          {isComic && (
+            <SettingSection title="Comic Fit Mode">
+              <div className="space-y-2">
+                {(Object.keys(COMIC_FIT_MODES) as ComicFitMode[]).map((mode) => (
                   <button
                     key={mode}
-                    onClick={() => onUpdateSetting("pdfPageLayout", mode)}
+                    onClick={() => onUpdateSetting("comicFitMode", mode)}
                     className="w-full text-left px-3 py-2 rounded-md border transition-colors"
                     style={{
                       borderColor:
-                        settings.pdfPageLayout === mode ? theme.accent : `${theme.foreground}20`,
+                        settings.comicFitMode === mode ? theme.accent : `${theme.foreground}20`,
                       backgroundColor:
-                        settings.pdfPageLayout === mode ? `${theme.accent}10` : "transparent",
+                        settings.comicFitMode === mode ? `${theme.accent}10` : "transparent",
                     }}
                   >
-                    <div className="font-medium">{labels[mode].name}</div>
+                    <div className="font-medium">{COMIC_FIT_MODES[mode].name}</div>
                     <div className="text-xs" style={{ color: theme.muted }}>
-                      {labels[mode].desc}
+                      {COMIC_FIT_MODES[mode].description}
                     </div>
                   </button>
-                );
-              })}
-            </div>
-          </SettingSection>
+                ))}
+              </div>
+            </SettingSection>
+          )}
 
-          {/* Comic Fit Mode */}
-          <SettingSection title="Comic Fit Mode">
-            <div className="space-y-2">
-              {(Object.keys(COMIC_FIT_MODES) as ComicFitMode[]).map((mode) => (
+          {/* Reading Direction — comics only */}
+          {isComic && (
+            <SettingSection title="Reading Direction">
+              <div className="flex gap-2">
                 <button
-                  key={mode}
-                  onClick={() => onUpdateSetting("comicFitMode", mode)}
-                  className="w-full text-left px-3 py-2 rounded-md border transition-colors"
+                  onClick={() => onUpdateSetting("comicRtl", false)}
+                  className="flex-1 px-3 py-2 rounded-md border transition-colors"
                   style={{
-                    borderColor:
-                      settings.comicFitMode === mode ? theme.accent : `${theme.foreground}20`,
-                    backgroundColor:
-                      settings.comicFitMode === mode ? `${theme.accent}10` : "transparent",
+                    borderColor: !settings.comicRtl ? theme.accent : `${theme.foreground}20`,
+                    backgroundColor: !settings.comicRtl ? `${theme.accent}10` : "transparent",
                   }}
                 >
-                  <div className="font-medium">{COMIC_FIT_MODES[mode].name}</div>
-                  <div className="text-xs" style={{ color: theme.muted }}>
-                    {COMIC_FIT_MODES[mode].description}
-                  </div>
+                  Left to Right
                 </button>
-              ))}
-            </div>
-          </SettingSection>
-
-          {/* Manga Mode */}
-          <SettingSection title="Reading Direction">
-            <div className="flex gap-2">
-              <button
-                onClick={() => onUpdateSetting("comicRtl", false)}
-                className="flex-1 px-3 py-2 rounded-md border transition-colors"
-                style={{
-                  borderColor: !settings.comicRtl ? theme.accent : `${theme.foreground}20`,
-                  backgroundColor: !settings.comicRtl ? `${theme.accent}10` : "transparent",
-                }}
-              >
-                Left to Right
-              </button>
-              <button
-                onClick={() => onUpdateSetting("comicRtl", true)}
-                className="flex-1 px-3 py-2 rounded-md border transition-colors"
-                style={{
-                  borderColor: settings.comicRtl ? theme.accent : `${theme.foreground}20`,
-                  backgroundColor: settings.comicRtl ? `${theme.accent}10` : "transparent",
-                }}
-              >
-                Right to Left
-              </button>
-            </div>
-          </SettingSection>
-
-          {/* Audio Playback Speed */}
-          <SettingSection title="Audio Playback Speed">
-            <div className="flex flex-wrap gap-2">
-              {PLAYBACK_SPEEDS.map((speed) => (
                 <button
-                  key={speed}
-                  onClick={() => onUpdateSetting("audioPlaybackSpeed", speed)}
-                  className="px-3 py-1 rounded-md border transition-colors"
+                  onClick={() => onUpdateSetting("comicRtl", true)}
+                  className="flex-1 px-3 py-2 rounded-md border transition-colors"
                   style={{
-                    borderColor:
-                      settings.audioPlaybackSpeed === speed
-                        ? theme.accent
-                        : `${theme.foreground}20`,
-                    backgroundColor:
-                      settings.audioPlaybackSpeed === speed ? `${theme.accent}10` : "transparent",
+                    borderColor: settings.comicRtl ? theme.accent : `${theme.foreground}20`,
+                    backgroundColor: settings.comicRtl ? `${theme.accent}10` : "transparent",
                   }}
                 >
-                  {speed}x
+                  Right to Left
                 </button>
-              ))}
-            </div>
-          </SettingSection>
+              </div>
+            </SettingSection>
+          )}
+
+          {/* Audio Playback Speed — audio only */}
+          {isAudio && (
+            <SettingSection title="Audio Playback Speed">
+              <div className="flex flex-wrap gap-2">
+                {PLAYBACK_SPEEDS.map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => onUpdateSetting("audioPlaybackSpeed", speed)}
+                    className="px-3 py-1 rounded-md border transition-colors"
+                    style={{
+                      borderColor:
+                        settings.audioPlaybackSpeed === speed
+                          ? theme.accent
+                          : `${theme.foreground}20`,
+                      backgroundColor:
+                        settings.audioPlaybackSpeed === speed ? `${theme.accent}10` : "transparent",
+                    }}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </SettingSection>
+          )}
         </div>
       </div>
     </>

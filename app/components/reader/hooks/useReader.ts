@@ -33,6 +33,7 @@ interface UseReaderOptions {
   bookId: string;
   initialPosition?: number;
   formatOverride?: string;
+  nativePdfMode?: boolean;
 }
 
 interface UseReaderReturn {
@@ -104,6 +105,12 @@ interface UseReaderReturn {
   saveProgress: () => Promise<void>;
 }
 
+function getClientProfileId(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie.match(/(?:^|;\s*)compendus-profile=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 /**
  * Main hook for the unified reader
  */
@@ -111,6 +118,7 @@ export function useReader({
   bookId,
   initialPosition = 0,
   formatOverride,
+  nativePdfMode = false,
 }: UseReaderOptions): UseReaderReturn {
   const viewport = useViewport();
   const { settings, updateGlobalSetting, updateBookSetting } = useReaderSettings(bookId);
@@ -239,7 +247,7 @@ export function useReader({
 
   // Fetch full text content for client-side column pagination
   useEffect(() => {
-    if (!bookInfo) return;
+    if (!bookInfo || nativePdfMode) return;
     const fetchFullText = async () => {
       try {
         const data = await getFullTextContent(bookId, formatOverride);
@@ -255,11 +263,11 @@ export function useReader({
       }
     };
     fetchFullText();
-  }, [bookId, formatOverride, bookInfo]);
+  }, [bookId, formatOverride, bookInfo, nativePdfMode]);
 
-  // Fetch page content when page changes (only for non-column-paginated content)
+  // Fetch page content when page changes (only for non-column-paginated, non-native-pdf content)
   useEffect(() => {
-    if (!bookInfo || viewport.width === 0 || isColumnPaginated) return;
+    if (!bookInfo || viewport.width === 0 || isColumnPaginated || nativePdfMode) return;
 
     const fetchPages = async () => {
       try {
@@ -305,9 +313,9 @@ export function useReader({
     formatOverride,
   ]);
 
-  // Prefetch upcoming pages in the background (only for non-column-paginated content)
+  // Prefetch upcoming pages in the background (only for non-column-paginated, non-native-pdf content)
   useEffect(() => {
-    if (!bookInfo || viewport.width === 0 || isColumnPaginated) return;
+    if (!bookInfo || viewport.width === 0 || isColumnPaginated || nativePdfMode) return;
 
     const prefetchPages = async () => {
       const totalPages = bookInfo.totalPages;
@@ -379,12 +387,16 @@ export function useReader({
   useEffect(() => {
     const totalPages =
       isColumnPaginated && clientTotalPages !== null ? clientTotalPages : bookInfo?.totalPages || 0;
-    const pos =
-      isColumnPaginated && totalPages > 0
-        ? (currentPage - 1) / totalPages
-        : (pageContent?.position ?? 0);
+    let pos: number;
+    if (nativePdfMode && totalPages > 0) {
+      pos = (currentPage - 1) / Math.max(1, totalPages - 1);
+    } else if (isColumnPaginated && totalPages > 0) {
+      pos = (currentPage - 1) / totalPages;
+    } else {
+      pos = pageContent?.position ?? 0;
+    }
     currentPositionRef.current = pos;
-  }, [currentPage, pageContent, isColumnPaginated, clientTotalPages, bookInfo]);
+  }, [currentPage, pageContent, isColumnPaginated, clientTotalPages, bookInfo, nativePdfMode]);
 
   // Start a reading session when the book info loads, end it on unmount
   useEffect(() => {
@@ -426,21 +438,25 @@ export function useReader({
     };
   }, [bookId, bookInfo]); // Only depend on bookId and bookInfo — we read current values from refs
 
-  // The effective total pages (client-reported for column pagination, server for others)
+  // The effective total pages (client-reported for column pagination or native PDF, server for others)
   const effectiveTotalPages =
-    isColumnPaginated && clientTotalPages !== null ? clientTotalPages : bookInfo?.totalPages || 0;
+    (isColumnPaginated || nativePdfMode) && clientTotalPages !== null
+      ? clientTotalPages
+      : bookInfo?.totalPages || 0;
 
-  // Callback for client to report total pages from CSS column measurement
+  // Callback for client to report total pages from CSS column measurement (or PDF.js page count).
   const setClientTotalPagesCallback = useCallback(
     (total: number) => {
       setClientTotalPages(total);
-      // Apply initial position once we know the real page count
-      if (initialPosition > 0 && total > 1) {
+      // For native PDF mode, initial page is set by getReaderPageForPosition in the getReaderInfo
+      // effect (server knows the exact page boundaries). Don't override it here with an
+      // approximate calculation, which uses the wrong formula and clobbers the correct value.
+      if (!nativePdfMode && initialPosition > 0 && total > 1) {
         const targetPage = Math.max(1, Math.round(initialPosition * total));
         setCurrentPage(targetPage);
       }
     },
-    [initialPosition],
+    [initialPosition, nativePdfMode],
   );
 
   // Navigation functions
@@ -462,6 +478,13 @@ export function useReader({
       try {
         isJumpNavigationRef.current = true;
         setIsJumpNavigation(true);
+
+        if (nativePdfMode && effectiveTotalPages > 0) {
+          // For native PDF, map 0-1 position to page number
+          const targetPage = Math.max(1, Math.round(position * (effectiveTotalPages - 1)) + 1);
+          setCurrentPage(targetPage);
+          return;
+        }
 
         if (isColumnPaginated && effectiveTotalPages > 0) {
           // For column pagination, map position directly to page
@@ -492,6 +515,7 @@ export function useReader({
       settings.lineHeight,
       isColumnPaginated,
       effectiveTotalPages,
+      nativePdfMode,
     ],
   );
 
@@ -514,7 +538,15 @@ export function useReader({
   const addBookmark = useCallback(
     async (position: number, title?: string, note?: string) => {
       try {
-        const bookmark = await addBookmarkAction(bookId, position, title, note);
+        const profileId = getClientProfileId();
+        const bookmark = await addBookmarkAction(
+          bookId,
+          position,
+          title,
+          note,
+          undefined,
+          profileId,
+        );
         setBookmarks((prev) => [...prev, bookmark]);
       } catch (err) {
         console.error("Failed to add bookmark:", err);
@@ -525,7 +557,7 @@ export function useReader({
 
   const removeBookmark = useCallback(async (bookmarkId: string) => {
     try {
-      await deleteBookmarkAction(bookmarkId);
+      await deleteBookmarkAction(bookmarkId, getClientProfileId());
       setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
     } catch (err) {
       console.error("Failed to remove bookmark:", err);
@@ -542,6 +574,7 @@ export function useReader({
       color?: string,
     ) => {
       try {
+        const profileId = getClientProfileId();
         const highlight = await addHighlightAction(
           bookId,
           startPosition,
@@ -549,6 +582,7 @@ export function useReader({
           text,
           note,
           color,
+          profileId,
         );
         setHighlights((prev) => [...prev, highlight]);
       } catch (err) {
@@ -560,7 +594,7 @@ export function useReader({
 
   const removeHighlight = useCallback(async (highlightId: string) => {
     try {
-      await deleteHighlightAction(highlightId);
+      await deleteHighlightAction(highlightId, getClientProfileId());
       setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
     } catch (err) {
       console.error("Failed to remove highlight:", err);
@@ -569,7 +603,7 @@ export function useReader({
 
   const updateHighlightNote = useCallback(async (highlightId: string, note: string | null) => {
     try {
-      await updateHighlightNoteAction(highlightId, note);
+      await updateHighlightNoteAction(highlightId, note, getClientProfileId());
       setHighlights((prev) =>
         prev.map((h) => (h.id === highlightId ? { ...h, note: note ?? undefined } : h)),
       );
@@ -580,7 +614,7 @@ export function useReader({
 
   const updateHighlightColor = useCallback(async (highlightId: string, color: string) => {
     try {
-      await updateHighlightColorAction(highlightId, color);
+      await updateHighlightColorAction(highlightId, color, getClientProfileId());
       setHighlights((prev) => prev.map((h) => (h.id === highlightId ? { ...h, color } : h)));
     } catch (err) {
       console.error("Failed to update highlight color:", err);
@@ -620,10 +654,16 @@ export function useReader({
   const columnPosition =
     isColumnPaginated && effectiveTotalPages > 0 ? (currentPage - 1) / effectiveTotalPages : null;
 
+  // Compute position for native PDF mode
+  const nativePdfPosition =
+    nativePdfMode && effectiveTotalPages > 0
+      ? (currentPage - 1) / Math.max(1, effectiveTotalPages - 1)
+      : null;
+
   // Save progress
   const saveProgress = useCallback(async () => {
-    const position = columnPosition ?? pageContent?.position;
-    if (position === undefined && position === null) return;
+    const position = nativePdfPosition ?? columnPosition ?? pageContent?.position;
+    if (position === undefined || position === null) return;
 
     // Build universal position JSON for EPUB column-paginated content
     let positionJSON: string | undefined;
@@ -653,22 +693,28 @@ export function useReader({
     }
 
     try {
-      await saveReadingProgress(bookId, position ?? 0, currentPage, undefined, positionJSON);
+      await saveReadingProgress(
+        bookId,
+        position ?? 0,
+        currentPage,
+        getClientProfileId(),
+        positionJSON,
+      );
     } catch (err) {
       console.error("Failed to save progress:", err);
     }
-  }, [bookId, currentPage, pageContent, columnPosition, fullTextContent]);
+  }, [bookId, currentPage, pageContent, columnPosition, nativePdfPosition, fullTextContent]);
 
   // Auto-save progress when page changes
   useEffect(() => {
-    if (!pageContent && !isColumnPaginated) return;
+    if (!pageContent && !isColumnPaginated && !nativePdfMode) return;
 
     const timer = setTimeout(() => {
       saveProgress();
     }, 2000); // Debounce 2 seconds
 
     return () => clearTimeout(timer);
-  }, [currentPage, pageContent, saveProgress, isColumnPaginated]);
+  }, [currentPage, pageContent, saveProgress, isColumnPaginated, nativePdfMode]);
 
   return {
     bookInfo,
@@ -676,16 +722,23 @@ export function useReader({
     error,
     currentPage,
     totalPages: effectiveTotalPages,
-    pageContent: isColumnPaginated
+    pageContent: nativePdfMode
       ? {
           type: "text" as const,
-          position: columnPosition ?? 0,
+          position: nativePdfPosition ?? 0,
           endPosition: effectiveTotalPages > 0 ? currentPage / effectiveTotalPages : 1,
           chapterTitle,
         }
-      : pageContent,
+      : isColumnPaginated
+        ? {
+            type: "text" as const,
+            position: columnPosition ?? 0,
+            endPosition: effectiveTotalPages > 0 ? currentPage / effectiveTotalPages : 1,
+            chapterTitle,
+          }
+        : pageContent,
     rightPageContent,
-    position: columnPosition ?? pageContent?.position ?? 0,
+    position: nativePdfPosition ?? columnPosition ?? pageContent?.position ?? 0,
     isSpreadMode,
     goToPage,
     goToPosition,

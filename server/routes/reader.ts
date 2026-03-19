@@ -52,6 +52,47 @@ app.get("/api/reader/:bookId/pdf-page/:pageNum", async (c) => {
   }
 });
 
+// GET /api/reader/:bookId/pdf-stream - Serve raw PDF file for client-side rendering
+app.get("/api/reader/:bookId/pdf-stream", async (c) => {
+  try {
+    const bookId = c.req.param("bookId");
+
+    const book = await db.query.books.findFirst({
+      where: eq(books.id, bookId),
+    });
+
+    if (!book || book.format !== "pdf") {
+      return new Response("PDF not found", { status: 404 });
+    }
+
+    const pdfPath = resolve("data", "books", `${bookId}.pdf`);
+    const pdfStat = await getFileStat(pdfPath);
+    if (!pdfStat) {
+      return new Response("PDF file not found", { status: 404 });
+    }
+
+    const buffer = await readFile(pdfPath);
+    const etag = generateETag(pdfStat.mtime, pdfStat.size);
+
+    if (c.req.header("if-none-match") === etag) {
+      return new Response(null, { status: 304 });
+    }
+
+    return new Response(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Length": String(pdfStat.size),
+        "Cache-Control": "public, max-age=31536000, immutable",
+        ETag: etag,
+      },
+    });
+  } catch (error) {
+    console.error("PDF stream error:", error);
+    return new Response("Failed to serve PDF", { status: 500 });
+  }
+});
+
 // GET /api/reader/:bookId/resource/* - Serve embedded resources from EPUB files
 app.get("/api/reader/:bookId/resource/*", async (c) => {
   try {

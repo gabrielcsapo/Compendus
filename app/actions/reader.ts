@@ -50,7 +50,9 @@ export async function addBookmark(
   color?: string,
   profileId?: string,
 ): Promise<ReaderBookmark> {
-  if (!profileId) throw new Error("profileId is required");
+  const resolvedProfileId = profileId ?? resolveProfileId();
+  if (!resolvedProfileId) throw new Error("profileId is required");
+  profileId = resolvedProfileId;
   const id = randomUUID();
   const createdAt = new Date();
   const updatedAt = new Date();
@@ -119,7 +121,9 @@ export async function addHighlight(
   color?: string,
   profileId?: string,
 ): Promise<ReaderHighlight> {
-  if (!profileId) throw new Error("profileId is required");
+  const resolvedProfileId = profileId ?? resolveProfileId();
+  if (!resolvedProfileId) throw new Error("profileId is required");
+  profileId = resolvedProfileId;
   const id = randomUUID();
   const highlightColor = color || "#ffff00";
   const createdAt = new Date();
@@ -167,7 +171,9 @@ export async function updateHighlightNote(
   note: string | null,
   profileId?: string,
 ): Promise<void> {
-  if (!profileId) throw new Error("profileId is required");
+  const resolvedProfileId = profileId ?? resolveProfileId();
+  if (!resolvedProfileId) throw new Error("profileId is required");
+  profileId = resolvedProfileId;
   await db
     .update(highlights)
     .set({ note: note || null, updatedAt: new Date() })
@@ -179,7 +185,9 @@ export async function updateHighlightColor(
   color: string,
   profileId?: string,
 ): Promise<void> {
-  if (!profileId) throw new Error("profileId is required");
+  const resolvedProfileId = profileId ?? resolveProfileId();
+  if (!resolvedProfileId) throw new Error("profileId is required");
+  profileId = resolvedProfileId;
   await db
     .update(highlights)
     .set({ color, updatedAt: new Date() })
@@ -263,7 +271,9 @@ export async function saveReadingProgress(
   profileId?: string,
   positionJSON?: string,
 ): Promise<{ position: number; pageNum?: number }> {
-  if (!profileId) throw new Error("profileId is required");
+  const resolvedProfileId = profileId ?? resolveProfileId();
+  if (!resolvedProfileId) throw new Error("profileId is required");
+  profileId = resolvedProfileId;
 
   const now = new Date();
   // Use universal position format if provided, otherwise legacy format
