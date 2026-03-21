@@ -8,6 +8,7 @@
 
 import Foundation
 import whisper
+import EPUBReader
 
 enum WhisperError: Error, LocalizedError {
     case couldNotInitializeContext

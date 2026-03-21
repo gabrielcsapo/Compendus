@@ -12,6 +12,7 @@ import BackgroundTasks
 import SwiftData
 import UIKit
 import os.log
+import EPUBReader
 
 private let logger = Logger(subsystem: "com.compendus.background", category: "ProcessingManager")
 

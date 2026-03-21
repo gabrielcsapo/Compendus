@@ -8,6 +8,7 @@
 //
 
 import UIKit
+import EPUBReader
 
 @MainActor
 class ComicPageViewController: UIViewController {

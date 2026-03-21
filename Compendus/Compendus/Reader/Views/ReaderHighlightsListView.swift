@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct ReaderHighlightsListView: View {
     let highlights: [BookHighlight]

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import EPUBReader
 
 enum APIError: LocalizedError {
     case serverNotConfigured

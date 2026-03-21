@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import EPUBReader
 
 struct AppTheme: Codable, Identifiable, Hashable {
     let id: String

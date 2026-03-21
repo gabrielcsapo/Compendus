@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct FloatingHighlightToolbar: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager

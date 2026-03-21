@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct SettingsView: View {
     @Environment(ServerConfig.self) private var serverConfig
@@ -254,20 +255,7 @@ struct SettingsView: View {
                 if serverConfig.isProfileSelected {
                     Section {
                         HStack(spacing: 12) {
-                            // Avatar
-                            ZStack {
-                                Circle()
-                                    .fill(Color(.systemGray5))
-                                    .frame(width: 44, height: 44)
-                                if let avatar = serverConfig.selectedProfileAvatar, !avatar.isEmpty {
-                                    Text(avatar)
-                                        .font(.title2)
-                                } else {
-                                    Text(String(serverConfig.selectedProfileName?.prefix(1).uppercased() ?? "?"))
-                                        .font(.headline)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
+                            ProfileAvatarView(serverConfig: serverConfig, size: 44)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(serverConfig.selectedProfileName ?? "Unknown")

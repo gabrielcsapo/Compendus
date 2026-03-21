@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct BookmarkEditSheet: View {
     @Bindable var bookmark: BookBookmark

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct SeriesDetailView: View {
     let seriesName: String
@@ -112,7 +113,6 @@ struct SeriesDetailView: View {
                     if downloaded.isAudiobook {
                         Task {
                             await audiobookPlayer.loadBook(downloaded)
-                            audiobookPlayer.play()
                             audiobookPlayer.isFullPlayerPresented = true
                         }
                     } else {
@@ -201,7 +201,6 @@ struct SeriesDetailView: View {
                         if downloaded.isAudiobook {
                             Task {
                                 await audiobookPlayer.loadBook(downloaded)
-                                audiobookPlayer.play()
                                 audiobookPlayer.isFullPlayerPresented = true
                             }
                         } else {

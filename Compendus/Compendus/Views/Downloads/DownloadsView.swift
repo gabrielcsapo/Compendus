@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 enum DownloadFilter: String, CaseIterable {
     case all = "All"
@@ -92,17 +93,39 @@ struct DownloadsView: View {
     @State private var bookToDelete: DownloadedBook?
     @State private var showingDeleteConfirmation = false
     @State private var searchText = ""
-    @State private var selectedFilter: DownloadFilter = .all
-    @State private var showingStorageBreakdown = false
+    @State private var selectedChipId: String = "all"
+
     @State private var bookToRead: DownloadedBook?
-    @State private var viewMode: DownloadViewMode = .books
     @State private var seriesSheet: DownloadSeriesSheet? = nil
     @State private var showingDeleteError = false
     @State private var deleteError: String?
     @State private var navigationPath = NavigationPath()
     @State private var selectedRemoteBook: Book? = nil
+    @State private var greetingText: String = ""
+    @FocusState private var isSearchFocused: Bool
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var effectiveFilter: DownloadFilter {
+        switch selectedChipId {
+        case "ebooks": return .ebooks
+        case "audiobooks": return .audiobooks
+        case "comics": return .comics
+        default: return .all
+        }
+    }
+
+    private var isSeriesMode: Bool { selectedChipId == "series" }
+
+    private var homeChips: [FilterChip] {
+        [
+            FilterChip(id: "all", label: "All", systemImage: nil),
+            FilterChip(id: "ebooks", label: "Ebooks", systemImage: "book.closed"),
+            FilterChip(id: "audiobooks", label: "Audiobooks", systemImage: "headphones"),
+            FilterChip(id: "comics", label: "Comics", systemImage: "book.pages"),
+            FilterChip(id: "series", label: "Series", systemImage: "books.vertical"),
+        ]
+    }
 
     private var columns: [GridItem] {
         let count = horizontalSizeClass == .compact ? 2 : 4
@@ -145,27 +168,56 @@ struct DownloadsView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             mainContent
-                .navigationTitle(navigationTitle)
-                .toolbar {
-                    downloadsToolbar
-                    if downloadManager.isSyncingMetadata {
-                        ToolbarItem(placement: .principal) {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Syncing...")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                            TextField(searchPrompt, text: $searchText)
+                                .textFieldStyle(.plain)
+                                .font(.subheadline)
+                                .submitLabel(.search)
+                                .focused($isSearchFocused)
+                            if !searchText.isEmpty || isSearchFocused {
+                                Button("Cancel") {
+                                    searchText = ""
+                                    isSearchFocused = false
+                                }
+                                .font(.subheadline)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(.secondarySystemFill))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .animation(.easeInOut(duration: 0.2), value: isSearchFocused || !searchText.isEmpty)
+
+                        if downloadManager.isSyncingMetadata {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.mini)
+                                Text("Syncing...").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 4)
+                        }
+
+                        FilterChipBar(chips: homeChips, selectedId: $selectedChipId)
+                            .padding(.vertical, 4)
+                        Divider()
                     }
+                    .background(.ultraThinMaterial)
                 }
                 .navigationDestination(for: DownloadedBook.self) { book in
                     DownloadedBookDetailView(book: book) { seriesName in
                         seriesSheet = DownloadSeriesSheet(id: seriesName)
                     }
                 }
-                .searchable(text: $searchText, prompt: searchPrompt)
                 .confirmationDialog(
                     deleteDialogTitle,
                     isPresented: $showingDeleteConfirmation,
@@ -184,9 +236,6 @@ struct DownloadsView: View {
                     ReaderContainerView(book: book)
                         .environment(readerSettings)
                 }
-                .sheet(isPresented: $showingStorageBreakdown) {
-                    StorageBreakdownView()
-                }
                 .sheet(item: $seriesSheet) { sheet in
                     DownloadedSeriesDetailView(seriesName: sheet.id)
                         .presentationDetents([.large])
@@ -199,7 +248,6 @@ struct DownloadsView: View {
                             if downloaded.isAudiobook {
                                 Task {
                                     await audiobookPlayer.loadBook(downloaded)
-                                    audiobookPlayer.play()
                                     audiobookPlayer.isFullPlayerPresented = true
                                 }
                             } else {
@@ -217,9 +265,18 @@ struct DownloadsView: View {
                     await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
                     // Clean up stale failed download entries on launch
                     downloadManager.cleanupStaleFailedDownloads()
+                    // Set greeting
+                    let hour = Calendar.current.component(.hour, from: Date())
+                    greetingText = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
                 }
                 .onChange(of: searchText) { _, _ in recomputeFilteredBooks() }
-                .onChange(of: selectedFilter) { _, _ in recomputeFilteredBooks() }
+                .onChange(of: selectedChipId) { _, _ in
+                    if !isSeriesMode {
+                        recomputeFilteredBooks()
+                    } else {
+                        recomputeSeriesItems()
+                    }
+                }
                 .onChange(of: allBooks.count) { _, _ in
                     recomputeFilteredBooks()
                     recomputeSeriesItems()
@@ -239,14 +296,11 @@ struct DownloadsView: View {
     // MARK: - Navigation Title
 
     private var navigationTitle: String {
-        if viewMode == .series {
-            return cachedSeriesItems.isEmpty ? "Series" : "Series (\(cachedSeriesItems.count))"
-        }
-        return "Home"
+        "Home"
     }
 
     private var searchPrompt: String {
-        if viewMode == .series {
+        if isSeriesMode {
             return "Search series..."
         }
         return "Search your books..."
@@ -258,7 +312,7 @@ struct DownloadsView: View {
     private var mainContent: some View {
         if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
             DownloadsEmptyStateView()
-        } else if viewMode == .series {
+        } else if isSeriesMode {
             seriesGridContent
         } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
             filteredEmptyState
@@ -273,9 +327,9 @@ struct DownloadsView: View {
             SearchEmptyStateView(query: searchText)
         } else {
             EmptyStateView(
-                icon: selectedFilter.icon,
-                title: "No \(selectedFilter.rawValue)",
-                description: "No \(selectedFilter.rawValue.lowercased()) found in your downloads."
+                icon: effectiveFilter.icon,
+                title: "No \(effectiveFilter.rawValue)",
+                description: "No \(effectiveFilter.rawValue.lowercased()) found in your downloads."
             )
         }
     }
@@ -310,6 +364,7 @@ struct DownloadsView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 20)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 
@@ -318,14 +373,13 @@ struct DownloadsView: View {
     private var booksScrollContent: some View {
         ScrollView {
             // Continue Reading section (local + remote books with progress)
-            if !continueReadingItems.isEmpty && searchText.isEmpty && selectedFilter == .all {
+            if !continueReadingItems.isEmpty && searchText.isEmpty && effectiveFilter == .all && !isSeriesMode {
                 ContinueReadingSection(
                     items: continueReadingItems,
                     onLocalBookTap: { book in
                         if book.isAudiobook {
                             Task {
                                 await audiobookPlayer.loadBook(book)
-                                audiobookPlayer.play()
                                 audiobookPlayer.isFullPlayerPresented = true
                             }
                         } else {
@@ -346,13 +400,6 @@ struct DownloadsView: View {
                 .padding(.bottom, 8)
             }
 
-            // Reading streak
-            if searchText.isEmpty && selectedFilter == .all {
-                ReadingStreakView()
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-            }
-
             // Active downloads section
             if hasActiveDownloads {
                 activeDownloadsSection
@@ -363,13 +410,15 @@ struct DownloadsView: View {
                 activeTranscriptionSection
             }
 
-            // Storage summary (only show when not searching or filtering)
-            if searchText.isEmpty && selectedFilter == .all {
-                StorageUsageView {
-                    showingStorageBreakdown = true
+            // My Library section header
+            if searchText.isEmpty {
+                HStack {
+                    Text("My Library")
+                        .font(.title3).fontWeight(.semibold)
+                    Spacer()
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 20)
+                .padding(.top, 8)
             }
 
             LazyVGrid(columns: columns, spacing: 16) {
@@ -402,56 +451,10 @@ struct DownloadsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 20)
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var downloadsToolbar: some ToolbarContent {
-        if !books.isEmpty {
-            ToolbarItem(placement: .topBarLeading) {
-                Picker("View", selection: $viewMode) {
-                    ForEach(DownloadViewMode.allCases, id: \.self) { mode in
-                        Label(mode.rawValue, systemImage: mode.icon)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-            }
-
-            if viewMode == .books {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        ForEach(DownloadFilter.allCases, id: \.self) { filter in
-                            Button {
-                                selectedFilter = filter
-                            } label: {
-                                Label(filter.rawValue, systemImage: filter.icon)
-                                if selectedFilter == filter {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    } label: {
-                        Label("Filter", systemImage: selectedFilter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                    }
-                }
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button(role: .destructive) {
-                        bookToDelete = nil  // nil means delete all
-                        showingDeleteConfirmation = true
-                    } label: {
-                        Label("Delete All", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-    }
 
     // MARK: - Active Downloads Section
 
@@ -602,20 +605,11 @@ struct DownloadsView: View {
 
     // MARK: - Delete Helpers
 
-    private var deleteDialogTitle: String {
-        if bookToDelete != nil {
-            return "Delete Book?"
-        } else {
-            return "Delete All Books?"
-        }
-    }
+    private var deleteDialogTitle: String { "Delete Book?" }
 
     private var deleteDialogMessage: String {
-        if let book = bookToDelete {
-            return "This will remove \"\(book.title)\" from your device. You can download it again from your library."
-        } else {
-            return "This will remove all downloaded books from your device. You can download them again from your library."
-        }
+        guard let book = bookToDelete else { return "" }
+        return "This will remove \"\(book.title)\" from your device. You can download it again from your library."
     }
 
     private func toggleReadStatus(for book: DownloadedBook) {
@@ -631,8 +625,8 @@ struct DownloadsView: View {
 
     private func recomputeFilteredBooks() {
         var result = books
-        if selectedFilter != .all {
-            result = result.filter { selectedFilter.matches(format: $0.format) }
+        if effectiveFilter != .all {
+            result = result.filter { effectiveFilter.matches(format: $0.format) }
         }
         if !searchText.isEmpty {
             let query = searchText.lowercased()
@@ -662,12 +656,9 @@ struct DownloadsView: View {
     }
 
     private func performDelete() {
+        guard let book = bookToDelete else { return }
         do {
-            if let book = bookToDelete {
-                try downloadManager.deleteBook(book, modelContext: modelContext)
-            } else {
-                try downloadManager.deleteAllBooks(modelContext: modelContext)
-            }
+            try downloadManager.deleteBook(book, modelContext: modelContext)
         } catch {
             deleteError = error.localizedDescription
             showingDeleteError = true

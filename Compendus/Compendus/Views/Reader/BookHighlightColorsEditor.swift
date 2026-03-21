@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct BookHighlightColorsEditor: View {
     let bookId: String

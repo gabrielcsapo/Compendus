@@ -12,6 +12,7 @@
 import Foundation
 import SwiftData
 import os.log
+import EPUBReader
 
 private let logger = Logger(subsystem: "com.compendus.tts", category: "PreGeneration")
 

@@ -130,7 +130,8 @@ final class PendingDownload {
             duration: duration,
             narrator: narrator,
             chaptersData: chaptersData,
-            pageCount: pageCount
+            pageCount: pageCount,
+            profileId: profileId
         )
     }
 }

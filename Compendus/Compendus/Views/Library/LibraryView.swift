@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 enum LibraryViewMode: String, CaseIterable {
     case books = "Books"
@@ -122,6 +123,9 @@ struct LibraryView: View {
     @State private var paginationFailed = false
     /// Book IDs that should auto-open in the reader once their download completes
     @State private var pendingReadBookIds: Set<String> = []
+    @State private var selectedChipId: String = "all"
+    @State private var showingSortSheet = false
+    @FocusState private var isSearchFocused: Bool
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -129,6 +133,48 @@ struct LibraryView: View {
     private var columns: [GridItem] {
         let count = horizontalSizeClass == .compact ? 2 : 4
         return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
+    }
+
+    private var isSeriesChipSelected: Bool { selectedChipId == "series" }
+
+    private var chipDrivenFilter: BookFilter {
+        switch selectedChipId {
+        case "ebooks": return .ebooks
+        case "audiobooks": return .audiobooks
+        case "comics": return .comics
+        default: return .all
+        }
+    }
+
+    private var libraryChips: [FilterChip] {
+        [
+            FilterChip(id: "all", label: "All", systemImage: nil),
+            FilterChip(id: "ebooks", label: "Ebooks", systemImage: "book.closed"),
+            FilterChip(id: "audiobooks", label: "Audiobooks", systemImage: "headphones"),
+            FilterChip(id: "comics", label: "Comics", systemImage: "book.pages"),
+            FilterChip(id: "series", label: "Series", systemImage: "books.vertical"),
+        ]
+    }
+
+    private var sortChipView: AnyView {
+        AnyView(
+            Button {
+                showingSortSheet = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Sort: \(selectedSort.rawValue)")
+                    Image(systemName: "chevron.down")
+                        .font(.caption2)
+                }
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color(.secondarySystemFill)))
+                .foregroundStyle(Color.primary)
+            }
+            .buttonStyle(.plain)
+        )
     }
 
     var body: some View {
@@ -142,6 +188,9 @@ struct LibraryView: View {
             .onChange(of: downloadManager.activeDownloads.count) {
                 cleanupFinishedDownloads()
             }
+            .sheet(isPresented: $showingSortSheet) {
+                SortBottomSheet(selectedSort: $selectedSort)
+            }
             .sheet(item: $selectedBook) { book in
                 BookDetailView(
                     book: book,
@@ -149,7 +198,6 @@ struct LibraryView: View {
                         if downloaded.isAudiobook {
                             Task {
                                 await audiobookPlayer.loadBook(downloaded)
-                                audiobookPlayer.play()
                                 audiobookPlayer.isFullPlayerPresented = true
                             }
                         } else {
@@ -182,28 +230,19 @@ struct LibraryView: View {
 
     private var libraryBase: some View {
         librarySearchable
-            .onChange(of: viewMode) { _, newValue in
-                Task {
-                    if newValue == .series {
-                        await loadSeries()
-                    } else if newValue == .books {
-                        await loadBooks()
-                    }
-                }
-            }
             .onChange(of: appNavigation.pendingSeriesFilter) { _, _ in
                 applyPendingSeriesFilter()
             }
             .onAppear { applyPendingSeriesFilter() }
             .refreshable {
-                if viewMode == .series {
+                if isSeriesChipSelected {
                     await loadSeries()
                 } else {
                     await loadBooks()
                 }
             }
             .task {
-                if books.isEmpty && viewMode == .books {
+                if books.isEmpty && !isSeriesChipSelected {
                     await loadBooks()
                 }
                 await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
@@ -212,12 +251,44 @@ struct LibraryView: View {
 
     private var librarySearchable: some View {
         mainContent
-            .navigationTitle(navigationTitle)
-            .toolbar { libraryToolbar }
-            .searchable(text: $searchText, prompt: searchPrompt)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                        TextField(searchPrompt, text: $searchText)
+                            .textFieldStyle(.plain)
+                            .font(.subheadline)
+                            .submitLabel(.search)
+                            .focused($isSearchFocused)
+                        if !searchText.isEmpty || isSearchFocused {
+                            Button("Cancel") {
+                                searchText = ""
+                                isSearchFocused = false
+                            }
+                            .font(.subheadline)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .animation(.easeInOut(duration: 0.2), value: isSearchFocused || !searchText.isEmpty)
+
+                    FilterChipBar(chips: libraryChips, selectedId: $selectedChipId, trailingContent: isSeriesChipSelected ? nil : sortChipView)
+                        .padding(.vertical, 4)
+                    Divider()
+                }
+                .background(.ultraThinMaterial)
+            }
             .onChange(of: searchText) { _, newValue in
                 searchTask?.cancel()
-                guard viewMode != .series else { return } // series search is local
+                guard !isSeriesChipSelected else { return } // series search is local
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
                     searchTask = Task { await loadBooks() }
@@ -229,27 +300,32 @@ struct LibraryView: View {
                     await searchBooks(query: trimmed)
                 }
             }
-            .onChange(of: selectedFilter) { _, _ in
-                if viewMode == .books {
+            .onChange(of: selectedChipId) { _, newId in
+                if newId == "series" {
+                    viewMode = .series
+                    Task { await loadSeries() }
+                } else {
+                    viewMode = .books
+                    selectedFilter = chipDrivenFilter
                     Task { await loadBooks() }
                 }
             }
             .onChange(of: selectedSort) { _, _ in
-                if viewMode == .books {
+                if !isSeriesChipSelected {
                     Task { await loadBooks() }
                 }
             }
     }
 
     private var searchPrompt: String {
-        viewMode == .series ? "Search series..." : "Search books..."
+        isSeriesChipSelected ? "Search series..." : "Search books..."
     }
 
     // MARK: - Main Content
 
     @ViewBuilder
     private var mainContent: some View {
-        if viewMode == .series {
+        if isSeriesChipSelected {
             seriesGridContent
         } else if books.isEmpty && isLoading {
             SkeletonBookGrid(count: 8)
@@ -297,6 +373,7 @@ struct LibraryView: View {
                 .padding()
             }
         }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private func bookGridCell(book: Book, index: Int) -> some View {
@@ -317,7 +394,6 @@ struct LibraryView: View {
                         if downloaded.isAudiobook {
                             Task {
                                 await audiobookPlayer.loadBook(downloaded)
-                                audiobookPlayer.play()
                                 audiobookPlayer.isFullPlayerPresented = true
                             }
                         } else {
@@ -362,62 +438,10 @@ struct LibraryView: View {
             }
     }
 
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var libraryToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Picker("View", selection: $viewMode) {
-                ForEach(LibraryViewMode.allCases, id: \.self) { mode in
-                    Label(mode.rawValue, systemImage: mode.icon)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 160)
-        }
-        if viewMode == .books {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(BookFilter.allCases, id: \.self) { filter in
-                        Button {
-                            selectedFilter = filter
-                        } label: {
-                            Label(filter.rawValue, systemImage: filter.icon)
-                            if selectedFilter == filter {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                } label: {
-                    Label("Filter", systemImage: selectedFilter == .all ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(BookSort.allCases, id: \.self) { sort in
-                        Button {
-                            selectedSort = sort
-                        } label: {
-                            Label(sort.rawValue, systemImage: sort.icon)
-                            if selectedSort == sort {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                } label: {
-                    Label("Sort", systemImage: "arrow.up.arrow.down")
-                }
-            }
-        }
-    }
-
     // MARK: - Navigation Title
 
     private var navigationTitle: String {
-        if viewMode == .series {
-            return seriesItems.isEmpty ? "Series" : "Series (\(seriesItems.count))"
-        }
-        return totalCount > 0 ? "Library (\(totalCount))" : "Library"
+        "Library"
     }
 
     // MARK: - Series Grid
@@ -456,6 +480,7 @@ struct LibraryView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 20)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 
@@ -469,6 +494,7 @@ struct LibraryView: View {
     private func applyPendingSeriesFilter() {
         if let seriesName = appNavigation.pendingSeriesFilter {
             appNavigation.pendingSeriesFilter = nil
+            selectedChipId = "series"
             seriesSheet = SeriesSheet(id: seriesName)
         }
     }
@@ -626,7 +652,6 @@ struct LibraryView: View {
         if downloaded.isAudiobook {
             Task {
                 await audiobookPlayer.loadBook(downloaded)
-                audiobookPlayer.play()
                 audiobookPlayer.isFullPlayerPresented = true
             }
         } else {

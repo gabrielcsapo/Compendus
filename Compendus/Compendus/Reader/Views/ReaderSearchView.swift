@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct ReaderSearchView: View {
     let engine: any ReaderEngine

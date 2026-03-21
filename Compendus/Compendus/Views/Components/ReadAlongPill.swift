@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct ReadAlongPill: View {
     enum Source {

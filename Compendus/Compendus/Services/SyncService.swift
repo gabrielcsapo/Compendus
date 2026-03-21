@@ -10,6 +10,7 @@ import Foundation
 import SwiftData
 import BackgroundTasks
 import UIKit
+import EPUBReader
 
 @Observable
 @MainActor

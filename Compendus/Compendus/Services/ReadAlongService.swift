@@ -14,6 +14,7 @@ import AVFoundation
 import MediaPlayer
 
 import os.log
+import EPUBReader
 
 private let logger = Logger(subsystem: "com.compendus.reader", category: "ReadAlong")
 

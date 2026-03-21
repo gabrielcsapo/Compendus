@@ -9,6 +9,7 @@
 #if DEBUG
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct SampleEPUBListView: View {
     @Environment(\.modelContext) private var modelContext

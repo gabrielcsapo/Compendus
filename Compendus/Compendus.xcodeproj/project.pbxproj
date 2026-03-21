@@ -7,51 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0962C86F16A51D4580A8AB82 /* cc-shared-culture.epub in Resources */ = {isa = PBXBuildFile; fileRef = 43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */; };
-		126BA627C414AD0E8B512D3C /* page-blanche.epub in Resources */ = {isa = PBXBuildFile; fileRef = 0AC06FBC5F946AD5BA336870 /* page-blanche.epub */; };
-		15F2A68DC8B06A14B4D9CA3D /* quiz-bindings.epub in Resources */ = {isa = PBXBuildFile; fileRef = D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */; };
-		1A4345B752E17BB0EEF2E496 /* kusamakura-japanese-vertical-writing.epub in Resources */ = {isa = PBXBuildFile; fileRef = F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */; };
-		22EBCD4572294F1AF8D8F9C8 /* EPUBParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */; };
-		2C381E44577CB1DB692BAA8A /* AttributedStringBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */; };
 		36EA78AEF80572E668BF61EC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3198DB17E9FF90C3612D619A /* Foundation.framework */; };
-		4637F892513846848EC1E57C /* figure-gallery-bindings.epub in Resources */ = {isa = PBXBuildFile; fileRef = 49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */; };
-		4BEAEE2C3E7AA8A115739921 /* haruko-ahl.epub in Resources */ = {isa = PBXBuildFile; fileRef = 8F7F4934B000457C12EB9854 /* haruko-ahl.epub */; };
-		4CF97F08ACEDC367E1CF78C0 /* cole-voyage-of-life.epub in Resources */ = {isa = PBXBuildFile; fileRef = AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */; };
-		4E7D36E4CDF5F900FC97416B /* moby-dick.epub in Resources */ = {isa = PBXBuildFile; fileRef = 81D0A590A20E760F6386BD17 /* moby-dick.epub */; };
-		50B5DF7509C408F5A6458701 /* hefty-water.epub in Resources */ = {isa = PBXBuildFile; fileRef = B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */; };
-		5261468CF2191467A9AC0C75 /* mahabharata.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */; };
-		5C7911140AA3EC3ED240161F /* jlreq-in-japanese.epub in Resources */ = {isa = PBXBuildFile; fileRef = 7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */; };
-		60155E7648C284E88D055B26 /* kusamakura-preview.epub in Resources */ = {isa = PBXBuildFile; fileRef = FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */; };
-		61FB170B77C6B9A08879D801 /* sous-le-vent.epub in Resources */ = {isa = PBXBuildFile; fileRef = EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */; };
-		622B44296280C0CCFA49C674 /* kusamakura-preview-embedded.epub in Resources */ = {isa = PBXBuildFile; fileRef = 5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */; };
-		630A89744C7D0C65145E2E2F /* accessible_epub_3.epub in Resources */ = {isa = PBXBuildFile; fileRef = 0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */; };
-		6930027B1C5483DF3FFA2B58 /* israelsailing.epub in Resources */ = {isa = PBXBuildFile; fileRef = 1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */; };
-		740FCD4B25798FF7FA92C43B /* NativePaginationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */; };
-		7F79025BC59FF0A0853A7CB2 /* georgia-cfi.epub in Resources */ = {isa = PBXBuildFile; fileRef = EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */; };
-		81A6ABC176F1A5D934BED888 /* cole-voyage-of-life-tol.epub in Resources */ = {isa = PBXBuildFile; fileRef = 10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */; };
-		820575CE1F29DD6B0D7235E9 /* childrens-literature.epub in Resources */ = {isa = PBXBuildFile; fileRef = AE842891B44113B4A5FF6E91 /* childrens-literature.epub */; };
-		85DC76F02C0503605478D3E1 /* linear-algebra.epub in Resources */ = {isa = PBXBuildFile; fileRef = 36DB5DB50405C5725DA15419 /* linear-algebra.epub */; };
-		86CF172AA5BDE444DE12911B /* page-blanche-bitmaps-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */; };
-		897263B71893AA340834CB4D /* epub30-spec.epub in Resources */ = {isa = PBXBuildFile; fileRef = F936D7C41466220B1F3D3926 /* epub30-spec.epub */; };
-		8C2B5C770A32AFE1A92F7CC9 /* regime-anticancer-arabic.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */; };
-		8F94EB0592449A47A99B4B08 /* internallinks.epub in Resources */ = {isa = PBXBuildFile; fileRef = 7D2CF6D5EA965A9EB707A473 /* internallinks.epub */; };
-		922A738C682FFB9BEEC2E827 /* jlreq-in-english.epub in Resources */ = {isa = PBXBuildFile; fileRef = 6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */; };
-		9D79A56D8B51C192714058A6 /* svg-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */; };
-		A6C8714D718D4DD9AC54683D /* childrens-media-query.epub in Resources */ = {isa = PBXBuildFile; fileRef = FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */; };
-		A915BE8CBDF9617FB2542912 /* moby-dick-mo.epub in Resources */ = {isa = PBXBuildFile; fileRef = 78DE80B7B553073962261DC6 /* moby-dick-mo.epub */; };
 		AA00000001000002PTTSMDL0 /* PocketTTSModel in Resources */ = {isa = PBXBuildFile; fileRef = AA00000001000001PTTSMDL0 /* PocketTTSModel */; };
-		C306A46CA6F5DEE383DFD793 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */; };
-		C5646A1FEF05473109666712 /* haruko-jpeg.epub in Resources */ = {isa = PBXBuildFile; fileRef = 9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */; };
-		C7B52C7FC49FDA601594006C /* NativeEPUBEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */; };
-		C87D4573BA29359834CA2ED3 /* indexing-for-eds-and-auths-3f.epub in Resources */ = {isa = PBXBuildFile; fileRef = 519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */; };
-		CFB6A1D78AC6A4EFA68EDFE0 /* sous-le-vent_svg-in-spine.epub in Resources */ = {isa = PBXBuildFile; fileRef = 37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */; };
-		D1B527B10E02140348962F8D /* haruko-html-jpeg.epub in Resources */ = {isa = PBXBuildFile; fileRef = 8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */; };
-		F58FD9C72A7ED05E8F046F7E /* XHTMLContentParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */; };
-		F762B7CB76CB156CFA5440F8 /* georgia-pls-ssml.epub in Resources */ = {isa = PBXBuildFile; fileRef = 30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */; };
 		F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18582F3679000029A1F0 /* ZIPFoundation */; };
 		F91E18752F37E6270029A1F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18742F37E6270029A1F0 /* WidgetKit.framework */; };
 		F91E18772F37E6270029A1F0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18762F37E6270029A1F0 /* SwiftUI.framework */; };
 		F91E18882F37E6280029A1F0 /* CompendusWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F99BA7822F6DFF7700009EE0 /* EPUBReader in Frameworks */ = {isa = PBXBuildFile; productRef = F99BA7812F6DFF7700009EE0 /* EPUBReader */; };
 		F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F9A1B0022F4500000029A1F0 /* SwiftSoup */; };
 		F9CF53942F4848380099E42C /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F9CF53932F4848380099E42C /* Launch Screen.storyboard */; };
 		F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000002WHISPER /* whisper */; };
@@ -89,54 +51,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		0AC06FBC5F946AD5BA336870 /* page-blanche.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "page-blanche.epub"; sourceTree = "<group>"; };
-		0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = accessible_epub_3.epub; sourceTree = "<group>"; };
-		10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cole-voyage-of-life-tol.epub"; sourceTree = "<group>"; };
-		1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = israelsailing.epub; sourceTree = "<group>"; };
-		30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "georgia-pls-ssml.epub"; sourceTree = "<group>"; };
 		3198DB17E9FF90C3612D619A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		36DB5DB50405C5725DA15419 /* linear-algebra.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "linear-algebra.epub"; sourceTree = "<group>"; };
-		37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "sous-le-vent_svg-in-spine.epub"; sourceTree = "<group>"; };
 		3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompendusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cc-shared-culture.epub"; sourceTree = "<group>"; };
-		44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = XHTMLContentParserTests.swift; sourceTree = "<group>"; };
-		46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "svg-in-spine.epub"; sourceTree = "<group>"; };
-		49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "figure-gallery-bindings.epub"; sourceTree = "<group>"; };
-		510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeEPUBEngineTests.swift; sourceTree = "<group>"; };
-		519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "indexing-for-eds-and-auths-3f.epub"; sourceTree = "<group>"; };
-		5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-preview-embedded.epub"; sourceTree = "<group>"; };
-		6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "page-blanche-bitmaps-in-spine.epub"; sourceTree = "<group>"; };
-		6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "jlreq-in-english.epub"; sourceTree = "<group>"; };
-		78DE80B7B553073962261DC6 /* moby-dick-mo.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "moby-dick-mo.epub"; sourceTree = "<group>"; };
-		7D2CF6D5EA965A9EB707A473 /* internallinks.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = internallinks.epub; sourceTree = "<group>"; };
-		7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "jlreq-in-japanese.epub"; sourceTree = "<group>"; };
-		8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-html-jpeg.epub"; sourceTree = "<group>"; };
-		81D0A590A20E760F6386BD17 /* moby-dick.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "moby-dick.epub"; sourceTree = "<group>"; };
-		8F7F4934B000457C12EB9854 /* haruko-ahl.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-ahl.epub"; sourceTree = "<group>"; };
-		9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "regime-anticancer-arabic.epub"; sourceTree = "<group>"; };
-		9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "haruko-jpeg.epub"; sourceTree = "<group>"; };
-		9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = mahabharata.epub; sourceTree = "<group>"; };
-		A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
 		AA00000001000001PTTSMDL0 /* PocketTTSModel */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PocketTTSModel; sourceTree = "<group>"; };
-		AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "cole-voyage-of-life.epub"; sourceTree = "<group>"; };
-		AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EPUBParserTests.swift; sourceTree = "<group>"; };
-		AE842891B44113B4A5FF6E91 /* childrens-literature.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "childrens-literature.epub"; sourceTree = "<group>"; };
-		B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "hefty-water.epub"; sourceTree = "<group>"; };
-		BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativePaginationEngineTests.swift; sourceTree = "<group>"; };
-		BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AttributedStringBuilderTests.swift; sourceTree = "<group>"; };
-		D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "quiz-bindings.epub"; sourceTree = "<group>"; };
-		EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "georgia-cfi.epub"; sourceTree = "<group>"; };
-		EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "sous-le-vent.epub"; sourceTree = "<group>"; };
-		F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-japanese-vertical-writing.epub"; sourceTree = "<group>"; };
 		F91E180A2F366F9C0029A1F0 /* Compendus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compendus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompendusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18742F37E6270029A1F0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F91E18762F37E6270029A1F0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		F91E18932F37EAAF0029A1F0 /* CompendusWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CompendusWidgetExtension.entitlements; sourceTree = "<group>"; };
-		F936D7C41466220B1F3D3926 /* epub30-spec.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "epub30-spec.epub"; sourceTree = "<group>"; };
 		F9CF53932F4848380099E42C /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
-		FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "childrens-media-query.epub"; sourceTree = "<group>"; };
-		FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = "kusamakura-preview.epub"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -189,6 +112,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */,
+				F99BA7822F6DFF7700009EE0 /* EPUBReader in Frameworks */,
 				F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */,
 				F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */,
 			);
@@ -209,13 +133,6 @@
 		0A957213575147E9065818B7 /* CompendusTests */ = {
 			isa = PBXGroup;
 			children = (
-				44ED4D0DA38EB9EF94A231A8 /* XHTMLContentParserTests.swift */,
-				BE517AB534352AE109A08B2B /* AttributedStringBuilderTests.swift */,
-				BA11CA397984A7443ECD416A /* NativePaginationEngineTests.swift */,
-				510BA1F4EB0F433CA89F1372 /* NativeEPUBEngineTests.swift */,
-				AB4FB0B945C61889390AC3DC /* EPUBParserTests.swift */,
-				A33A54BD6BDD8D5CD5F14DA0 /* TestHelpers.swift */,
-				F8FA7A8CE8AE416B7C3BBA1B /* Samples */,
 			);
 			path = CompendusTests;
 			sourceTree = SOURCE_ROOT;
@@ -227,47 +144,6 @@
 			);
 			name = iOS;
 			sourceTree = "<group>";
-		};
-		F8FA7A8CE8AE416B7C3BBA1B /* Samples */ = {
-			isa = PBXGroup;
-			children = (
-				AE842891B44113B4A5FF6E91 /* childrens-literature.epub */,
-				36DB5DB50405C5725DA15419 /* linear-algebra.epub */,
-				EC15F57B10A6BF3F2BC1FC00 /* georgia-cfi.epub */,
-				8F7F4934B000457C12EB9854 /* haruko-ahl.epub */,
-				F0615FA666A7A92A9ADE2691 /* kusamakura-japanese-vertical-writing.epub */,
-				7E4960943FB02B3DE5B287A4 /* jlreq-in-japanese.epub */,
-				0B9D5CC6B405CB68B11DCF76 /* accessible_epub_3.epub */,
-				F936D7C41466220B1F3D3926 /* epub30-spec.epub */,
-				519C09F50D9ECDB61EB42A73 /* indexing-for-eds-and-auths-3f.epub */,
-				EE8142962968D2E6D0C8F4C4 /* sous-le-vent.epub */,
-				B62E5AE0E1D562D97E39D9C8 /* hefty-water.epub */,
-				78DE80B7B553073962261DC6 /* moby-dick-mo.epub */,
-				FE3B98B8FB9F95209F6ED0D8 /* childrens-media-query.epub */,
-				6B101721A94C97F0B15F8E0A /* page-blanche-bitmaps-in-spine.epub */,
-				46784804C7B5A1DDB4BBF236 /* svg-in-spine.epub */,
-				0AC06FBC5F946AD5BA336870 /* page-blanche.epub */,
-				10EE9D9A0C87F5323A073968 /* cole-voyage-of-life-tol.epub */,
-				5A4391AFD70A9253832AE93E /* kusamakura-preview-embedded.epub */,
-				43AFE216AF72FB4FE34E642E /* cc-shared-culture.epub */,
-				30EC1970D1ED757920B944A0 /* georgia-pls-ssml.epub */,
-				81D0A590A20E760F6386BD17 /* moby-dick.epub */,
-				6B6F6F87CE408D3916D95334 /* jlreq-in-english.epub */,
-				7D2CF6D5EA965A9EB707A473 /* internallinks.epub */,
-				9EE430E6BF8E2B81BE95F6F2 /* mahabharata.epub */,
-				D5C18CBB8A3593138384C6B7 /* quiz-bindings.epub */,
-				9A2C527D44054E76C4E060A1 /* regime-anticancer-arabic.epub */,
-				49C4E70FAF62856777774448 /* figure-gallery-bindings.epub */,
-				AB1211E8FACD466238C5ACA1 /* cole-voyage-of-life.epub */,
-				37EA3933EAEC9A53BDC20584 /* sous-le-vent_svg-in-spine.epub */,
-				9C533180AAE2ED380EC11C2E /* haruko-jpeg.epub */,
-				8191CF3770B0724ED2F3D13B /* haruko-html-jpeg.epub */,
-				1E2DD2E2CDAA9F986B881CD8 /* israelsailing.epub */,
-				FE841F3410C7E564EA872A44 /* kusamakura-preview.epub */,
-			);
-			name = Samples;
-			path = Compendus/Reader/Samples;
-			sourceTree = SOURCE_ROOT;
 		};
 		F91E18012F366F9C0029A1F0 = {
 			isa = PBXGroup;
@@ -346,6 +222,7 @@
 				F91E18582F3679000029A1F0 /* ZIPFoundation */,
 				F9A1B0022F4500000029A1F0 /* SwiftSoup */,
 				AA00000000000002WHISPER /* whisper */,
+				F99BA7812F6DFF7700009EE0 /* EPUBReader */,
 			);
 			productName = Compendus;
 			productReference = F91E180A2F366F9C0029A1F0 /* Compendus.app */;
@@ -402,6 +279,7 @@
 				F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				F9A1B0032F4500000029A1F0 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				AA00000000000001WHISPER /* XCLocalSwiftPackageReference "Packages/whisper.cpp" */,
+				F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "EPUBReader" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F91E180B2F366F9C0029A1F0 /* Products */;
@@ -420,39 +298,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				820575CE1F29DD6B0D7235E9 /* childrens-literature.epub in Resources */,
-				85DC76F02C0503605478D3E1 /* linear-algebra.epub in Resources */,
-				7F79025BC59FF0A0853A7CB2 /* georgia-cfi.epub in Resources */,
-				4BEAEE2C3E7AA8A115739921 /* haruko-ahl.epub in Resources */,
-				1A4345B752E17BB0EEF2E496 /* kusamakura-japanese-vertical-writing.epub in Resources */,
-				5C7911140AA3EC3ED240161F /* jlreq-in-japanese.epub in Resources */,
-				630A89744C7D0C65145E2E2F /* accessible_epub_3.epub in Resources */,
-				897263B71893AA340834CB4D /* epub30-spec.epub in Resources */,
-				C87D4573BA29359834CA2ED3 /* indexing-for-eds-and-auths-3f.epub in Resources */,
-				61FB170B77C6B9A08879D801 /* sous-le-vent.epub in Resources */,
-				50B5DF7509C408F5A6458701 /* hefty-water.epub in Resources */,
-				A915BE8CBDF9617FB2542912 /* moby-dick-mo.epub in Resources */,
-				A6C8714D718D4DD9AC54683D /* childrens-media-query.epub in Resources */,
-				86CF172AA5BDE444DE12911B /* page-blanche-bitmaps-in-spine.epub in Resources */,
-				9D79A56D8B51C192714058A6 /* svg-in-spine.epub in Resources */,
-				126BA627C414AD0E8B512D3C /* page-blanche.epub in Resources */,
-				81A6ABC176F1A5D934BED888 /* cole-voyage-of-life-tol.epub in Resources */,
-				622B44296280C0CCFA49C674 /* kusamakura-preview-embedded.epub in Resources */,
-				0962C86F16A51D4580A8AB82 /* cc-shared-culture.epub in Resources */,
-				F762B7CB76CB156CFA5440F8 /* georgia-pls-ssml.epub in Resources */,
-				4E7D36E4CDF5F900FC97416B /* moby-dick.epub in Resources */,
-				922A738C682FFB9BEEC2E827 /* jlreq-in-english.epub in Resources */,
-				8F94EB0592449A47A99B4B08 /* internallinks.epub in Resources */,
-				5261468CF2191467A9AC0C75 /* mahabharata.epub in Resources */,
-				15F2A68DC8B06A14B4D9CA3D /* quiz-bindings.epub in Resources */,
-				8C2B5C770A32AFE1A92F7CC9 /* regime-anticancer-arabic.epub in Resources */,
-				4637F892513846848EC1E57C /* figure-gallery-bindings.epub in Resources */,
-				4CF97F08ACEDC367E1CF78C0 /* cole-voyage-of-life.epub in Resources */,
-				CFB6A1D78AC6A4EFA68EDFE0 /* sous-le-vent_svg-in-spine.epub in Resources */,
-				C5646A1FEF05473109666712 /* haruko-jpeg.epub in Resources */,
-				D1B527B10E02140348962F8D /* haruko-html-jpeg.epub in Resources */,
-				6930027B1C5483DF3FFA2B58 /* israelsailing.epub in Resources */,
-				60155E7648C284E88D055B26 /* kusamakura-preview.epub in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -479,12 +324,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F58FD9C72A7ED05E8F046F7E /* XHTMLContentParserTests.swift in Sources */,
-				2C381E44577CB1DB692BAA8A /* AttributedStringBuilderTests.swift in Sources */,
-				740FCD4B25798FF7FA92C43B /* NativePaginationEngineTests.swift in Sources */,
-				C7B52C7FC49FDA601594006C /* NativeEPUBEngineTests.swift in Sources */,
-				22EBCD4572294F1AF8D8F9C8 /* EPUBParserTests.swift in Sources */,
-				C306A46CA6F5DEE383DFD793 /* TestHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -913,6 +752,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/whisper.cpp;
 		};
+		F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "EPUBReader" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = EPUBReader;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -943,6 +786,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		F99BA7812F6DFF7700009EE0 /* EPUBReader */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EPUBReader;
 		};
 		F9A1B0022F4500000029A1F0 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;

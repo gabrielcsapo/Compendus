@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct DownloadedBookDetailView: View {
     let book: DownloadedBook
@@ -291,7 +292,6 @@ struct DownloadedBookDetailView: View {
                     isLoadingAudiobook = true
                     Task {
                         await audiobookPlayer.loadBook(book)
-                        audiobookPlayer.play()
                         audiobookPlayer.isFullPlayerPresented = true
                         isLoadingAudiobook = false
                     }

@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import EPUBReader
 
 @Model
 final class DownloadedBook {
@@ -58,7 +59,8 @@ final class DownloadedBook {
         duration: Int? = nil,
         narrator: String? = nil,
         chaptersData: Data? = nil,
-        pageCount: Int? = nil
+        pageCount: Int? = nil,
+        profileId: String = ""
     ) {
         self.id = id
         self.title = title
@@ -84,6 +86,7 @@ final class DownloadedBook {
         self.narrator = narrator
         self.chaptersData = chaptersData
         self.pageCount = pageCount
+        self.profileId = profileId
     }
 
     var authorsDisplay: String {

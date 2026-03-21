@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct ReaderModeScrollView: View {
     struct Segment: Identifiable {

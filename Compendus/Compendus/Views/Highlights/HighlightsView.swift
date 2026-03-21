@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct HighlightsView: View {
     @Query(sort: \BookHighlight.createdAt, order: .reverse) private var allHighlightsQuery: [BookHighlight]

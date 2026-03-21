@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import EPUBReader
 
 /// Book model matching the server's ApiBook format
 struct Book: Codable, Identifiable, Hashable {

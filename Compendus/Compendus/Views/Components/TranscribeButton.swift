@@ -8,6 +8,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct TranscribeButton: View {
     let book: DownloadedBook

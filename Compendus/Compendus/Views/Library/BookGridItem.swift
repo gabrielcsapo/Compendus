@@ -168,6 +168,22 @@ struct DownloadedBookGridItem: View {
                         .padding(6)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if book.readingProgress > 0 && book.readingProgress < 1.0 {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.3))
+                            Rectangle()
+                                .fill(Color.accentColor)
+                                .frame(width: geometry.size.width * book.readingProgress)
+                        }
+                    }
+                    .frame(height: 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                    .padding(4)
+                }
+            }
 
             // Title and author
             VStack(alignment: .leading, spacing: 2) {
@@ -193,12 +209,6 @@ struct DownloadedBookGridItem: View {
 
                 HStack(spacing: 4) {
                     formatBadge
-
-                    if book.readingProgress > 0 {
-                        ProgressView(value: book.readingProgress)
-                            .progressViewStyle(LinearProgressViewStyle())
-                            .frame(width: 40)
-                    }
                 }
 
                 if let rating = book.rating {

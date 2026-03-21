@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+import AVKit
+import MediaPlayer
+import EPUBReader
 
 struct AudiobookPlayerView: View {
     let book: DownloadedBook
@@ -15,8 +18,6 @@ struct AudiobookPlayerView: View {
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
 
     @State private var showingChapters = false
-    @State private var sleepTimerMinutes: Int?
-    @State private var showingSleepTimer = false
     @State private var showLyrics = false
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
@@ -27,6 +28,10 @@ struct AudiobookPlayerView: View {
     /// True when the current transcription was started as "live" (tied to playback).
     @State private var isLiveTranscription = false
     @State private var isLoadingBook = false
+    @State private var showStopConfirmation = false
+    @State private var sleepTimer: Timer?
+    @State private var sleepTimerFireDate: Date?
+    @State private var showSleepTimerMenu = false
 
     private var showTranscriptionPill: Bool {
         !transcriptionPillDismissed && (
@@ -86,6 +91,7 @@ struct AudiobookPlayerView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity)
+                        .transition(.opacity)
                     } else if showLyrics, let transcript = effectiveTranscript {
                         // Lyrics view (replaces cover when active)
                         VStack(spacing: 8) {
@@ -106,63 +112,78 @@ struct AudiobookPlayerView: View {
                                 onSeek: { time in player.seek(to: time) }
                             )
                         }
+                        .transition(.opacity)
                     } else {
-                        // Cover and info (centered in available space)
-                        VStack(spacing: 14) {
-                            Spacer()
+                        // Circular scrubber + metadata — expands to fill available space
+                        // so that playerControls stays pinned to the bottom
+                        VStack(spacing: 10) {
+                            Spacer(minLength: 0)
 
-                            // Cover image — tap to show details
-                            if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: geometry.size.width - 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                                    .shadow(color: .black.opacity(0.3), radius: 16, x: 0, y: 8)
-                                    .onTapGesture { showBookDetail = true }
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.systemGray5))
-                                    .frame(width: 280, height: 280)
-                                    .overlay {
-                                        Image(systemName: CoverImageDecoder.placeholderIcon(for: book.format))
-                                            .font(.system(size: 50))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .onTapGesture { showBookDetail = true }
+                            // Circular scrubber with cover art inside
+                            let scrubberSize = min(geometry.size.width - 40, geometry.size.height * 0.45)
+                            CircularScrubberView(
+                                currentTime: player.currentTime,
+                                duration: player.duration,
+                                onSeek: { player.seek(to: $0) },
+                                coverImage: CoverImageDecoder.decode(bookId: book.id, data: book.coverData),
+                                bookFormat: book.format
+                            )
+                            .frame(width: scrubberSize, height: scrubberSize)
+                            .onTapGesture { showBookDetail = true }
+
+                            // Elapsed / remaining time
+                            HStack {
+                                Text(formatTime(player.currentTime))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                                Spacer()
+                                Text("-\(formatTime(max(0, player.duration - player.currentTime)))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
                             }
+                            .padding(.horizontal, 28)
 
-                            // Title and author
-                            VStack(spacing: 6) {
+                            // Title, author, narrator
+                            VStack(spacing: 4) {
                                 Text(book.title)
                                     .font(.title3)
                                     .fontWeight(.bold)
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
 
-                                Text(book.authorsDisplay)
+                                let authorNarrator = [book.authorsDisplay, book.narrator.map { "Narrated by \($0)" }]
+                                    .compactMap { $0 }
+                                    .joined(separator: " · ")
+                                Text(authorNarrator)
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
-
-                                if let narrator = book.narrator {
-                                    Text("Narrated by \(narrator)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
                             }
                             .padding(.horizontal, 20)
 
-                            // Current chapter
+                            // Current chapter — primary navigation affordance
                             if let chapter = player.currentChapter {
-                                Text(chapter.title)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 20)
+                                Button { showingChapters = true } label: {
+                                    HStack(spacing: 4) {
+                                        Text(chapter.title)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .lineLimit(1)
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .foregroundStyle(.tint)
+                                }
+                                .disabled(book.chapters?.isEmpty ?? true)
                             }
 
-                            Spacer()
+                            Spacer(minLength: 0)
                         }
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
                     }
 
                     // Transcription pill (above player controls)
@@ -184,6 +205,7 @@ struct AudiobookPlayerView: View {
                     playerControls
                 }
                 .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.3), value: showLyrics)
             }
         }
         .ignoresSafeArea(edges: .bottom)
@@ -193,9 +215,6 @@ struct AudiobookPlayerView: View {
                 isLoadingBook = true
                 await player.loadBook(book)
                 isLoadingBook = false
-            }
-            if !player.isPlaying {
-                player.play()
             }
             // Load transcript if available
             if loadedTranscript == nil, let transcript = book.transcript {
@@ -217,19 +236,6 @@ struct AudiobookPlayerView: View {
                 DownloadedBookDetailView(book: book)
             }
         }
-        .confirmationDialog("Sleep Timer", isPresented: $showingSleepTimer) {
-            Button("15 minutes") { setSleepTimer(minutes: 15) }
-            Button("30 minutes") { setSleepTimer(minutes: 30) }
-            Button("45 minutes") { setSleepTimer(minutes: 45) }
-            Button("60 minutes") { setSleepTimer(minutes: 60) }
-            if sleepTimerMinutes != nil {
-                Button("Cancel Timer", role: .destructive) {
-                    sleepTimerMinutes = nil
-                    player.cancelSleepTimer()
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        }
         .onChange(of: transcriptionService.partialTranscript?.segments.count) { _, _ in
             checkTranscriptBuffer()
         }
@@ -238,72 +244,57 @@ struct AudiobookPlayerView: View {
     // MARK: - Player Controls
 
     private var playerControls: some View {
-        VStack(spacing: 12) {
-            // Progress slider
-            VStack(spacing: 4) {
-                Slider(
-                    value: Binding(
-                        get: { player.currentTime },
-                        set: { player.seek(to: $0) }
-                    ),
-                    in: 0...max(1, player.duration)
-                )
-                .tint(.primary)
+        VStack(spacing: 0) {
+            // Single 5-button transport row
+            HStack {
+                Spacer()
 
-                HStack {
-                    Text(formatTime(player.currentTime))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-
-                    Spacer()
-
-                    Text("-\(formatTime(player.duration - player.currentTime))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                // Chapters
+                let hasChapters = !(book.chapters?.isEmpty ?? true)
+                Button { showingChapters = true } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
                 }
-            }
+                .disabled(!hasChapters)
+                .opacity(hasChapters ? 1.0 : 0.3)
+                .accessibilityLabel("Chapters")
 
-            // Playback controls
-            HStack(spacing: 28) {
-                Button {
-                    player.skipBackward()
-                } label: {
+                Spacer()
+
+                // Skip back 15s
+                Button { player.skipBackward() } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
+                        .frame(width: 44, height: 44)
                 }
+                .accessibilityLabel("Skip backward 15 seconds")
 
-                Button {
-                    cancelLiveTranscriptionIfNeeded()
-                    player.isFullPlayerPresented = false
-                    player.stop()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 36))
-                }
+                Spacer()
 
+                // Play/Pause — long-press to stop
                 Button {
-                    if player.isPlaying {
-                        player.pause()
-                    } else {
-                        player.play()
-                    }
+                    if player.isPlaying { player.pause() } else { player.play() }
                 } label: {
                     Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 56))
+                        .font(.system(size: 64))
+                        .contentTransition(.symbolEffect(.replace))
                 }
+                .accessibilityLabel(player.isPlaying ? "Pause" : "Play")
 
-                Button {
-                    player.skipForward()
-                } label: {
+                Spacer()
+
+                // Skip forward 30s
+                Button { player.skipForward() } label: {
                     Image(systemName: "goforward.30")
                         .font(.title2)
+                        .frame(width: 44, height: 44)
                 }
-            }
+                .accessibilityLabel("Skip forward 30 seconds")
 
-            // Speed and utilities
-            HStack {
+                Spacer()
+
+                // Speed picker
                 Menu {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
                         Button {
@@ -319,39 +310,134 @@ struct AudiobookPlayerView: View {
                     }
                 } label: {
                     Text("\(player.playbackRate, specifier: "%.2g")x")
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
+                        .font(.footnote.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Playback speed, currently \(player.playbackRate, specifier: "%.2g")x")
+
+                Spacer()
+            }
+            .padding(.bottom, 16)
+
+            // Secondary row: stop | AirPlay | sleep timer
+            HStack {
+                // Stop
+                Button {
+                    showStopConfirmation = true
+                } label: {
+                    Image(systemName: "stop.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Stop playback")
+                .confirmationDialog("Stop playback?", isPresented: $showStopConfirmation, titleVisibility: .visible) {
+                    Button("Stop", role: .destructive) {
+                        cancelLiveTranscriptionIfNeeded()
+                        cancelSleepTimer()
+                        player.isFullPlayerPresented = false
+                        player.stop()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will end your listening session.")
                 }
 
                 Spacer()
 
-                if let chapters = book.chapters, !chapters.isEmpty {
-                    Button {
-                        showingChapters = true
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.title3)
-                    }
+                // AirPlay — explicit size so MPVolumeView renders correctly
+                ZStack {
+                    AirPlayButton()
                 }
+                .frame(width: 44, height: 44)
 
+                Spacer()
+
+                // Sleep timer
                 Button {
-                    showingSleepTimer = true
+                    showSleepTimerMenu = true
                 } label: {
-                    Image(systemName: sleepTimerMinutes != nil ? "moon.fill" : "moon")
-                        .font(.title3)
+                    HStack(spacing: 4) {
+                        Image(systemName: "moon.zzz")
+                            .font(.callout)
+                        if let fireDate = sleepTimerFireDate {
+                            Text(sleepTimerLabel(fireDate: fireDate))
+                                .font(.caption.weight(.medium))
+                        }
+                    }
+                    .foregroundStyle(sleepTimerFireDate != nil ? Color.accentColor : Color.secondary)
+                    .frame(height: 36)
+                }
+                .accessibilityLabel(sleepTimerFireDate != nil ? "Sleep timer active" : "Set sleep timer")
+                .confirmationDialog("Sleep Timer", isPresented: $showSleepTimerMenu, titleVisibility: .visible) {
+                    if sleepTimerFireDate != nil {
+                        Button("Cancel Timer", role: .destructive) { cancelSleepTimer() }
+                    }
+                    Button("15 minutes") { setSleepTimer(minutes: 15) }
+                    Button("30 minutes") { setSleepTimer(minutes: 30) }
+                    Button("45 minutes") { setSleepTimer(minutes: 45) }
+                    Button("1 hour") { setSleepTimer(minutes: 60) }
+                    if let chapter = player.currentChapter,
+                       let chapters = book.chapters,
+                       let idx = chapters.firstIndex(where: { $0.id == chapter.id }),
+                       idx + 1 < chapters.count {
+                        Button("End of chapter") { setSleepTimerEndOfChapter() }
+                    }
+                    Button("Cancel", role: .cancel) {}
                 }
             }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 8)
         }
         .padding(.horizontal, 20)
         .padding(.bottom)
     }
 
+    // MARK: - Sleep Timer
+
     private func setSleepTimer(minutes: Int) {
-        sleepTimerMinutes = minutes
-        player.setSleepTimer(minutes: minutes)
+        cancelSleepTimer()
+        let fireDate = Date().addingTimeInterval(Double(minutes) * 60)
+        sleepTimerFireDate = fireDate
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes) * 60, repeats: false) { _ in
+            player.pause()
+            sleepTimerFireDate = nil
+            sleepTimer = nil
+        }
+    }
+
+    private func setSleepTimerEndOfChapter() {
+        guard let chapter = player.currentChapter,
+              let chapters = book.chapters,
+              let idx = chapters.firstIndex(where: { $0.id == chapter.id }),
+              idx + 1 < chapters.count else { return }
+        let chapterEnd = chapters[idx + 1].startTime
+        let secondsRemaining = max(1, chapterEnd - player.currentTime)
+        cancelSleepTimer()
+        let fireDate = Date().addingTimeInterval(secondsRemaining)
+        sleepTimerFireDate = fireDate
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: secondsRemaining, repeats: false) { _ in
+            player.pause()
+            sleepTimerFireDate = nil
+            sleepTimer = nil
+        }
+    }
+
+    private func cancelSleepTimer() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        sleepTimerFireDate = nil
+    }
+
+    private func sleepTimerLabel(fireDate: Date) -> String {
+        let remaining = fireDate.timeIntervalSinceNow
+        guard remaining > 0 else { return "" }
+        let minutes = Int(remaining) / 60
+        let seconds = Int(remaining) % 60
+        if minutes > 0 {
+            return "\(minutes)m"
+        }
+        return "\(seconds)s"
     }
 
     private func formatTime(_ seconds: Double) -> String {
@@ -522,6 +608,21 @@ struct ChaptersListView: View {
             return elapsed / chapterDuration
         }
     }
+}
+
+// MARK: - AirPlay Button
+
+/// MPVolumeView (showsVolumeSlider=false) is the most reliable way to embed an
+/// AirPlay route button in a SwiftUI sheet — it has worked since iOS 2 and handles
+/// all presentation context issues that AVRoutePickerView can hit in SwiftUI.
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView()
+        view.showsVolumeSlider = false
+        view.tintColor = .label
+        return view
+    }
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
 #Preview {

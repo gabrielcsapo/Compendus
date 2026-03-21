@@ -170,6 +170,7 @@ class DownloadManager: NSObject {
 
         // Persist download intent in SwiftData
         let pending = PendingDownload.from(book: book, downloadURL: downloadURL, localFormat: localFormat)
+        pending.profileId = apiService.config.selectedProfileId ?? ""
         pending.status = "downloading"
         pending.coverData = coverData
         modelContext.insert(pending)
@@ -540,6 +541,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let pendingNarrator = pending.narrator
         let pendingChaptersData = pending.chaptersData
         let pendingPageCount = pending.pageCount
+        let pendingProfileId = pending.profileId
 
         do {
             // File operations must happen synchronously on this thread
@@ -589,7 +591,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     duration: pendingDuration,
                     narrator: pendingNarrator,
                     chaptersData: pendingChaptersData,
-                    pageCount: pendingPageCount
+                    pageCount: pendingPageCount,
+                    profileId: pendingProfileId
                 )
 
                 mainContext.insert(downloadedBook)

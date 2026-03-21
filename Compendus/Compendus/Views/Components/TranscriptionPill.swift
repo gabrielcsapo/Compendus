@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct TranscriptionPill: View {
     let book: DownloadedBook
@@ -66,33 +67,19 @@ struct TranscriptionPill: View {
     // MARK: - Available State
 
     private var availablePill: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "text.quote")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Text("Transcription available")
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-
-            Spacer()
-
-            Button {
-                withAnimation { onDismiss() }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
-        .contentShape(Capsule())
-        .onTapGesture {
+        Button {
             showingOptionsSheet = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "text.quote")
+                    .font(.subheadline)
+                Text("Transcription")
+                    .font(.subheadline.weight(.medium))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }

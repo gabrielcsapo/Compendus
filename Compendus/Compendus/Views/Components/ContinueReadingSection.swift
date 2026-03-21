@@ -74,39 +74,52 @@ struct ContinueReadingSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Continue Reading")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-
-                Spacer()
-
-                if items.count > 3 {
-                    Text("\(items.count) books")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 20)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(items.prefix(10)) { item in
-                        ContinueReadingCard(item: item)
-                            .onTapGesture {
-                                switch item {
-                                case .downloaded(let book):
-                                    onLocalBookTap?(book)
-                                case .remote(let book):
-                                    onRemoteBookTap?(book)
-                                }
-                            }
-                            .contextMenu {
-                                contextMenuItems(for: item)
-                            }
+            // First item as hero card
+            if let first = items.first {
+                HeroContinueReadingCard(item: first) {
+                    switch first {
+                    case .downloaded(let book):
+                        onLocalBookTap?(book)
+                    case .remote(let book):
+                        onRemoteBookTap?(book)
                     }
                 }
+                .contextMenu {
+                    contextMenuItems(for: first)
+                }
                 .padding(.horizontal, 20)
+            }
+
+            // Remaining items as horizontal scroll
+            if items.count > 1 {
+                HStack {
+                    Text("Also Reading")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(items.dropFirst().prefix(9)) { item in
+                            ContinueReadingCard(item: item)
+                                .onTapGesture {
+                                    switch item {
+                                    case .downloaded(let book):
+                                        onLocalBookTap?(book)
+                                    case .remote(let book):
+                                        onRemoteBookTap?(book)
+                                    }
+                                }
+                                .contextMenu {
+                                    contextMenuItems(for: item)
+                                }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
             }
         }
     }

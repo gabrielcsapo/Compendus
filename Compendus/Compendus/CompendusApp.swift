@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import BackgroundTasks
+import EPUBReader
 
 @main
 struct CompendusApp: App {

@@ -8,6 +8,7 @@
 
 import UIKit
 import PDFKit
+import EPUBReader
 
 @Observable
 @MainActor

@@ -27,9 +27,16 @@ class ImageCache {
         return docs.appendingPathComponent("cover-cache", isDirectory: true)
     }
 
+    /// Maximum total disk cache size in bytes before LRU eviction runs (50 MB).
+    private let maxDiskCacheSize: Int = 50 * 1024 * 1024
+
     init() {
         memoryCache.countLimit = 200
         try? fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        // Evict on launch in case previous sessions accumulated too much data.
+        Task.detached(priority: .background) { [weak self] in
+            self?.evictLRUIfNeeded()
+        }
     }
 
     /// Get a cover image, checking memory → disk → network in that order.
@@ -66,6 +73,11 @@ class ImageCache {
 
                 // Save to disk
                 try? data.write(to: diskURL)
+
+                // Evict in background if over threshold
+                Task.detached(priority: .background) { [weak self] in
+                    self?.evictLRUIfNeeded()
+                }
 
                 // Save to memory
                 memoryCache.setObject(image, forKey: key)
@@ -118,5 +130,45 @@ class ImageCache {
     /// Clear the entire memory cache.
     func clearMemoryCache() {
         memoryCache.removeAllObjects()
+    }
+
+    /// Remove all cached files whose bookId prefix matches. Evicts from memory too.
+    func clearCache(for bookId: String) {
+        evict(bookId: bookId)
+    }
+
+    /// Evict least-recently-used disk cache entries until total size is under `maxDiskCacheSize`.
+    /// Nonisolated so it can be called from a detached background Task.
+    nonisolated func evictLRUIfNeeded() {
+        let fm = FileManager.default
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dir = docs.appendingPathComponent("cover-cache", isDirectory: true)
+
+        guard let contents = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        // Build list of (url, size, modDate) sorted oldest-first
+        var entries: [(url: URL, size: Int, date: Date)] = []
+        var totalSize = 0
+        for fileURL in contents {
+            guard let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+                  let size = values.fileSize,
+                  let date = values.contentModificationDate else { continue }
+            entries.append((url: fileURL, size: size, date: date))
+            totalSize += size
+        }
+
+        guard totalSize > maxDiskCacheSize else { return }
+
+        entries.sort { $0.date < $1.date }
+
+        for entry in entries {
+            guard totalSize > maxDiskCacheSize else { break }
+            try? fm.removeItem(at: entry.url)
+            totalSize -= entry.size
+        }
     }
 }

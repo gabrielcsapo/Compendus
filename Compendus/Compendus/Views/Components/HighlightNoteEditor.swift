@@ -11,6 +11,7 @@
 //
 
 import SwiftUI
+import EPUBReader
 
 struct HighlightNoteEditor: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager

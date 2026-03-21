@@ -8,6 +8,7 @@
 //
 
 import UIKit
+import EPUBReader
 
 @Observable
 @MainActor

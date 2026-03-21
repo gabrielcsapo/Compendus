@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct ContentView: View {
     @Environment(ServerConfig.self) private var serverConfig
@@ -104,7 +105,6 @@ struct ContentView: View {
             if book.isAudiobook {
                 Task {
                     await audiobookPlayer.loadBook(book)
-                    audiobookPlayer.play()
                     audiobookPlayer.isFullPlayerPresented = true
                 }
             } else {
@@ -143,12 +143,12 @@ struct CustomBottomBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Mini player (when active)
+            // Mini player (when active) — its progress bar acts as the divider
             if player.hasActiveSession && !player.isFullPlayerPresented {
                 MiniPlayerView()
+            } else {
+                Divider()
             }
-
-            Divider()
 
             // Tab buttons
             HStack(spacing: 0) {

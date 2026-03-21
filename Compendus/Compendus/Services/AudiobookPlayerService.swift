@@ -29,10 +29,10 @@ class AudiobookPlayer: NSObject {
         currentBook != nil && duration > 0
     }
 
-    @ObservationIgnored private var player: AVAudioPlayer?
+    @ObservationIgnored private var player: AVPlayer?
+    @ObservationIgnored private var playerItemObserver: Any?
     @ObservationIgnored private var chapters: [Chapter] = []
     @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var sleepTimer: Timer?
     @ObservationIgnored private var progressSaveTimer: Timer?
     @ObservationIgnored private var currentSession: ReadingSession?
     @ObservationIgnored private var sessionContext: ModelContext?
@@ -95,7 +95,6 @@ class AudiobookPlayer: NSObject {
         currentChapter = nil
         progressSaveTimer?.invalidate()
         progressSaveTimer = nil
-        cancelSleepTimer()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
@@ -104,19 +103,49 @@ class AudiobookPlayer: NSObject {
     private func load(url: URL, chapters: [Chapter]?) async {
         self.chapters = chapters ?? []
 
-        do {
-            player = try AVAudioPlayer(contentsOf: url)
-            player?.delegate = self
-            player?.prepareToPlay()
-            duration = player?.duration ?? 0
-            updateCurrentChapter()
-        } catch {
-            print("Error loading audio: \(error)")
+        // Remove previous end-of-playback observer
+        if let observer = playerItemObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playerItemObserver = nil
         }
+
+        let asset = AVURLAsset(url: url)
+        do {
+            let assetDuration = try await asset.load(.duration)
+            duration = assetDuration.seconds.isNaN ? 0 : assetDuration.seconds
+        } catch {
+            print("Error loading audio asset: \(error)")
+        }
+
+        let item = AVPlayerItem(asset: asset)
+        // Preserve pitch when adjusting playback rate
+        item.audioTimePitchAlgorithm = .timeDomain
+
+        player = AVPlayer(playerItem: item)
+        // AirPlay requires AVPlayer; allowsExternalPlayback enables routing via AVRoutePickerView
+        player?.allowsExternalPlayback = true
+        // Local files don't need stalling prevention; skip buffering delay for instant start
+        player?.automaticallyWaitsToMinimizeStalling = false
+
+        playerItemObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.isPlaying = false
+                self?.stopTimer()
+                self?.saveProgress()
+                self?.finalizeListeningSession()
+            }
+        }
+
+        updateCurrentChapter()
     }
 
     func play() {
-        player?.play()
+        // Setting rate to a non-zero value both starts and applies speed in AVPlayer
+        player?.rate = playbackRate
         isPlaying = true
         startTimer()
     }
@@ -128,7 +157,7 @@ class AudiobookPlayer: NSObject {
     }
 
     func seek(to time: Double) {
-        player?.currentTime = time
+        player?.seek(to: CMTime(seconds: time, preferredTimescale: 600))
         currentTime = time
         updateCurrentChapter()
         updateNowPlayingTime()
@@ -146,24 +175,10 @@ class AudiobookPlayer: NSObject {
 
     func setPlaybackRate(_ rate: Float) {
         playbackRate = rate
-        player?.rate = rate
         if isPlaying {
-            player?.play()
+            player?.rate = rate
         }
-    }
-
-    func setSleepTimer(minutes: Int) {
-        sleepTimer?.invalidate()
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes * 60), repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.pause()
-            }
-        }
-    }
-
-    func cancelSleepTimer() {
-        sleepTimer?.invalidate()
-        sleepTimer = nil
+        updateNowPlayingTime()
     }
 
     // MARK: - Progress Saving
@@ -325,7 +340,9 @@ class AudiobookPlayer: NSObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, let player = self.player else { return }
-                self.currentTime = player.currentTime
+                let t = player.currentTime().seconds
+                guard !t.isNaN && !t.isInfinite else { return }
+                self.currentTime = t
                 self.updateCurrentChapter()
                 self.updateNowPlayingTime()
             }
@@ -415,8 +432,11 @@ class AudiobookPlayer: NSObject {
     }
 
     private func stopPlayback() {
-        player?.delegate = nil
-        player?.stop()
+        if let observer = playerItemObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playerItemObserver = nil
+        }
+        player?.pause()
         player = nil
         isPlaying = false
         currentTime = 0
@@ -425,13 +445,3 @@ class AudiobookPlayer: NSObject {
     }
 }
 
-extension AudiobookPlayer: @preconcurrency AVAudioPlayerDelegate {
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in
-            self.isPlaying = false
-            self.stopTimer()
-            self.saveProgress()
-            self.finalizeListeningSession()
-        }
-    }
-}

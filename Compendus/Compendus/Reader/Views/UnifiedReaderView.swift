@@ -9,6 +9,7 @@
 
 import SwiftUI
 import SwiftData
+import EPUBReader
 
 struct UnifiedReaderView: View {
     let book: DownloadedBook
@@ -109,141 +110,134 @@ struct UnifiedReaderView: View {
         case error(String)
     }
 
-    var body: some View {
-        Group {
-            switch readerState {
-            case .loading:
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 200)
-                    Text("Loading...")
-                        .foregroundStyle(.secondary)
-                }
+    // Break out complex optional chains to help the type-checker across module boundaries
+    private var currentProgression: Double? { engine?.currentLocation?.totalProgression }
 
-            case .ready:
-                if let engine = engine {
-                    readerContent(engine: engine)
+    @ViewBuilder private var stateContent: some View {
+        switch readerState {
+        case .loading:
+            VStack(spacing: 16) {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 200)
+                Text("Loading...")
+                    .foregroundStyle(.secondary)
+            }
+        case .ready:
+            if let engine = engine {
+                readerContent(engine: engine)
+            }
+        case .error(let message):
+            ContentUnavailableView {
+                Label("Error", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try Again") {
+                    readerState = .loading
+                    Task { await initializeEngine() }
                 }
-
-            case .error(let message):
-                ContentUnavailableView {
-                    Label("Error", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(message)
-                } actions: {
-                    Button("Try Again") {
-                        readerState = .loading
-                        Task { await initializeEngine() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("Close", role: .cancel) {
-                        dismiss()
-                    }
-                    .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                Button("Close", role: .cancel) {
+                    dismiss()
                 }
+                .buttonStyle(.bordered)
             }
         }
-        .ignoresSafeArea(.all)
-        .statusBarHidden(!showingOverlay)
+    }
+
+    // Lifecycle modifiers only — kept small for the type-checker
+    private var lifecycleContent: some View {
+        stateContent
+            .ignoresSafeArea(.all)
+            .statusBarHidden(!showingOverlay)
+            .task { await initializeEngine() }
+            .onChange(of: currentProgression) { _, _ in updateReadingSession() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in saveProgress() }
+            .onDisappear {
+                saveProgress()
+                readerModeActive = false
+                readAlongService.deactivate()
+                if let nativeEPUB = engine as? NativeEPUBEngine { nativeEPUB.cleanup() }
+                #if !targetEnvironment(macCatalyst)
+                if engine?.isPDF == true { UIScreen.main.brightness = CGFloat(originalBrightness) }
+                #endif
+            }
         #if targetEnvironment(macCatalyst)
-        .focusable()
-        .focusEffectDisabled()
-        .onKeyPress(.leftArrow) {
-            hideOverlayIfShowing()
-            showingFloatingToolbar = false
-            Task { await engine?.goBackward() }
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            hideOverlayIfShowing()
-            showingFloatingToolbar = false
-            Task { await engine?.goForward() }
-            return .handled
-        }
+            .focusable()
+            .focusEffectDisabled()
+            .onKeyPress(.leftArrow) {
+                hideOverlayIfShowing(); showingFloatingToolbar = false
+                Task { await engine?.goBackward() }; return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                hideOverlayIfShowing(); showingFloatingToolbar = false
+                Task { await engine?.goForward() }; return .handled
+            }
         #endif
-        .task { await initializeEngine() }
-        .onChange(of: engine?.currentLocation?.totalProgression) { _, _ in
-            updateReadingSession()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            saveProgress()
-        }
-        .onDisappear {
-            saveProgress()
-            readerModeActive = false
-            readAlongService.deactivate()
-            if let nativeEPUB = engine as? NativeEPUBEngine {
-                nativeEPUB.cleanup()
+    }
+
+    // ── Sheet group 1: settings, TOC, highlights ──
+    private var sheetsGroup1: some View {
+        lifecycleContent
+            .sheet(isPresented: $showingSettings, onDismiss: {
+                engine?.applySettings(readerSettings)
+            }) {
+                ReaderSettingsView(format: engine?.isComic == true ? .comic : (engine?.isPDF == true ? .pdf : .epub), bookId: book.id)
+                    .readerThemed(readerSettings)
             }
-            #if !targetEnvironment(macCatalyst)
-            if engine?.isPDF == true {
-                UIScreen.main.brightness = CGFloat(originalBrightness)
-            }
-            #endif
-        }
-        // Settings — apply changes on dismiss to avoid lag during adjustment
-        .sheet(isPresented: $showingSettings, onDismiss: {
-            engine?.applySettings(readerSettings)
-        }) {
-            ReaderSettingsView(format: engine?.isComic == true ? .comic : (engine?.isPDF == true ? .pdf : .epub), bookId: book.id)
-                .readerThemed(readerSettings)
-        }
-        // TOC
-        .sheet(isPresented: $showingTOC) {
-            if let comicEngine = engine as? ComicEngine {
-                ComicThumbnailGridView(
-                    engine: comicEngine,
-                    onSelect: { pageIndex in
-                        Task {
-                            await comicEngine.go(to: ReaderLocation(
-                                href: nil, pageIndex: pageIndex,
-                                progression: 0, totalProgression: 0, title: nil
-                            ))
+            .sheet(isPresented: $showingTOC) {
+                if let comicEngine = engine as? ComicEngine {
+                    ComicThumbnailGridView(
+                        engine: comicEngine,
+                        onSelect: { pageIndex in
+                            Task {
+                                await comicEngine.go(to: ReaderLocation(
+                                    href: nil, pageIndex: pageIndex,
+                                    progression: 0, totalProgression: 0, title: nil
+                                ))
+                            }
+                            showingTOC = false
                         }
-                        showingTOC = false
-                    }
-                )
-                .readerThemed(readerSettings)
-            } else {
-                ReaderTOCView(
-                    items: tocItems,
-                    currentLocation: engine?.currentLocation,
-                    onSelect: { item in
-                        Task {
-                            await engine?.go(to: item.location)
+                    )
+                    .readerThemed(readerSettings)
+                } else {
+                    ReaderTOCView(
+                        items: tocItems,
+                        currentLocation: engine?.currentLocation,
+                        onSelect: { item in
+                            Task { await engine?.go(to: item.location) }
+                            showingTOC = false
                         }
-                        showingTOC = false
-                    }
-                )
-                .readerThemed(readerSettings)
-                .task {
-                    // Refresh TOC items to get latest page numbers after pagination
-                    if let items = await engine?.tableOfContents(), !items.isEmpty {
-                        tocItems = items
+                    )
+                    .readerThemed(readerSettings)
+                    .task {
+                        if let items = await engine?.tableOfContents(), !items.isEmpty {
+                            tocItems = items
+                        }
                     }
                 }
             }
-        }
-        // Highlights list
-        .sheet(isPresented: $showingHighlights) {
-            ReaderHighlightsListView(
-                highlights: highlights,
-                onSelect: { highlight in
-                    navigateToHighlight(highlight)
-                    showingHighlights = false
-                },
-                onDelete: { highlight in
-                    deleteHighlight(highlight)
-                },
-                onEditNote: { highlight in
-                    showingHighlights = false
-                    editingHighlight = highlight
-                }
-            )
-            .readerThemed(readerSettings)
-        }
-        // Bookmarks list
+            .sheet(isPresented: $showingHighlights) {
+                ReaderHighlightsListView(
+                    highlights: highlights,
+                    onSelect: { highlight in
+                        navigateToHighlight(highlight)
+                        showingHighlights = false
+                    },
+                    onDelete: { highlight in deleteHighlight(highlight) },
+                    onEditNote: { highlight in
+                        showingHighlights = false
+                        editingHighlight = highlight
+                    }
+                )
+                .readerThemed(readerSettings)
+            }
+    }
+
+    // ── Sheet group 2: bookmarks, bookmark edit, note input ──
+    private var sheetsGroup2: some View {
+        sheetsGroup1
         .sheet(isPresented: $showingBookmarks) {
             NavigationStack {
                 List {
@@ -345,170 +339,166 @@ struct UnifiedReaderView: View {
             .presentationDetents([.medium, .large])
             .readerThemed(readerSettings)
         }
-        // Edit note
-        .sheet(item: $editingHighlight) { highlight in
-            EditNoteSheet(highlight: highlight) {
-                try? modelContext.save()
-                fetchHighlights()
-            }
-            .readerThemed(readerSettings)
-        }
-        // Tapped highlight actions
-        .sheet(item: $tappedHighlight) { highlight in
-            HighlightEditSheet(
-                bookId: book.id,
-                highlight: highlight,
-                onChangeColor: { color in
-                    highlight.color = color
-                    if let pdfEngine = engine as? PDFEngine {
-                        pdfEngine.updateAnnotationColor(for: highlight, color: color)
-                    }
+    }
+
+    // ── Sheet group 3: highlight editors + fullscreen covers ──
+    private var sheetsGroup3: some View {
+        sheetsGroup2
+            .sheet(item: $editingHighlight) { highlight in
+                EditNoteSheet(highlight: highlight) {
                     try? modelContext.save()
                     fetchHighlights()
-                },
-                onSaveNote: { note in
-                    highlight.note = note
-                    try? modelContext.save()
-                    fetchHighlights()
-                },
-                onCopy: {
-                    UIPasteboard.general.string = highlight.text
-                },
-                onDelete: {
-                    deleteHighlight(highlight)
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .readerThemed(readerSettings)
-        }
-        // First-time highlight setup (full-screen so banners don't distract)
-        .fullScreenCover(isPresented: $showingHighlightSetup) {
-            HighlightSetupSheet(
-                bookId: book.id,
-                bookTitle: book.title,
-                onUseDefaults: {},
-                onCustomize: {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showingBookColorEditor = true
-                    }
-                }
-            )
-            .readerThemed(readerSettings)
-        }
-        // Book-specific color editor
-        .sheet(isPresented: $showingBookColorEditor) {
-            NavigationStack {
-                BookHighlightColorsEditor(bookId: book.id)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Done") { showingBookColorEditor = false }
-                        }
-                    }
-            }
-            .readerThemed(readerSettings)
-        }
-        // Page jump
-        .sheet(isPresented: $showingPageJump) {
-            if let engine = engine {
-                if engine.isPDF || engine.isComic {
-                    let currentPage = (engine.currentLocation?.pageIndex ?? 0) + 1
-                    PageJumpView(
-                        totalPages: engine.totalPositions,
-                        currentPage: currentPage,
-                        onJump: { progression in
-                            Task { await engine.go(toProgression: progression) }
-                        }
-                    )
-                    .presentationDetents([.height(240)])
-                    .presentationDragIndicator(.hidden)
-                    .readerThemed(readerSettings)
-                } else if let nativeEngine = engine as? NativeEPUBEngine {
-                    PageJumpView(
-                        totalPages: nativeEngine.totalPositions,
-                        currentPage: nativeEngine.globalPageIndex + 1,
-                        chapterTitle: engine.currentLocation?.title,
-                        chapterTitleForPage: { page in
-                            nativeEngine.chapterTitle(forGlobalPage: page)
-                        },
-                        onJump: { progression in
-                            Task {
-                                await nativeEngine.go(toProgression: progression)
-                            }
-                        }
-                    )
-                    .presentationDetents([.height(240)])
-                    .presentationDragIndicator(.hidden)
-                    .readerThemed(readerSettings)
-                }
-            }
-        }
-        // Search
-        .sheet(isPresented: $showingSearch) {
-            if let engine = engine {
-                ReaderSearchView(engine: engine) { location in
-                    Task { await engine.go(to: location) }
                 }
                 .readerThemed(readerSettings)
             }
-        }
-        .sheet(isPresented: $showingFootnote) {
-            NavigationStack {
-                ScrollView {
-                    Text(footnoteContent)
-                        .font(.body)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            .sheet(item: $tappedHighlight) { highlight in
+                HighlightEditSheet(
+                    bookId: book.id,
+                    highlight: highlight,
+                    onChangeColor: { color in
+                        highlight.color = color
+                        if let pdfEngine = engine as? PDFEngine {
+                            pdfEngine.updateAnnotationColor(for: highlight, color: color)
+                        }
+                        try? modelContext.save()
+                        fetchHighlights()
+                    },
+                    onSaveNote: { note in
+                        highlight.note = note
+                        try? modelContext.save()
+                        fetchHighlights()
+                    },
+                    onCopy: { UIPasteboard.general.string = highlight.text },
+                    onDelete: { deleteHighlight(highlight) }
+                )
+                .presentationDetents([.medium, .large])
+                .readerThemed(readerSettings)
+            }
+            .fullScreenCover(isPresented: $showingHighlightSetup) {
+                HighlightSetupSheet(
+                    bookId: book.id,
+                    bookTitle: book.title,
+                    onUseDefaults: {},
+                    onCustomize: {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingBookColorEditor = true
+                        }
+                    }
+                )
+                .readerThemed(readerSettings)
+            }
+            .sheet(isPresented: $showingBookColorEditor) {
+                NavigationStack {
+                    BookHighlightColorsEditor(bookId: book.id)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { showingBookColorEditor = false }
+                            }
+                        }
                 }
-                .navigationTitle("Footnote")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showingFootnote = false }
+                .readerThemed(readerSettings)
+            }
+    }
+
+    // ── Sheet group 4: navigation + footnote ──
+    private var sheetsGroup4: some View {
+        sheetsGroup3
+            .sheet(isPresented: $showingPageJump) {
+                if let engine = engine {
+                    if engine.isPDF || engine.isComic {
+                        PageJumpView(
+                            totalPages: engine.totalPositions,
+                            currentPage: (engine.currentLocation?.pageIndex ?? 0) + 1,
+                            onJump: { progression in
+                                Task { await engine.go(toProgression: progression) }
+                            }
+                        )
+                        .presentationDetents([.height(240)])
+                        .presentationDragIndicator(.hidden)
+                        .readerThemed(readerSettings)
+                    } else if let nativeEngine = engine as? NativeEPUBEngine {
+                        PageJumpView(
+                            totalPages: nativeEngine.totalPositions,
+                            currentPage: nativeEngine.globalPageIndex + 1,
+                            chapterTitle: engine.currentLocation?.title,
+                            chapterTitleForPage: { page in nativeEngine.chapterTitle(forGlobalPage: page) },
+                            onJump: { progression in
+                                Task { await nativeEngine.go(toProgression: progression) }
+                            }
+                        )
+                        .presentationDetents([.height(240)])
+                        .presentationDragIndicator(.hidden)
+                        .readerThemed(readerSettings)
                     }
                 }
             }
-            .presentationDetents([.medium])
-            .readerThemed(readerSettings)
-        }
-        .alert(
-            pendingLinkIsExternal ? "Open External Link?" : "Navigate to Link?",
-            isPresented: $showingLinkConfirmation
-        ) {
-            Button("Cancel", role: .cancel) {
-                pendingLinkURL = nil
-            }
-            Button(pendingLinkIsExternal ? "Open" : "Go") {
-                if let url = pendingLinkURL,
-                   let nativeEngine = engine as? NativeEPUBEngine {
-                    nativeEngine.performLinkNavigation(url)
-                }
-                pendingLinkURL = nil
-            }
-        } message: {
-            if let url = pendingLinkURL {
-                if pendingLinkIsExternal {
-                    Text("This will open \(url.absoluteString) in your browser.")
-                } else {
-                    Text("Navigate to this section in the book?")
+            .sheet(isPresented: $showingSearch) {
+                if let engine = engine {
+                    ReaderSearchView(engine: engine) { location in
+                        Task { await engine.go(to: location) }
+                    }
+                    .readerThemed(readerSettings)
                 }
             }
-        }
-        // Settings changes — skip while settings sheet is open (applied on dismiss)
-        .onChange(of: readerSettings.theme) { _, _ in
-            if !showingSettings { engine?.applySettings(readerSettings) }
-        }
-        .onChange(of: readerSettings.fontFamily) { _, _ in
-            if !showingSettings { engine?.applySettings(readerSettings) }
-        }
-        .onChange(of: readerSettings.fontSize) { _, _ in
-            if !showingSettings { engine?.applySettings(readerSettings) }
-        }
-        .onChange(of: readerSettings.lineHeight) { _, _ in
-            if !showingSettings { engine?.applySettings(readerSettings) }
-        }
-        .onChange(of: readerSettings.layout) { _, _ in
-            if !showingSettings { engine?.applySettings(readerSettings) }
-        }
+            .sheet(isPresented: $showingFootnote) {
+                NavigationStack {
+                    ScrollView {
+                        Text(footnoteContent)
+                            .font(.body)
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .navigationTitle("Footnote")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingFootnote = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+                .readerThemed(readerSettings)
+            }
+    }
+
+    var body: some View {
+        sheetsGroup4
+            .alert(
+                pendingLinkIsExternal ? "Open External Link?" : "Navigate to Link?",
+                isPresented: $showingLinkConfirmation
+            ) {
+                Button("Cancel", role: .cancel) { pendingLinkURL = nil }
+                Button(pendingLinkIsExternal ? "Open" : "Go") {
+                    if let url = pendingLinkURL,
+                       let nativeEngine = engine as? NativeEPUBEngine {
+                        nativeEngine.performLinkNavigation(url)
+                    }
+                    pendingLinkURL = nil
+                }
+            } message: {
+                if let url = pendingLinkURL {
+                    if pendingLinkIsExternal {
+                        Text("This will open \(url.absoluteString) in your browser.")
+                    } else {
+                        Text("Navigate to this section in the book?")
+                    }
+                }
+            }
+            .onChange(of: readerSettings.theme) { _, _ in
+                if !showingSettings { engine?.applySettings(readerSettings) }
+            }
+            .onChange(of: readerSettings.fontFamily) { _, _ in
+                if !showingSettings { engine?.applySettings(readerSettings) }
+            }
+            .onChange(of: readerSettings.fontSize) { _, _ in
+                if !showingSettings { engine?.applySettings(readerSettings) }
+            }
+            .onChange(of: readerSettings.lineHeight) { _, _ in
+                if !showingSettings { engine?.applySettings(readerSettings) }
+            }
+            .onChange(of: readerSettings.layout) { _, _ in
+                if !showingSettings { engine?.applySettings(readerSettings) }
+            }
     }
 
     // MARK: - Reader Content

@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import SwiftData
 import PhotosUI
 
 struct ProfileView: View {
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(APIService.self) private var apiService
+    @Environment(\.modelContext) private var modelContext
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isUploading = false
@@ -24,6 +26,9 @@ struct ProfileView: View {
     @State private var showingPinSheet = false
     @State private var showingNameSheet = false
     @State private var customEmoji = ""
+    @State private var streakDays: Int = 0
+    @State private var todayMinutes: Int = 0
+    @State private var showingStreakStats = false
 
     private let emojiSuggestions = [
         "\u{1F60A}", "\u{1F4DA}", "\u{1F98A}", "\u{1F31F}", "\u{1F3A8}", "\u{1F3B5}",
@@ -32,12 +37,19 @@ struct ProfileView: View {
 
     var body: some View {
         Form {
+            streakSliverSection
             avatarSection
             profileInfoSection
             actionsSection
         }
         .navigationTitle("Profile")
-        .task { await loadProfile() }
+        .task {
+            await loadProfile()
+            await calculateStreak()
+        }
+        .sheet(isPresented: $showingStreakStats) {
+            ReadingDashboardView()
+        }
         .onChange(of: selectedPhoto) { _, newItem in
             if let newItem {
                 Task { await uploadPhoto(newItem) }
@@ -239,7 +251,80 @@ struct ProfileView: View {
         .onDisappear { customEmoji = "" }
     }
 
+    @ViewBuilder
+    private var streakSliverSection: some View {
+        Section {
+            Button {
+                showingStreakStats = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: streakDays > 0 ? "flame.fill" : "flame")
+                        .font(.title3)
+                        .foregroundStyle(streakDays > 0 ? .orange : .secondary)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(streakDays == 1 ? "1 day streak" : "\(streakDays) day streak")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                        Text(todayMinutes > 0 ? "\(todayMinutes)m read today" : "Read today to keep your streak")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(.primary)
+        }
+    }
+
     // MARK: - Actions
+
+    private func calculateStreak() async {
+        let descriptor = FetchDescriptor<ReadingSession>(
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        guard let allSessions = try? modelContext.fetch(descriptor), !allSessions.isEmpty else {
+            streakDays = 0; todayMinutes = 0; return
+        }
+        let pid = serverConfig.selectedProfileId ?? ""
+        let sessions = allSessions.filter { $0.profileId == pid || $0.profileId.isEmpty }
+        guard !sessions.isEmpty else { streakDays = 0; todayMinutes = 0; return }
+
+        let sessionData = sessions.map { (startedAt: $0.startedAt, durationSeconds: $0.durationSeconds) }
+        let (streak, minutes) = await Task.detached {
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            var daysWithReading: Set<Date> = []
+            var todaySeconds = 0
+            for s in sessionData {
+                let day = calendar.startOfDay(for: s.startedAt)
+                daysWithReading.insert(day)
+                if day == today { todaySeconds += s.durationSeconds }
+            }
+            var count = 0
+            var check = today
+            if daysWithReading.contains(check) {
+                count = 1
+                check = calendar.date(byAdding: .day, value: -1, to: check)!
+            } else {
+                check = calendar.date(byAdding: .day, value: -1, to: check)!
+                if !daysWithReading.contains(check) { return (0, todaySeconds / 60) }
+            }
+            while daysWithReading.contains(check) {
+                count += 1
+                check = calendar.date(byAdding: .day, value: -1, to: check)!
+            }
+            return (count, todaySeconds / 60)
+        }.value
+        streakDays = streak
+        todayMinutes = minutes
+    }
 
     private func loadProfile() async {
         do {
