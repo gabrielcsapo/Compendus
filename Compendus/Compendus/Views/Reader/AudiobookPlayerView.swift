@@ -34,6 +34,7 @@ struct AudiobookPlayerView: View {
     /// True when the current transcription was started as "live" (tied to playback).
     @State private var isLiveTranscription = false
     @State private var isLoadingBook = false
+    @State private var loadError: String?
     @State private var showStopConfirmation = false
     @State private var sleepTimer: Timer?
     @State private var sleepTimerFireDate: Date?
@@ -96,6 +97,36 @@ struct AudiobookPlayerView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding(.top, 8)
+                        Spacer()
+                    } else if let errorMessage = loadError {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.secondary)
+                            Text(errorMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("Try Again") {
+                                loadError = nil
+                                isLoadingBook = true
+                                Task {
+                                    let timeoutTask = Task {
+                                        try? await Task.sleep(nanoseconds: 15_000_000_000)
+                                        if isLoadingBook {
+                                            isLoadingBook = false
+                                            loadError = "Loading timed out. Please try again."
+                                        }
+                                    }
+                                    await player.loadBook(book)
+                                    timeoutTask.cancel()
+                                    isLoadingBook = false
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding()
                         Spacer()
                     } else if showLyrics, liveBufferResumeTime != nil {
                         // Buffering transcript before playback resumes
@@ -237,7 +268,15 @@ struct AudiobookPlayerView: View {
             // Only load if this isn't already the active book
             if player.currentBook?.id != book.id {
                 isLoadingBook = true
+                let timeoutTask = Task {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    if isLoadingBook {
+                        isLoadingBook = false
+                        loadError = "Loading timed out. Check your connection and try again."
+                    }
+                }
                 await player.loadBook(book)
+                timeoutTask.cancel()
                 isLoadingBook = false
             }
             // Load transcript if available

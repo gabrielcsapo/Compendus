@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from "react";
 import { Link } from "react-flight-router/client";
+import { useToast } from "./ToastContext";
 import {
   deleteOrphanedFile,
   deleteMissingFileRecord,
@@ -157,6 +158,7 @@ export function AdminDataClient({
   booksDir,
   jobs: initialJobs,
 }: AdminDataClientProps) {
+  const { showToast } = useToast();
   const [orphanedFiles, setOrphanedFiles] = useState(initialOrphanedFiles);
   const [matchedFiles, setMatchedFiles] = useState(initialMatchedFiles);
   const [missingFiles, setMissingFiles] = useState(initialMissingFiles);
@@ -224,7 +226,7 @@ export function AdminDataClient({
         );
       }
     } else {
-      alert(result.message);
+      showToast(result.message, "error");
     }
   };
 
@@ -239,7 +241,7 @@ export function AdminDataClient({
       setOrphanedFiles((prev) => prev.filter((f) => f.path !== file.path));
       setOrphanedSize((prev) => prev - file.size);
     } else {
-      alert(result.message);
+      showToast(result.message, "error");
     }
   };
 
@@ -286,10 +288,10 @@ export function AdminDataClient({
           );
         }
       } else {
-        alert(result.message || result.error || "Upload failed");
+        showToast(result.message || result.error || "Upload failed", "error");
       }
     } catch {
-      alert("Upload failed");
+      showToast("Upload failed", "error");
     } finally {
       setUploading(null);
       uploadBookIdRef.current = null;
@@ -306,7 +308,7 @@ export function AdminDataClient({
     if (result.success) {
       setMissingFiles((prev) => prev.filter((b) => b.id !== book.id));
     } else {
-      alert(result.message);
+      showToast(result.message, "error");
     }
   };
 
@@ -320,7 +322,7 @@ export function AdminDataClient({
     if (success) {
       setMatchedFiles((prev) => prev.filter((f) => f.book.id !== file.book.id));
     } else {
-      alert("Failed to delete book");
+      showToast("Failed to delete book", "error");
     }
   };
 

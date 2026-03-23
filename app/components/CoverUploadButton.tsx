@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "react-flight-router/client";
 
 interface CoverUploadButtonProps {
   bookId: string;
@@ -8,6 +9,7 @@ interface CoverUploadButtonProps {
 }
 
 export function CoverUploadButton({ bookId, hasCover }: CoverUploadButtonProps) {
+  const router = useRouter();
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -49,7 +51,7 @@ export function CoverUploadButton({ bookId, hasCover }: CoverUploadButtonProps) 
 
       if (result.success) {
         // Refresh the page to show the new cover
-        window.location.reload();
+        router.refresh();
       } else {
         setError(
           result.error === "processing_failed"

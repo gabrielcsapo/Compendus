@@ -72,8 +72,8 @@ struct ProfileView: View {
             emojiPickerSheet
         }
         .sheet(isPresented: $showingPinSheet) {
-            PinChangeSheet(hasExistingPin: currentProfile?.hasPin == true) { newPin in
-                await updatePin(newPin)
+            PinChangeSheet(hasExistingPin: currentProfile?.hasPin == true) { currentPin, newPin in
+                await updatePin(currentPin: currentPin, newPin: newPin)
             }
         }
         .sheet(isPresented: $showingNameSheet) {
@@ -412,9 +412,13 @@ struct ProfileView: View {
         }
     }
 
-    private func updatePin(_ newPin: String?) async -> Bool {
+    private func updatePin(currentPin: String?, newPin: String?) async -> Bool {
         guard let profileId = serverConfig.selectedProfileId else { return false }
         do {
+            // Verify current PIN before allowing change
+            if let currentPin {
+                _ = try await apiService.selectProfile(id: profileId, pin: currentPin)
+            }
             let updated = try await apiService.updateProfile(id: profileId, pin: .some(newPin))
             await MainActor.run {
                 serverConfig.selectProfile(updated)
@@ -423,7 +427,7 @@ struct ProfileView: View {
             return true
         } catch {
             await MainActor.run {
-                errorMessage = "Failed to update PIN"
+                errorMessage = currentPin != nil ? "Current PIN is incorrect" : "Failed to update PIN"
                 showingError = true
             }
             return false
@@ -512,21 +516,32 @@ private struct NameChangeSheet: View {
 
 private struct PinChangeSheet: View {
     let hasExistingPin: Bool
-    let onSave: (String?) async -> Bool
+    let onSave: (String?, String?) async -> Bool
 
     @Environment(\.dismiss) private var dismiss
+    @State private var currentPin = ""
     @State private var pin = ""
     @State private var confirmPin = ""
     @State private var showingRemoveConfirmation = false
     @State private var isSaving = false
 
     private var isValid: Bool {
+        (!hasExistingPin || currentPin.count == 4) &&
         pin.count == 4 && pin == confirmPin && pin.allSatisfy(\.isNumber)
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                if hasExistingPin {
+                    Section("Current PIN") {
+                        SecureField("Current 4-digit PIN", text: $currentPin)
+                            .keyboardType(.numberPad)
+                            .textContentType(.password)
+                            .disabled(isSaving)
+                    }
+                }
+
                 Section {
                     SecureField("New 4-digit PIN", text: $pin)
                         .keyboardType(.numberPad)
@@ -570,7 +585,8 @@ private struct PinChangeSheet: View {
                         Button("Save") {
                             isSaving = true
                             Task {
-                                let success = await onSave(pin)
+                                let current = hasExistingPin ? currentPin : nil
+                                let success = await onSave(current, pin)
                                 isSaving = false
                                 if success { dismiss() }
                             }
@@ -583,7 +599,8 @@ private struct PinChangeSheet: View {
                 Button("Remove PIN", role: .destructive) {
                     isSaving = true
                     Task {
-                        let success = await onSave(nil)
+                        let current = hasExistingPin ? currentPin : nil
+                        let success = await onSave(current, nil)
                         isSaving = false
                         if success { dismiss() }
                     }

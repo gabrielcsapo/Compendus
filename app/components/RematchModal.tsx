@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "react-flight-router/client";
 import { refreshMetadata, searchMetadata, applyMetadata } from "../actions/books";
 import { buttonStyles, badgeStyles, inputStyles } from "../lib/styles";
 import type { MetadataSearchResult } from "../lib/metadata";
@@ -27,6 +28,7 @@ export function RematchModal({
   hasCover,
   coverUrl,
 }: RematchModalProps) {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{
     text: string;
@@ -45,7 +47,7 @@ export function RematchModal({
       const result = await refreshMetadata(bookId);
       setMessage({ text: result.message, type: result.success ? "success" : "info" });
       if (result.success && result.book) {
-        setTimeout(() => window.location.reload(), 1000);
+        router.refresh();
       }
     } catch (error) {
       setMessage({ text: `Failed to refresh metadata: ${(error as any).message}`, type: "error" });
@@ -92,7 +94,7 @@ export function RematchModal({
       const result = await applyMetadata(bookId, metadata, { skipCover });
       setMessage({ text: result.message, type: result.success ? "success" : "error" });
       if (result.success) {
-        setTimeout(() => window.location.reload(), 1000);
+        router.refresh();
       }
     } catch {
       setMessage({ text: "Failed to apply metadata", type: "error" });

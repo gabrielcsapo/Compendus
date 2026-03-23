@@ -176,6 +176,7 @@ private struct BookHighlightsDetailView: View {
     @State private var bookToOpen: DownloadedBook?
     @State private var highlightPosition: String?
     @State private var editingHighlight: BookHighlight?
+    @State private var saveError: String?
 
     var body: some View {
         List {
@@ -202,7 +203,12 @@ private struct BookHighlightsDetailView: View {
                     let highlight = highlights[index]
                     modelContext.delete(highlight)
                 }
-                try? modelContext.save()
+                do {
+                    try modelContext.save()
+                } catch {
+                    HapticFeedback.error()
+                    saveError = "Couldn't delete highlight. Please try again."
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -230,9 +236,16 @@ private struct BookHighlightsDetailView: View {
         }
         .sheet(item: $editingHighlight) { highlight in
             EditNoteSheet(highlight: highlight) {
-                try? modelContext.save()
+                do {
+                    try modelContext.save()
+                    HapticFeedback.lightImpact()
+                } catch {
+                    HapticFeedback.error()
+                    saveError = "Couldn't save note. Please try again."
+                }
             }
         }
+        .bannerToast($saveError, type: .error)
     }
 }
 

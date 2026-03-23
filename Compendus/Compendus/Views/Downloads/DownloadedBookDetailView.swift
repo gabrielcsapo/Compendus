@@ -41,6 +41,7 @@ struct DownloadedBookDetailView: View {
     @State private var isLoadingAudiobook = false
     @State private var showingDeleteError = false
     @State private var deleteError: String?
+    @State private var saveError: String?
 
     var body: some View {
         ScrollView {
@@ -135,6 +136,7 @@ struct DownloadedBookDetailView: View {
                 }
             )
         }
+        .bannerToast($saveError, type: .error)
     }
 
     // MARK: - Hero Cover
@@ -678,6 +680,7 @@ struct BookManagementSheet: View {
     @State private var showingTranscriptDeleteError = false
     @State private var showingEditSheet = false
     @State private var showingReviewSheet = false
+    @State private var saveError: String?
 
     /// Whether a transcript exists (saved or in-progress partial)
     private var hasAnyTranscript: Bool {
@@ -838,7 +841,7 @@ struct BookManagementSheet: View {
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This will remove \"\(book.title)\" from your device. You can download it again from your library.")
+                Text("This will remove \"\(book.title)\" from your device, including all highlights and bookmarks. You can download it again from your library.")
             }
             .confirmationDialog(
                 "Delete Transcript?",
@@ -865,28 +868,41 @@ struct BookManagementSheet: View {
         } message: {
             Text(transcriptDeleteError ?? "An error occurred.")
         }
+        .bannerToast($saveError, type: .error)
     }
 
     private func toggleReadStatus() {
         let newValue = !book.isRead
         book.isRead = newValue
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            HapticFeedback.error()
+            saveError = "Couldn't save read status. Please try again."
+            return
+        }
 
         // Sync to server
         if let edit = PendingBookEdit.toggleRead(bookId: book.id, isRead: newValue) {
             modelContext.insert(edit)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { print("[DownloadedBookDetail] Failed to queue sync: \(error)") }
         }
     }
 
     private func setRating(_ rating: Int?) {
         book.rating = rating
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            HapticFeedback.error()
+            saveError = "Couldn't save rating. Please try again."
+            return
+        }
 
         // Sync to server
         if let edit = PendingBookEdit.rateBook(bookId: book.id, rating: rating, review: book.review) {
             modelContext.insert(edit)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { print("[DownloadedBookDetail] Failed to queue sync: \(error)") }
         }
     }
 
@@ -899,7 +915,11 @@ struct BookManagementSheet: View {
         }
 
         book.transcriptData = nil
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            print("[DownloadedBookDetail] Failed to delete transcript locally: \(error)")
+        }
 
         // Also delete from server
         Task {
@@ -923,6 +943,7 @@ struct BookReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var reviewText: String = ""
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -956,16 +977,23 @@ struct BookReviewSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .bannerToast($saveError, type: .error)
     }
 
     private func saveReview() {
         book.review = reviewText.isEmpty ? nil : reviewText
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            HapticFeedback.error()
+            saveError = "Couldn't save review. Please try again."
+            return
+        }
 
         // Sync to server
         if let edit = PendingBookEdit.rateBook(bookId: book.id, rating: book.rating, review: book.review) {
             modelContext.insert(edit)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { print("[DownloadedBookDetail] Failed to queue sync: \(error)") }
         }
 
         dismiss()

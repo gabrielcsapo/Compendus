@@ -143,11 +143,15 @@ struct LibraryEmptyStateView: View {
 
 /// Home tab empty state
 struct DownloadsEmptyStateView: View {
+    var goToLibrary: (() -> Void)? = nil
+
     var body: some View {
         EmptyStateView(
             icon: "house",
             title: "Welcome Home",
-            description: "Your downloaded books and reading activity will appear here. Head to your library to download some books!"
+            description: "Your downloaded books and reading activity will appear here.",
+            actionTitle: goToLibrary != nil ? "Browse Library" : nil,
+            action: goToLibrary
         )
     }
 }

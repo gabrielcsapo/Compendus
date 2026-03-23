@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "react-flight-router/client";
 import { rateBook } from "../actions/books";
 import { StarRating } from "./StarRating";
 import { buttonStyles } from "../lib/styles";
@@ -11,6 +12,7 @@ interface BookReviewProps {
 }
 
 export function BookReview({ book }: BookReviewProps) {
+  const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editRating, setEditRating] = useState<number | null>(book.rating ?? null);
@@ -22,7 +24,8 @@ export function BookReview({ book }: BookReviewProps) {
     setIsSaving(true);
     try {
       await rateBook(book.id, editRating, editReview || null);
-      window.location.reload();
+      setIsEditing(false);
+      router.refresh();
     } catch {
       setIsSaving(false);
     }

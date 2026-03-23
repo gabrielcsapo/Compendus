@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "react-flight-router/client";
 import { extractCoverFromBook } from "../actions/books";
 
 interface CoverExtractButtonProps {
@@ -19,6 +20,7 @@ export function CoverExtractButton({
   onSuccess,
   variant = "button",
 }: CoverExtractButtonProps) {
+  const router = useRouter();
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +42,7 @@ export function CoverExtractButton({
           onSuccess();
         } else {
           // Default behavior: refresh the page
-          window.location.reload();
+          router.refresh();
         }
       } else {
         setError(result.message);
@@ -115,6 +117,7 @@ export function ClickableCoverPlaceholder({
   onSuccess,
   className = "",
 }: ClickableCoverPlaceholderProps) {
+  const router = useRouter();
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,7 +137,7 @@ export function ClickableCoverPlaceholder({
         if (onSuccess) {
           onSuccess();
         } else {
-          window.location.reload();
+          router.refresh();
         }
       } else {
         setError(result.message);

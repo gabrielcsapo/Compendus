@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-flight-router/client";
+import { Link, useRouter } from "react-flight-router/client";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { buttonStyles } from "../lib/styles";
 import { batchUpdateBooks } from "../actions/batch";
@@ -147,6 +147,7 @@ export function BatchEditClient({
   seriesNames,
   authorNames,
 }: BatchEditClientProps) {
+  const router = useRouter();
   const allBooks = initialBooks;
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -628,7 +629,7 @@ export function BatchEditClient({
       });
     } else {
       setMessage({ type: "success", text: `Deleted ${deleted} book${deleted !== 1 ? "s" : ""}.` });
-      setTimeout(() => window.location.reload(), 1500);
+      router.refresh();
     }
   }, [selectedIds, allBooks]);
 
@@ -748,7 +749,7 @@ export function BatchEditClient({
         setEdits(new Map());
         setTagAdditions(new Map());
         setTagRemovals(new Map());
-        setTimeout(() => window.location.reload(), 1500);
+        router.refresh();
       }
     } catch (error) {
       setMessage({

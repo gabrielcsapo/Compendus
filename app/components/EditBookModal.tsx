@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "react-flight-router/client";
+import { useToast } from "./ToastContext";
 import { updateBook, deleteBook } from "../actions/books";
 import { getTags, addTagToBookByName, removeTagFromBook } from "../actions/tags";
 import { getDistinctSeries, getDistinctAuthors } from "../actions/batch";
@@ -92,6 +94,8 @@ export function EditBookModal({
   bookAuthors,
   hasConvertedEpub,
 }: EditBookModalProps) {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle || "");
   const [authors, setAuthors] = useState<string>(() => {
@@ -196,7 +200,8 @@ export function EditBookModal({
       });
 
       onClose();
-      window.location.reload();
+      showToast("Changes saved", "success");
+      router.refresh();
     } catch {
       setError("Failed to update book");
     } finally {
@@ -259,7 +264,7 @@ export function EditBookModal({
     try {
       const success = await deleteBook(book.id);
       if (success) {
-        window.location.href = "/";
+        router.navigate("/");
       } else {
         setDeleteError("Failed to delete book");
         setIsDeleting(false);

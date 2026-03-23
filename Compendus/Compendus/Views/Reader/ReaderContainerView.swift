@@ -42,7 +42,11 @@ struct ReaderShell<Content: View>: View {
         }
         .onDisappear {
             book.lastReadAt = Date()
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+            } catch {
+                print("[ReaderShell] Failed to save reading progress: \(error)")
+            }
             updateWidgetData()
         }
     }

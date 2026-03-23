@@ -57,6 +57,7 @@ struct FloatingHighlightToolbar: View {
                             .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
                             .frame(width: 28, height: 28)
                     }
+                    .accessibilityLabel("\(item.preset.name) highlight")
                 }
 
                 // Vertical divider between colors and actions

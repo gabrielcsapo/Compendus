@@ -443,6 +443,19 @@ export function ReaderShell({
             />
           ) : (
             <>
+              {reader.pageLoadError && (
+                <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/80">
+                  <div className="text-center px-6">
+                    <p className="text-sm text-foreground-muted mb-3">{reader.pageLoadError}</p>
+                    <button
+                      onClick={() => reader.retryPageLoad()}
+                      className="px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              )}
               <ReaderContent
                 content={reader.pageContent}
                 rightContent={reader.rightPageContent}

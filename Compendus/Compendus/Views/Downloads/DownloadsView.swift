@@ -320,7 +320,9 @@ struct DownloadsView: View {
     @ViewBuilder
     private var mainContent: some View {
         if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
-            DownloadsEmptyStateView()
+            DownloadsEmptyStateView {
+                appNavigation.selectedTab = 1
+            }
         } else if isSeriesMode {
             seriesGridContent
         } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
@@ -609,17 +611,21 @@ struct DownloadsView: View {
 
     private var deleteDialogMessage: String {
         guard let book = bookToDelete else { return "" }
-        return "This will remove \"\(book.title)\" from your device. You can download it again from your library."
+        return "This will remove \"\(book.title)\" from your device, including all highlights and bookmarks. You can download it again from your library."
     }
 
     private func toggleReadStatus(for book: DownloadedBook) {
         book.isRead.toggle()
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            print("[DownloadsView] Failed to save read status: \(error)")
+        }
 
         // Sync to server
         if let edit = PendingBookEdit.toggleRead(bookId: book.id, isRead: book.isRead) {
             modelContext.insert(edit)
-            try? modelContext.save()
+            do { try modelContext.save() } catch { print("[DownloadsView] Failed to queue sync: \(error)") }
         }
     }
 

@@ -104,6 +104,9 @@ struct UnifiedReaderView: View {
     // Reading session tracking
     @State private var currentSession: ReadingSession?
 
+    // Save error feedback
+    @State private var saveError: String?
+
     enum ReaderState {
         case loading
         case ready
@@ -284,7 +287,12 @@ struct UnifiedReaderView: View {
                                 modelContext.delete(bookmark)
                             }
                             bookmarks.remove(atOffsets: indexSet)
-                            try? modelContext.save()
+                            do {
+                                try modelContext.save()
+                            } catch {
+                                HapticFeedback.error()
+                                saveError = "Couldn't delete bookmark. Please try again."
+                            }
                         }
                     }
                 }
@@ -305,7 +313,12 @@ struct UnifiedReaderView: View {
                     bookmark: bookmark,
                     bookId: book.id,
                     onSave: {
-                        try? modelContext.save()
+                        do {
+                            try modelContext.save()
+                        } catch {
+                            HapticFeedback.error()
+                            saveError = "Couldn't save bookmark. Please try again."
+                        }
                         fetchBookmarks()
                         showingBookmarkEdit = false
                     },
@@ -346,7 +359,13 @@ struct UnifiedReaderView: View {
         sheetsGroup2
             .sheet(item: $editingHighlight) { highlight in
                 EditNoteSheet(highlight: highlight) {
-                    try? modelContext.save()
+                    do {
+                        try modelContext.save()
+                        HapticFeedback.lightImpact()
+                    } catch {
+                        HapticFeedback.error()
+                        saveError = "Couldn't save note. Please try again."
+                    }
                     fetchHighlights()
                 }
                 .readerThemed(readerSettings)
@@ -360,12 +379,23 @@ struct UnifiedReaderView: View {
                         if let pdfEngine = engine as? PDFEngine {
                             pdfEngine.updateAnnotationColor(for: highlight, color: color)
                         }
-                        try? modelContext.save()
+                        do {
+                            try modelContext.save()
+                        } catch {
+                            HapticFeedback.error()
+                            saveError = "Couldn't save highlight color. Please try again."
+                        }
                         fetchHighlights()
                     },
                     onSaveNote: { note in
                         highlight.note = note
-                        try? modelContext.save()
+                        do {
+                            try modelContext.save()
+                            HapticFeedback.lightImpact()
+                        } catch {
+                            HapticFeedback.error()
+                            saveError = "Couldn't save note. Please try again."
+                        }
                         fetchHighlights()
                     },
                     onCopy: { UIPasteboard.general.string = highlight.text },
@@ -499,6 +529,7 @@ struct UnifiedReaderView: View {
             .onChange(of: readerSettings.layout) { _, _ in
                 if !showingSettings { engine?.applySettings(readerSettings) }
             }
+            .bannerToast($saveError, type: .error)
     }
 
     // MARK: - Reader Content
@@ -1485,7 +1516,7 @@ struct UnifiedReaderView: View {
             }
         }
 
-        try? modelContext.save()
+        do { try modelContext.save() } catch { print("[UnifiedReaderView] saveProgress failed: \(error)") }
     }
 
     // MARK: - Reading Session Tracking
@@ -1526,7 +1557,7 @@ struct UnifiedReaderView: View {
         session.profileId = book.profileId
         session.appendPageTurn(page: page, characterOffset: charOffset)
         modelContext.insert(session)
-        try? modelContext.save()
+        do { try modelContext.save() } catch { print("[UnifiedReaderView] startReadingSession save failed: \(error)") }
         currentSession = session
     }
 
@@ -1551,7 +1582,7 @@ struct UnifiedReaderView: View {
             session.appendPageTurn(page: page)
         }
 
-        try? modelContext.save()
+        do { try modelContext.save() } catch { print("[UnifiedReaderView] updateReadingSession save failed: \(error)") }
     }
 
     // MARK: - Bookmarks
@@ -1611,7 +1642,13 @@ struct UnifiedReaderView: View {
         )
         modelContext.insert(bookmark)
         bookmarks.append(bookmark)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            HapticFeedback.lightImpact()
+        } catch {
+            HapticFeedback.error()
+            saveError = "Couldn't create bookmark. Please try again."
+        }
 
         showingBookmarkEdit = true
     }
@@ -1619,7 +1656,12 @@ struct UnifiedReaderView: View {
     private func deleteBookmark(_ bookmark: BookBookmark) {
         modelContext.delete(bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            HapticFeedback.error()
+            saveError = "Couldn't delete bookmark. Please try again."
+        }
     }
 
     // MARK: - Read Along

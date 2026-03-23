@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "react-flight-router/client";
 import { toggleBookReadStatus } from "../actions/books";
 import { buttonStyles } from "../lib/styles";
 import type { Book } from "../lib/db/schema";
@@ -10,6 +11,7 @@ interface ToggleReadButtonProps {
 }
 
 export function ToggleReadButton({ book }: ToggleReadButtonProps) {
+  const router = useRouter();
   const [isUpdating, setIsUpdating] = useState(false);
   const isRead = book.isRead ?? false;
 
@@ -17,7 +19,7 @@ export function ToggleReadButton({ book }: ToggleReadButtonProps) {
     setIsUpdating(true);
     try {
       await toggleBookReadStatus(book.id, !isRead);
-      window.location.reload();
+      router.refresh();
     } catch {
       setIsUpdating(false);
     }

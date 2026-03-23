@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "react-flight-router/client";
 import { createCollection, updateCollection, deleteCollection } from "../actions/collections";
+import { useToast } from "./ToastContext";
 import { buttonStyles } from "../lib/styles";
 import type { Collection } from "../lib/db/schema";
 
@@ -26,6 +28,8 @@ interface CreateCollectionModalProps {
 }
 
 function CreateCollectionModal({ isOpen, onClose }: CreateCollectionModalProps) {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(COLORS[0]);
@@ -59,8 +63,8 @@ function CreateCollectionModal({ isOpen, onClose }: CreateCollectionModalProps) 
       setIcon("");
       onClose();
 
-      // Refresh the page to show new collection
-      window.location.reload();
+      showToast("Collection created", "success");
+      router.refresh();
     } catch {
       setError("Failed to create collection");
     } finally {
@@ -258,6 +262,8 @@ interface EditCollectionModalProps {
 }
 
 export function EditCollectionModal({ isOpen, onClose, collection }: EditCollectionModalProps) {
+  const router = useRouter();
+  const { showToast } = useToast();
   const [name, setName] = useState(collection.name);
   const [description, setDescription] = useState(collection.description || "");
   const [color, setColor] = useState(collection.color || COLORS[0]);
@@ -295,7 +301,8 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
       });
 
       onClose();
-      window.location.reload();
+      showToast("Collection updated", "success");
+      router.refresh();
     } catch {
       setError("Failed to update collection");
     } finally {
@@ -308,7 +315,7 @@ export function EditCollectionModal({ isOpen, onClose, collection }: EditCollect
     try {
       await deleteCollection(collection.id);
       onClose();
-      window.location.href = "/collections";
+      router.navigate("/collections");
     } catch {
       setError("Failed to delete collection");
       setIsDeleting(false);

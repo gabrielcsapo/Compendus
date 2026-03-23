@@ -130,6 +130,7 @@ export function useReader({
   const [rightPageContent, setRightPageContent] = useState<PageContent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pageLoadError, setPageLoadError] = useState<string | null>(null);
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
   const [highlights, setHighlights] = useState<ReaderHighlight[]>([]);
 
@@ -296,9 +297,11 @@ export function useReader({
         }
       } catch (err) {
         console.error("Failed to fetch page:", err);
+        setPageLoadError("Failed to load this page. Tap to retry.");
       }
     };
 
+    setPageLoadError(null);
     fetchPages();
   }, [
     bookId,
@@ -766,5 +769,7 @@ export function useReader({
     setClientTotalPages: setClientTotalPagesCallback,
     setChapterTitle,
     saveProgress,
+    pageLoadError,
+    retryPageLoad: () => setPageLoadError(null),
   };
 }

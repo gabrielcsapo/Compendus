@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "react-flight-router/client";
 import { refreshMetadata, searchMetadata, applyMetadata } from "../actions/books";
 import { buttonStyles, badgeStyles, inputStyles } from "../lib/styles";
 import type { MetadataSearchResult } from "../lib/metadata";
@@ -30,6 +31,7 @@ export function MetadataRefreshButton({
   const [searchQuery, setSearchQuery] = useState(bookTitle);
   const [pendingMetadata, setPendingMetadata] = useState<MetadataSearchResult | null>(null);
   const [showCoverPrompt, setShowCoverPrompt] = useState(false);
+  const router = useRouter();
 
   const handleAutoRefresh = async () => {
     setLoading(true);
@@ -40,7 +42,7 @@ export function MetadataRefreshButton({
       setMessage(result.message);
       if (result.success && result.book) {
         // Reload the page to show updated data
-        window.location.reload();
+        router.refresh();
       }
     } catch (error) {
       setMessage(`Failed to refresh metadata: ${(error as any).message}`);
@@ -87,7 +89,7 @@ export function MetadataRefreshButton({
       setMessage(result.message);
       if (result.success) {
         // Reload to show updated data
-        window.location.reload();
+        router.refresh();
       }
     } catch {
       setMessage("Failed to apply metadata");

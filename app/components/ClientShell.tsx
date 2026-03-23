@@ -9,6 +9,7 @@ import { SearchInput } from "./SearchInput";
 import { Footer } from "./Footer";
 import { CompendusLogo } from "./CompendusLogo";
 import { ProfileAvatar } from "./ProfileAvatar";
+import { ToastProvider } from "./ToastContext";
 
 /** Paths that don't require a profile to be selected */
 const PROFILE_GATE_SKIP_PATHS = ["/profiles", "/about", "/docs"];
@@ -260,7 +261,7 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <>
+    <ToastProvider>
       <header
         ref={headerRef}
         className="sticky top-0 z-40 backdrop-blur-md bg-background/80 border-b border-border"
@@ -309,6 +310,6 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
       {isAdmin && <GlobalUploadDropzone />}
       <div className="flex-1">{children}</div>
       <Footer />
-    </>
+    </ToastProvider>
   );
 }

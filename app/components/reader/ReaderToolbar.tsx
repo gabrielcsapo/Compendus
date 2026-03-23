@@ -42,15 +42,19 @@ export function ReaderToolbar({
 }: ReaderToolbarProps) {
   const [pageInput, setPageInput] = useState("");
   const [showPageInput, setShowPageInput] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
 
   const handlePageSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const page = parseInt(pageInput, 10);
     if (!isNaN(page) && page >= 1 && page <= totalPages) {
       onGoToPage(page);
+      setPageInput("");
+      setShowPageInput(false);
+      setInputError(null);
+    } else {
+      setInputError(`Enter a page between 1 and ${totalPages}`);
     }
-    setPageInput("");
-    setShowPageInput(false);
   };
 
   return (
@@ -104,21 +108,26 @@ export function ReaderToolbar({
           style={{ color: theme.muted }}
         >
           {showPageInput ? (
-            <form onSubmit={handlePageSubmit} className="flex items-center gap-1">
-              <input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value)}
-                placeholder={currentPage.toString()}
-                className="w-16 px-2 py-0.5 text-center border rounded"
-                style={{ borderColor: `${theme.foreground}30` }}
-                autoFocus
-                onBlur={() => setShowPageInput(false)}
-              />
-              <span>/ {totalPages}</span>
-            </form>
+            <div className="flex flex-col items-center gap-0.5">
+              <form onSubmit={handlePageSubmit} className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={pageInput}
+                  onChange={(e) => { setPageInput(e.target.value); setInputError(null); }}
+                  placeholder={currentPage.toString()}
+                  className="w-16 px-2 py-0.5 text-center border rounded"
+                  style={{ borderColor: inputError ? "rgb(220 38 38)" : `${theme.foreground}30` }}
+                  autoFocus
+                  onBlur={() => { if (!inputError) setShowPageInput(false); }}
+                />
+                <span>/ {totalPages}</span>
+              </form>
+              {inputError && (
+                <span className="text-[10px] text-danger whitespace-nowrap">{inputError}</span>
+              )}
+            </div>
           ) : (
             <button onClick={() => setShowPageInput(true)} className="hover:underline">
               Page {currentPage} of {totalPages}

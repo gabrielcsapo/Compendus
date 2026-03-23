@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useRouter } from "react-flight-router/client";
 import { BookCover } from "./BookCover";
 
 interface CoverDropZoneProps {
@@ -22,6 +23,7 @@ export function CoverDropZone({
   children,
   onSuccess,
 }: CoverDropZoneProps) {
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export function CoverDropZone({
           if (onSuccess) {
             onSuccess();
           } else {
-            window.location.reload();
+            router.refresh();
           }
         } else {
           setError(

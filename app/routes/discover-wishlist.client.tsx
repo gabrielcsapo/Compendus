@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "react-flight-router/client";
 import {
   getWantedBooks,
   removeFromWantedList,
@@ -44,8 +45,10 @@ export default function Component({
   initialBooks?: WantedBook[];
   initialRemoved?: number;
 }) {
+  const router = useRouter();
   const [wantedBooks, setWantedBooksState] = useState<WantedBook[]>(initialBooks ?? []);
   const [loading, setLoading] = useState(!initialBooks);
+  const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
     initialRemoved && initialRemoved > 0
       ? {
@@ -66,6 +69,14 @@ export default function Component({
     loadWantedList();
   }, []);
 
+  const setMessageWithAutoDismiss = (msg: { type: "success" | "error"; text: string } | null) => {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    setMessage(msg);
+    if (msg?.type === "error") {
+      messageTimerRef.current = setTimeout(() => setMessage(null), 6000);
+    }
+  };
+
   const loadWantedList = async () => {
     setLoading(true);
     try {
@@ -78,7 +89,7 @@ export default function Component({
         });
       }
     } catch {
-      setMessage({ type: "error", text: "Failed to load wanted list" });
+      setMessageWithAutoDismiss({ type: "error", text: "Failed to load wanted list" });
     } finally {
       setLoading(false);
     }
@@ -90,7 +101,7 @@ export default function Component({
       setWantedBooksState((prev) => prev.filter((b) => b.id !== id));
       setMessage({ type: "success", text: "Removed from wanted list" });
     } catch {
-      setMessage({ type: "error", text: "Failed to remove book" });
+      setMessageWithAutoDismiss({ type: "error", text: "Failed to remove book" });
     }
   };
 
@@ -99,7 +110,7 @@ export default function Component({
       await updateWantedBook(id, { status });
       setWantedBooksState((prev) => prev.map((b) => (b.id === id ? { ...b, status } : b)));
     } catch {
-      setMessage({ type: "error", text: "Failed to update status" });
+      setMessageWithAutoDismiss({ type: "error", text: "Failed to update status" });
     }
   };
 
@@ -113,7 +124,7 @@ export default function Component({
         text: `Removed ${count} book${count !== 1 ? "s" : ""} from wishlist`,
       });
     } catch {
-      setMessage({ type: "error", text: "Failed to clear wishlist" });
+      setMessageWithAutoDismiss({ type: "error", text: "Failed to clear wishlist" });
     }
   };
 
@@ -127,15 +138,14 @@ export default function Component({
         await removeFromWantedList(book.id);
         setWantedBooksState((prev) => prev.filter((b) => b.id !== book.id));
         setMessage({ type: "success", text: `"${book.title}" added to your library` });
-        // Refresh after a short delay to show the message
-        setTimeout(() => window.location.reload(), 1500);
+        router.refresh();
       } else if (result.error === "duplicate") {
-        setMessage({ type: "error", text: `"${book.title}" already exists in your library` });
+        setMessageWithAutoDismiss({ type: "error", text: `"${book.title}" already exists in your library` });
       } else {
-        setMessage({ type: "error", text: `Failed to upload: ${result.error}` });
+        setMessageWithAutoDismiss({ type: "error", text: `Failed to upload: ${result.error}` });
       }
     } catch {
-      setMessage({ type: "error", text: "Upload failed" });
+      setMessageWithAutoDismiss({ type: "error", text: "Upload failed" });
     } finally {
       setUploadingId(null);
     }
@@ -154,13 +164,22 @@ export default function Component({
       {/* Message */}
       {message && (
         <div
-          className={`mb-4 p-3 rounded-lg border ${
+          className={`mb-4 p-3 rounded-lg border flex items-center justify-between gap-3 ${
             message.type === "success"
               ? "bg-success-light text-success border-success/20"
               : "bg-danger-light text-danger border-danger/20"
           }`}
         >
-          {message.text}
+          <span>{message.text}</span>
+          <button
+            onClick={() => setMessage(null)}
+            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
