@@ -13,6 +13,7 @@ import EPUBReader
 
 struct SampleEPUBListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(ServerConfig.self) private var serverConfig
     @State private var selectedBook: DownloadedBook?
     @State private var sampleFiles: [(name: String, url: URL)] = []
     @State private var errorMessage: String?
@@ -116,7 +117,8 @@ struct SampleEPUBListView: View {
                 authors: ["Sample"],
                 format: "epub",
                 fileSize: fileSize(for: sample.url),
-                localPath: localPath
+                localPath: localPath,
+                profileId: serverConfig.selectedProfileId ?? ""
             )
 
             // Check if this sample already exists in the context

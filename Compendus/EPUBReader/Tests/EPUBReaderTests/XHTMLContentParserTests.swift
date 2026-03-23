@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import SwiftSoup
 @testable import EPUBReader
 
 final class XHTMLContentParserTests: XCTestCase {
@@ -188,13 +189,17 @@ final class XHTMLContentParserTests: XCTestCase {
     // MARK: - Sample EPUB Content Loss Detection
 
     /// Parses every chapter of every sample EPUB and verifies no text content is silently lost.
-    /// Compares the plain text extracted from the XHTML (tag-stripped) against the parsed AST output.
+    ///
+    /// Uses SwiftSoup to extract the ground-truth word count and image count directly from the
+    /// XHTML body, then compares against what our parser/renderer pipeline produces. This gives
+    /// an exact unit (words + images) rather than a character-count heuristic.
+    ///
     /// Add new .epub files to the Samples folder to automatically include them in this test.
     func testAllSampleEPUBsNoContentLoss() async throws {
         let samples = TestHelpers.allSampleEPUBNames
         XCTAssertGreaterThan(samples.count, 0, "Should have sample EPUBs in the test bundle")
 
-        var failures: [(book: String, chapter: Int, ratio: Double)] = []
+        var failures: [(book: String, chapter: Int, ratio: Double, detail: String)] = []
 
         for name in samples {
             guard let url = TestHelpers.sampleEPUBURL(named: name),
@@ -205,7 +210,6 @@ final class XHTMLContentParserTests: XCTestCase {
             for spineIndex in 0..<epub.package.spine.count {
                 guard let chapterURL = epub.resolveSpineItemURL(at: spineIndex) else { continue }
 
-                // Skip non-XHTML spine items (images, SVG-only pages, etc.)
                 if let item = epub.manifestItem(forSpineIndex: spineIndex) {
                     let mt = item.mediaType.lowercased()
                     if !mt.contains("xhtml") && !mt.contains("html") { continue }
@@ -213,36 +217,34 @@ final class XHTMLContentParserTests: XCTestCase {
 
                 guard let data = try? Data(contentsOf: chapterURL) else { continue }
 
-                // Extract expected visible text by stripping HTML tags and decoding entities
-                let expectedText = normalizeForComparison(stripHTMLTags(from: data))
+                // Ground truth: use SwiftSoup to extract exact body text and image count
+                let (expectedWords, expectedImages) = groundTruth(from: data)
+                let expectedUnits = expectedWords + expectedImages
 
-                // Skip chapters with very little visible text (cover pages, images-only, etc.)
-                guard expectedText.count > 50 else { continue }
+                // Skip chapters with very little content (cover pages, image-only, etc.)
+                guard expectedUnits > 20 else { continue }
 
                 // Parse through our pipeline
                 let baseURL = chapterURL.deletingLastPathComponent()
                 let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
                 let nodes = contentParser.parse()
-                let parsedText = normalizeForComparison(
-                    NativeEPUBEngine.extractPlainText(from: nodes)
-                )
 
-                // Compare character counts — the parsed output should capture most of the text.
-                // We use a generous threshold because:
-                // - HTML entity-encoded code examples inflate the expected count
-                // - Some elements (video fallback text, metadata) are legitimately excluded
-                let ratio = expectedText.isEmpty ? 1.0 : Double(parsedText.count) / Double(expectedText.count)
+                let parsedWords = wordCount(NativeEPUBEngine.extractPlainText(from: nodes))
+                let parsedImages = imageCount(in: nodes)
+                let parsedUnits = parsedWords + parsedImages
 
-                // Flag if we captured less than 40% of the expected text length
-                if ratio < 0.40 {
-                    failures.append((book: name, chapter: spineIndex, ratio: ratio))
+                let ratio = Double(parsedUnits) / Double(expectedUnits)
+
+                if ratio < 0.70 {
+                    let detail = "\(parsedWords)w+\(parsedImages)img of \(expectedWords)w+\(expectedImages)img"
+                    failures.append((book: name, chapter: spineIndex, ratio: ratio, detail: detail))
                 }
             }
         }
 
         XCTAssertTrue(failures.isEmpty,
-                      "Chapters with significant content loss:\n" +
-                      failures.map { "  \($0.book) ch.\($0.chapter): only \(Int($0.ratio * 100))% of text captured" }
+                      "Chapters with significant content loss (>30%):\n" +
+                      failures.map { "  \($0.book) ch.\($0.chapter): \(Int($0.ratio * 100))% captured (\($0.detail))" }
                           .joined(separator: "\n"))
     }
 
@@ -268,8 +270,8 @@ final class XHTMLContentParserTests: XCTestCase {
                 guard let data = try? Data(contentsOf: chapterURL) else { continue }
 
                 // Skip files with very little content (empty wrapper pages, etc.)
-                let visibleText = normalizeForComparison(stripHTMLTags(from: data))
-                guard visibleText.count > 20 else { continue }
+                let (expectedWords, expectedImages) = groundTruth(from: data)
+                guard expectedWords + expectedImages > 20 else { continue }
 
                 let baseURL = chapterURL.deletingLastPathComponent()
                 let contentParser = XHTMLContentParser(data: data, baseURL: baseURL, stylesheet: stylesheet)
@@ -303,56 +305,43 @@ final class XHTMLContentParserTests: XCTestCase {
         return found ? stylesheet : nil
     }
 
-    /// Strip HTML tags to extract visible text from raw XHTML data.
-    private func stripHTMLTags(from data: Data) -> String {
+    /// Use SwiftSoup to extract the exact body text word count and image count from raw XHTML.
+    /// This is the ground truth: SwiftSoup handles entity decoding, namespace stripping, and
+    /// excludes script/style automatically via `.text()` on the body element.
+    private func groundTruth(from data: Data) -> (words: Int, images: Int) {
         guard let html = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .isoLatin1) else { return "" }
+                      ?? String(data: data, encoding: .isoLatin1),
+              let doc = try? SwiftSoup.parse(html),
+              let body = try? doc.body() else { return (0, 0) }
 
-        var result = ""
-        var inTag = false
-        var inScript = false
-        var inStyle = false
-        var inHead = false
-        var tagBuffer = ""
+        // Remove style and script elements before extracting text.
+        // SVG pages embed <style><![CDATA[...]]></style> blocks whose CSS content
+        // SwiftSoup treats as text nodes, inflating the expected word count.
+        try? body.select("style, script").remove()
 
-        for char in html {
-            if char == "<" {
-                inTag = true
-                tagBuffer = ""
-            } else if char == ">" && inTag {
-                inTag = false
-                let lower = tagBuffer.lowercased().trimmingCharacters(in: .whitespaces)
-                if lower.hasPrefix("script") { inScript = true }
-                else if lower.hasPrefix("/script") { inScript = false }
-                else if lower.hasPrefix("style") { inStyle = true }
-                else if lower.hasPrefix("/style") { inStyle = false }
-                else if lower.hasPrefix("head") { inHead = true }
-                else if lower.hasPrefix("/head") { inHead = false }
-            } else if inTag {
-                tagBuffer.append(char)
-            } else if !inScript && !inStyle && !inHead {
-                result.append(char)
-            }
-        }
-
-        return result
+        let text = (try? body.text()) ?? ""
+        let words = wordCount(text)
+        let images = (try? body.select("img").count) ?? 0
+        return (words, images)
     }
 
-    /// Decode common HTML entities and collapse whitespace for comparison.
-    private func normalizeForComparison(_ text: String) -> String {
-        var s = text
-        // Decode common HTML entities
-        s = s.replacingOccurrences(of: "&amp;", with: "&")
-        s = s.replacingOccurrences(of: "&lt;", with: "<")
-        s = s.replacingOccurrences(of: "&gt;", with: ">")
-        s = s.replacingOccurrences(of: "&quot;", with: "\"")
-        s = s.replacingOccurrences(of: "&apos;", with: "'")
-        s = s.replacingOccurrences(of: "&nbsp;", with: " ")
-        // Decode numeric entities (&#160; &#8211; etc.)
-        s = s.replacingOccurrences(of: "&#\\d+;", with: " ", options: .regularExpression)
-        // Collapse whitespace
-        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-        return s.trimmingCharacters(in: .whitespaces)
+    /// Count whitespace-delimited words in a string.
+    private func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).count
+    }
+
+    /// Count image nodes in a ContentNode tree.
+    private func imageCount(in nodes: [ContentNode]) -> Int {
+        nodes.reduce(0) { count, node in
+            switch node {
+            case .image: return count + 1
+            case .container(let children, _), .blockquote(let children):
+                return count + imageCount(in: children)
+            case .list(_, let items, _):
+                return count + items.reduce(0) { $0 + imageCount(in: $1.children) }
+            default: return count
+            }
+        }
     }
 
     // MARK: - Content Loss Prevention

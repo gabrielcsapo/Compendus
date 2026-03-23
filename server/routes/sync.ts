@@ -167,6 +167,45 @@ app.put("/api/sync/reading-progress", async (c) => {
   return c.json({ success: true });
 });
 
+// GET /api/sync/highlighted-books — Get distinct books that have highlights for current profile
+app.get("/api/sync/highlighted-books", (c) => {
+  const profileId = c.get("profileId");
+  const baseUrl = new URL(c.req.url).origin;
+
+  // Get distinct bookIds with non-deleted highlights for this profile
+  const distinctBookIds = db
+    .selectDistinct({ bookId: highlights.bookId })
+    .from(highlights)
+    .where(and(eq(highlights.profileId, profileId), sql`${highlights.deletedAt} IS NULL`))
+    .all()
+    .map((r) => r.bookId);
+
+  if (distinctBookIds.length === 0) {
+    return c.json({ success: true, data: [] });
+  }
+
+  const bookResults = db.select().from(books).where(inArray(books.id, distinctBookIds)).all();
+
+  const stateMap = new Map(
+    db
+      .select()
+      .from(userBookState)
+      .where(
+        and(
+          eq(userBookState.profileId, profileId),
+          inArray(userBookState.bookId, distinctBookIds),
+        ),
+      )
+      .all()
+      .map((s) => [s.bookId, s]),
+  );
+
+  return c.json({
+    success: true,
+    data: bookResults.map((book) => toApiBook(book, baseUrl, stateMap.get(book.id))),
+  });
+});
+
 // --- Highlights ---
 
 // GET /api/sync/highlights — Get highlights for current profile

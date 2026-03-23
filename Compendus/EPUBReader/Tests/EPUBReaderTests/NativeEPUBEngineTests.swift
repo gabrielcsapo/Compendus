@@ -325,4 +325,250 @@ final class NativeEPUBEngineTests: XCTestCase {
             "Pipeline failures across \(samples.count) EPUBs:\n" +
             failures.map { "  \($0.book) spine[\($0.spineIndex)]: \($0.reason)" }.joined(separator: "\n"))
     }
+
+    // MARK: - FXL SVG Rendering Tests
+
+    /// For each spine item in sous-le-vent.epub, verify that SVG extraction succeeds
+    /// and the rendered image fits within the expected viewport without clipping.
+    func testSousLeVentSVGRenderingAllPages() async throws {
+        let url = try XCTUnwrap(TestHelpers.sampleEPUBURL(named: "sous-le-vent.epub"))
+        let parser = try await EPUBParser.parse(epubURL: url)
+
+        let viewport = CGSize(width: 390, height: 844)
+        var failures: [(spine: Int, href: String, reason: String)] = []
+
+        for spineIndex in 0..<parser.package.spine.count {
+            let manifestItem = parser.package.manifestItem(forSpineIndex: spineIndex)
+            guard let href = manifestItem?.href else { continue }
+
+            // Only test pages declared as SVG content
+            let isSVG = manifestItem?.properties?.contains("svg") == true
+                     || manifestItem?.mediaType == "image/svg+xml"
+            guard isSVG else { continue }
+
+            guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex),
+                  let data = try? Data(contentsOf: chapterURL),
+                  let html = String(data: data, encoding: .utf8) else {
+                failures.append((spineIndex, href, "Could not load file"))
+                continue
+            }
+
+            // Extract SVG (same logic as NativeEPUBEngine.extractAndRenderSVG)
+            guard let svgStart = html.range(of: "<svg", options: .caseInsensitive),
+                  let svgEnd   = html.range(of: "</svg>", options: [.caseInsensitive, .backwards]),
+                  svgEnd.lowerBound > svgStart.lowerBound else {
+                failures.append((spineIndex, href, "No <svg>...</svg> found in file"))
+                continue
+            }
+            let svgString = String(html[svgStart.lowerBound..<svgEnd.upperBound])
+
+            // Parse the SVG and check canvas size
+            guard let doc = SVGDocument(Data(svgString.utf8)) else {
+                failures.append((spineIndex, href, "SVGDocument init failed (nil)"))
+                continue
+            }
+
+            let canvas = doc.canvasSize
+            if canvas == .zero || canvas.width <= 0 || canvas.height <= 0 {
+                failures.append((spineIndex, href, "SVGDocument canvasSize is \(canvas)"))
+                continue
+            }
+
+            // Render and verify the image is the correct size
+            guard let image = doc.image(size: viewport) else {
+                failures.append((spineIndex, href,
+                    "image(size:) returned nil (canvas=\(canvas))"))
+                continue
+            }
+
+            // The rendered image should exactly match the requested viewport
+            let imgSize = image.size
+            if imgSize != viewport {
+                failures.append((spineIndex, href,
+                    "image size \(imgSize) ≠ viewport \(viewport) (canvas=\(canvas))"))
+            }
+
+            // Verify scale produces no overflow: scaled content must fit in viewport
+            let scale = min(viewport.width / canvas.width, viewport.height / canvas.height)
+            let scaledW = canvas.width * scale
+            let scaledH = canvas.height * scale
+            if scaledW > viewport.width + 1 || scaledH > viewport.height + 1 {
+                failures.append((spineIndex, href,
+                    "Scaled content \(scaledW)×\(scaledH) overflows viewport \(viewport) " +
+                    "(canvas=\(canvas), scale=\(scale))"))
+            }
+        }
+
+        if !failures.isEmpty {
+            let detail = failures.map { "  spine[\($0.spine)] \($0.href): \($0.reason)" }
+                                  .joined(separator: "\n")
+            XCTFail("SVG rendering issues in sous-le-vent:\n\(detail)")
+        }
+    }
+
+    /// Full pipeline diagnostic: for each sous-le-vent page, verify SVG detection,
+    /// full extractAndRenderSVG (including image inlining), and what XHTML parsing
+    /// would produce if SVG detection incorrectly falls through.
+    ///
+    /// This test replicates the exact logic inside loadFXLChapter so any discrepancy
+    /// between the test and the running app is immediately visible.
+    func testSousLeVentFullPipelineDiagnostic() async throws {
+        let url = try XCTUnwrap(TestHelpers.sampleEPUBURL(named: "sous-le-vent.epub"))
+        let parser = try await EPUBParser.parse(epubURL: url)
+        let viewport = CGSize(width: 390, height: 844)
+
+        struct PageResult {
+            let spineIndex: Int
+            let href: String
+            let isSVGDetected: Bool
+            let svgRenderResult: String  // "ok", "nil-image", "svg-not-found", "svg-doc-nil"
+            let xhtmlNodeCount: Int
+            let xhtmlTextPreview: String
+        }
+
+        var results: [PageResult] = []
+        var svgFailures: [(Int, String, String)] = []
+
+        for spineIndex in 0..<parser.package.spine.count {
+            let manifestItem = parser.package.manifestItem(forSpineIndex: spineIndex)
+            let href = manifestItem?.href ?? "(nil)"
+
+            // Replicate isSVGSpineItem check from loadFXLChapter
+            let isSVG = manifestItem?.properties?.contains("svg") == true
+                     || manifestItem?.mediaType == "image/svg+xml"
+
+            // Always test full extractAndRenderSVG path (includes inlineImageHrefs)
+            guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex) else {
+                results.append(PageResult(spineIndex: spineIndex, href: href,
+                    isSVGDetected: isSVG, svgRenderResult: "url-nil",
+                    xhtmlNodeCount: 0, xhtmlTextPreview: ""))
+                continue
+            }
+
+            // Test SVG rendering via full engine path
+            let svgImage = await NativeEPUBEngine.extractAndRenderSVG(from: chapterURL, size: viewport)
+            let svgResult: String
+            if let img = svgImage {
+                svgResult = "ok(\(Int(img.size.width))×\(Int(img.size.height)))"
+            } else {
+                // Dig into why it failed
+                if let data = try? Data(contentsOf: chapterURL),
+                   let html = String(data: data, encoding: .utf8) {
+                    if let svgStart = html.range(of: "<svg", options: .caseInsensitive),
+                       let svgEnd = html.range(of: "</svg>", options: [.caseInsensitive, .backwards]),
+                       svgEnd.lowerBound > svgStart.lowerBound {
+                        let svgString = String(html[svgStart.lowerBound..<svgEnd.upperBound])
+                        if SVGDocument(Data(svgString.utf8)) != nil {
+                            svgResult = "nil-image(doc-ok)"
+                        } else {
+                            svgResult = "nil-image(doc-nil)"
+                        }
+                    } else {
+                        svgResult = "svg-tag-not-found"
+                    }
+                } else {
+                    svgResult = "file-unreadable"
+                }
+            }
+
+            // Also test what XHTML parsing produces for this page
+            // (this is what gets stored in chapterDocuments by paginateAllChapters/prefetch)
+            let xhtmlNodes: [ContentNode]
+            if let data = try? Data(contentsOf: chapterURL) {
+                let baseURL = chapterURL.deletingLastPathComponent()
+                let xhtmlParser = XHTMLContentParser(data: data, baseURL: baseURL)
+                xhtmlNodes = xhtmlParser.parse()
+            } else {
+                xhtmlNodes = []
+            }
+            let settings = ReaderSettings()
+            let builder = AttributedStringBuilder(settings: settings, contentWidth: 326)
+            let (xhtmlAttr, _, _) = builder.build(from: xhtmlNodes)
+            let preview = String(xhtmlAttr.string.prefix(80))
+                .replacingOccurrences(of: "\n", with: "↵")
+
+            let result = PageResult(
+                spineIndex: spineIndex, href: href,
+                isSVGDetected: isSVG, svgRenderResult: svgResult,
+                xhtmlNodeCount: xhtmlNodes.count,
+                xhtmlTextPreview: preview
+            )
+            results.append(result)
+
+            if svgImage == nil {
+                svgFailures.append((spineIndex, href, svgResult))
+            }
+            if !isSVG {
+                svgFailures.append((spineIndex, href, "NOT detected as SVG — would display XHTML text: '\(preview)'"))
+            }
+        }
+
+        // Print per-page summary so the test output is readable
+        for r in results {
+            let svgFlag = r.isSVGDetected ? "SVG✓" : "SVG✗"
+            print("  spine[\(r.spineIndex)] \(r.href): \(svgFlag) render=\(r.svgRenderResult) xhtml_nodes=\(r.xhtmlNodeCount) xhtml='\(r.xhtmlTextPreview)'")
+        }
+
+        if !svgFailures.isEmpty {
+            let detail = svgFailures.map { "  spine[\($0.0)] \($0.1): \($0.2)" }.joined(separator: "\n")
+            XCTFail("Pages that would display incorrectly:\n\(detail)")
+        }
+    }
+
+    /// Same test for the bare-SVG-in-spine variant.
+    func testSousLeVentSVGInSpineAllPages() async throws {
+        let url = try XCTUnwrap(TestHelpers.sampleEPUBURL(named: "sous-le-vent_svg-in-spine.epub"))
+        let parser = try await EPUBParser.parse(epubURL: url)
+
+        let viewport = CGSize(width: 390, height: 844)
+        var failures: [(spine: Int, href: String, reason: String)] = []
+
+        for spineIndex in 0..<parser.package.spine.count {
+            let manifestItem = parser.package.manifestItem(forSpineIndex: spineIndex)
+            guard let href = manifestItem?.href else { continue }
+
+            let isSVG = manifestItem?.properties?.contains("svg") == true
+                     || manifestItem?.mediaType == "image/svg+xml"
+            guard isSVG else { continue }
+
+            guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex),
+                  let data = try? Data(contentsOf: chapterURL),
+                  let html = String(data: data, encoding: .utf8) else {
+                failures.append((spineIndex, href, "Could not load file"))
+                continue
+            }
+
+            guard let svgStart = html.range(of: "<svg", options: .caseInsensitive),
+                  let svgEnd   = html.range(of: "</svg>", options: [.caseInsensitive, .backwards]),
+                  svgEnd.lowerBound > svgStart.lowerBound else {
+                failures.append((spineIndex, href, "No <svg>...</svg> found in file"))
+                continue
+            }
+            let svgString = String(html[svgStart.lowerBound..<svgEnd.upperBound])
+
+            guard let doc = SVGDocument(Data(svgString.utf8)) else {
+                failures.append((spineIndex, href, "SVGDocument init failed (nil)"))
+                continue
+            }
+
+            let canvas = doc.canvasSize
+            if canvas == .zero || canvas.width <= 0 || canvas.height <= 0 {
+                failures.append((spineIndex, href, "SVGDocument canvasSize is \(canvas)"))
+                continue
+            }
+
+            guard doc.image(size: viewport) != nil else {
+                failures.append((spineIndex, href,
+                    "image(size:) returned nil (canvas=\(canvas))"))
+                continue
+            }
+        }
+
+        if !failures.isEmpty {
+            let detail = failures.map { "  spine[\($0.spine)] \($0.href): \($0.reason)" }
+                                  .joined(separator: "\n")
+            XCTFail("SVG rendering issues in sous-le-vent_svg-in-spine:\n\(detail)")
+        }
+    }
+
 }

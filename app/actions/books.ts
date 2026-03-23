@@ -601,7 +601,7 @@ export async function getRecentBooks(
         userBookState,
         and(eq(userBookState.bookId, books.id), eq(userBookState.profileId, profileId)),
       )
-      .where(sql`${userBookState.lastReadAt} IS NOT NULL`)
+      .where(and(sql`${userBookState.lastReadAt} IS NOT NULL`, eq(userBookState.isRead, false)))
       .orderBy(desc(userBookState.lastReadAt))
       .limit(limit);
 
@@ -620,7 +620,7 @@ export async function getRecentBooks(
   return db
     .select()
     .from(books)
-    .where(sql`${books.lastReadAt} IS NOT NULL`)
+    .where(and(sql`${books.lastReadAt} IS NOT NULL`, eq(books.isRead, false)))
     .orderBy(desc(books.lastReadAt))
     .limit(limit);
 }

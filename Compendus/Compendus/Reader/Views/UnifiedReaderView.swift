@@ -1523,6 +1523,7 @@ struct UnifiedReaderView: View {
             startCharacterOffset: charOffset,
             endCharacterOffset: charOffset
         )
+        session.profileId = book.profileId
         session.appendPageTurn(page: page, characterOffset: charOffset)
         modelContext.insert(session)
         try? modelContext.save()

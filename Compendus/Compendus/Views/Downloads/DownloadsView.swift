@@ -61,12 +61,13 @@ struct DownloadsView: View {
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(SyncService.self) private var syncService
+    @Environment(AppNavigation.self) private var appNavigation
 
     @Query(sort: \DownloadedBook.downloadedAt, order: .reverse)
     private var allBooks: [DownloadedBook]
 
     @Query(
-        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil },
+        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil && !$0.isRead },
         sort: \DownloadedBook.lastReadAt,
         order: .reverse
     )
@@ -93,7 +94,6 @@ struct DownloadsView: View {
     @State private var bookToDelete: DownloadedBook?
     @State private var showingDeleteConfirmation = false
     @State private var searchText = ""
-    @State private var selectedChipId: String = "all"
 
     @State private var bookToRead: DownloadedBook?
     @State private var seriesSheet: DownloadSeriesSheet? = nil
@@ -107,7 +107,7 @@ struct DownloadsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var effectiveFilter: DownloadFilter {
-        switch selectedChipId {
+        switch appNavigation.homeFilterChipId {
         case "ebooks": return .ebooks
         case "audiobooks": return .audiobooks
         case "comics": return .comics
@@ -115,7 +115,7 @@ struct DownloadsView: View {
         }
     }
 
-    private var isSeriesMode: Bool { selectedChipId == "series" }
+    private var isSeriesMode: Bool { appNavigation.homeFilterChipId == "series" }
 
     private var homeChips: [FilterChip] {
         [
@@ -151,23 +151,33 @@ struct DownloadsView: View {
         !activePendingDownloads.isEmpty || !downloadManager.activeDownloads.isEmpty
     }
 
-    /// Merge local recently-read books with remote books that have progress but aren't downloaded
+    /// Merge local recently-read books with remote books that have progress or highlights but aren't downloaded
     private var continueReadingItems: [ContinueReadingItem] {
         let localIds = Set(recentlyReadBooks.map(\.id))
+        let progressIds = Set(syncService.remoteBooksWithProgress.map(\.id))
 
         let localItems = recentlyReadBooks.map { ContinueReadingItem.downloaded($0) }
 
-        let remoteItems = syncService.remoteBooksWithProgress
+        let progressRemoteItems = syncService.remoteBooksWithProgress
             .filter { !localIds.contains($0.id) }
             .map { ContinueReadingItem.remote($0) }
 
-        return (localItems + remoteItems)
+        let highlightOnlyRemoteItems = syncService.remoteBooksWithHighlights
+            .filter { !localIds.contains($0.id) && !progressIds.contains($0.id) }
+            .map { ContinueReadingItem.remote($0) }
+
+        return (localItems + progressRemoteItems + highlightOnlyRemoteItems)
             .sorted { ($0.lastReadAt ?? .distantPast) > ($1.lastReadAt ?? .distantPast) }
     }
 
     var body: some View {
+        @Bindable var nav = appNavigation
         NavigationStack(path: $navigationPath) {
             mainContent
+                #if targetEnvironment(macCatalyst)
+                .searchable(text: $searchText, prompt: searchPrompt)
+                .navigationTitle("")
+                #else
                 .toolbar(.hidden, for: .navigationBar)
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
@@ -207,12 +217,13 @@ struct DownloadsView: View {
                             .padding(.top, 4)
                         }
 
-                        FilterChipBar(chips: homeChips, selectedId: $selectedChipId)
+                        FilterChipBar(chips: homeChips, selectedId: $nav.homeFilterChipId)
                             .padding(.vertical, 4)
                         Divider()
                     }
                     .background(.ultraThinMaterial)
                 }
+                #endif
                 .navigationDestination(for: DownloadedBook.self) { book in
                     DownloadedBookDetailView(book: book) { seriesName in
                         seriesSheet = DownloadSeriesSheet(id: seriesName)
@@ -238,6 +249,10 @@ struct DownloadsView: View {
                 }
                 .sheet(item: $seriesSheet) { sheet in
                     DownloadedSeriesDetailView(seriesName: sheet.id)
+                        .environment(serverConfig)
+                        .environment(audiobookPlayer)
+                        .environment(downloadManager)
+                        .environment(readerSettings)
                         .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
                 }
@@ -270,7 +285,7 @@ struct DownloadsView: View {
                     greetingText = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
                 }
                 .onChange(of: searchText) { _, _ in recomputeFilteredBooks() }
-                .onChange(of: selectedChipId) { _, _ in
+                .onChange(of: appNavigation.homeFilterChipId) { _, _ in
                     if !isSeriesMode {
                         recomputeFilteredBooks()
                     } else {
@@ -293,12 +308,6 @@ struct DownloadsView: View {
         }
     }
 
-    // MARK: - Navigation Title
-
-    private var navigationTitle: String {
-        "Home"
-    }
-
     private var searchPrompt: String {
         if isSeriesMode {
             return "Search series..."
@@ -310,11 +319,11 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
+        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
             DownloadsEmptyStateView()
         } else if isSeriesMode {
             seriesGridContent
-        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty {
+        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -339,18 +348,15 @@ struct DownloadsView: View {
     @ViewBuilder
     private var seriesGridContent: some View {
         if filteredSeriesItems.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text(searchText.isEmpty ? "No series found" : "No matching series")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text(searchText.isEmpty ? "Downloaded books with series metadata will appear here." : "Try a different search term.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+            if !searchText.isEmpty {
+                SearchEmptyStateView(query: searchText)
+            } else {
+                EmptyStateView(
+                    icon: "books.vertical",
+                    title: "No Series",
+                    description: "Downloaded books with series metadata will appear here."
+                )
             }
-            .padding(.top, 80)
         } else {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 16) {
@@ -389,6 +395,11 @@ struct DownloadsView: View {
                     onRemoteBookTap: { book in
                         selectedRemoteBook = book
                     },
+                    onDownloadBook: { book in
+                        Task {
+                            try? await downloadManager.downloadBook(book, modelContext: modelContext)
+                        }
+                    },
                     onMarkAsRead: { book in
                         toggleReadStatus(for: book)
                     },
@@ -408,17 +419,6 @@ struct DownloadsView: View {
             // Active transcription section
             if transcriptionService.isActive {
                 activeTranscriptionSection
-            }
-
-            // My Library section header
-            if searchText.isEmpty {
-                HStack {
-                    Text("My Library")
-                        .font(.title3).fontWeight(.semibold)
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
             }
 
             LazyVGrid(columns: columns, spacing: 16) {

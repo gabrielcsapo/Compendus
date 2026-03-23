@@ -16,6 +16,12 @@ struct AudiobookPlayerView: View {
 
     @Environment(AudiobookPlayer.self) private var player
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ServerConfig.self) private var serverConfig
+    @Environment(APIService.self) private var apiService
+    @Environment(AppNavigation.self) private var appNavigation
+    @Environment(DownloadManager.self) private var downloadManager
+    @Environment(StorageManager.self) private var storageManager
+    @Environment(ReaderSettings.self) private var readerSettings
 
     @State private var showingChapters = false
     @State private var showLyrics = false
@@ -56,16 +62,30 @@ struct AudiobookPlayerView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                // Background blur from cover art
-                if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .blur(radius: 60)
-                        .opacity(0.3)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+            VStack(spacing: 0) {
+                // ── Bloom zone (cover art + metadata only) ──────────────────
+                ZStack {
+                    // Vibrant blurred cover background (Spotify-style)
+                    if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .saturation(1.8)
+                            .blur(radius: 50)
+                            .opacity(0.65)
+                            .clipped()
+                    }
+
+                // Bottom fade — blends bloom into the controls panel below
+                VStack(spacing: 0) {
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, Color(uiColor: .systemBackground)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120)
                 }
 
                 VStack(spacing: 0) {
@@ -186,27 +206,31 @@ struct AudiobookPlayerView: View {
                         .transition(.opacity)
                     }
 
-                    // Transcription pill (above player controls)
-                    if showTranscriptionPill {
-                        TranscriptionPill(
-                            book: book,
-                            showLyrics: showLyrics,
-                            onToggleLyrics: { showLyrics.toggle() },
-                            onStartLiveTranscription: { startLiveTranscription() },
-                            onStartFullTranscription: { startFullTranscription() },
-                            onDismiss: { withAnimation { transcriptionPillDismissed = true } }
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-
-                    // Player controls (fixed at bottom)
-                    playerControls
                 }
                 .frame(maxWidth: .infinity)
                 .animation(.easeInOut(duration: 0.3), value: showLyrics)
-            }
+                } // ZStack (bloom zone)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // ── Controls zone (outside bloom) ────────────────────────────
+                // Transcription pill
+                if showTranscriptionPill {
+                    TranscriptionPill(
+                        book: book,
+                        showLyrics: showLyrics,
+                        onToggleLyrics: { showLyrics.toggle() },
+                        onStartLiveTranscription: { startLiveTranscription() },
+                        onStartFullTranscription: { startFullTranscription() },
+                        onDismiss: { withAnimation { transcriptionPillDismissed = true } }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                // Player controls
+                playerControls
+            } // VStack (outer)
         }
         .ignoresSafeArea(edges: .bottom)
         .task {
@@ -235,6 +259,13 @@ struct AudiobookPlayerView: View {
             NavigationStack {
                 DownloadedBookDetailView(book: book)
             }
+            .environment(serverConfig)
+            .environment(apiService)
+            .environment(appNavigation)
+            .environment(player)
+            .environment(downloadManager)
+            .environment(storageManager)
+            .environment(readerSettings)
         }
         .onChange(of: transcriptionService.partialTranscript?.segments.count) { _, _ in
             checkTranscriptBuffer()

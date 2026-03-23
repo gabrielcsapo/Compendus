@@ -48,6 +48,22 @@ enum ContinueReadingItem: Identifiable {
         }
     }
 
+    /// Total pages (ebooks only)
+    var pageCount: Int? {
+        switch self {
+        case .downloaded(let book): return book.isAudiobook ? nil : book.pageCount
+        case .remote(let book): return book.isAudiobook ? nil : book.pageCount
+        }
+    }
+
+    /// Total duration in seconds (audiobooks only)
+    var duration: Int? {
+        switch self {
+        case .downloaded(let book): return book.isAudiobook ? book.duration : nil
+        case .remote(let book): return book.isAudiobook ? book.duration : nil
+        }
+    }
+
     var isDownloaded: Bool {
         if case .downloaded = self { return true }
         return false
@@ -69,6 +85,7 @@ struct ContinueReadingSection: View {
     let items: [ContinueReadingItem]
     var onLocalBookTap: ((DownloadedBook) -> Void)?
     var onRemoteBookTap: ((Book) -> Void)?
+    var onDownloadBook: ((Book) -> Void)?
     var onMarkAsRead: ((DownloadedBook) -> Void)?
     var onViewDetails: ((DownloadedBook) -> Void)?
 
@@ -76,14 +93,18 @@ struct ContinueReadingSection: View {
         VStack(alignment: .leading, spacing: 12) {
             // First item as hero card
             if let first = items.first {
-                HeroContinueReadingCard(item: first) {
+                HeroContinueReadingCard(item: first, onTap: {
                     switch first {
                     case .downloaded(let book):
                         onLocalBookTap?(book)
                     case .remote(let book):
                         onRemoteBookTap?(book)
                     }
-                }
+                }, onDownload: {
+                    if case .remote(let book) = first {
+                        onDownloadBook?(book)
+                    }
+                })
                 .contextMenu {
                     contextMenuItems(for: first)
                 }
@@ -110,7 +131,7 @@ struct ContinueReadingSection: View {
                                     case .downloaded(let book):
                                         onLocalBookTap?(book)
                                     case .remote(let book):
-                                        onRemoteBookTap?(book)
+                                        onDownloadBook?(book)
                                     }
                                 }
                                 .contextMenu {
@@ -153,6 +174,12 @@ struct ContinueReadingSection: View {
             }
 
         case .remote(let book):
+            Button {
+                onDownloadBook?(book)
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+
             Button {
                 onRemoteBookTap?(book)
             } label: {
@@ -201,13 +228,11 @@ struct ContinueReadingCard: View {
             }
             .frame(width: 100, height: 150)
             .overlay(alignment: .topTrailing) {
-                // Download icon for remote (not downloaded) books
+                // Download badge for remote (not downloaded) books
                 if !item.isDownloaded {
-                    Image(systemName: "icloud.and.arrow.down")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(5)
-                        .background(Circle().fill(Color.black.opacity(0.6)))
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.white, Color.accentColor)
                         .padding(4)
                 }
             }
@@ -222,7 +247,7 @@ struct ContinueReadingCard: View {
                 HStack(spacing: 4) {
                     FormatBadgeView(format: item.format, size: .compact)
 
-                    Text("\(Int(item.readingProgress * 100))%")
+                    Text(progressLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -230,10 +255,23 @@ struct ContinueReadingCard: View {
             .frame(width: 100, height: 44, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.title), \(Int(item.readingProgress * 100))% complete\(item.isDownloaded ? "" : ", available for download")")
+        .accessibilityLabel("\(item.title), \(progressLabel)\(item.isDownloaded ? "" : ", available for download")")
         .accessibilityHint(item.isDownloaded
             ? (item.isAudiobook ? "Double tap to continue listening" : "Double tap to continue reading")
-            : "Double tap to view book details")
+            : "Double tap to download book")
+    }
+
+    private var progressLabel: String {
+        if let duration = item.duration, duration > 0 {
+            let remaining = Int(Double(duration) * (1 - item.readingProgress))
+            let hours = remaining / 3600
+            let minutes = (remaining % 3600) / 60
+            return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+        } else if let pageCount = item.pageCount, pageCount > 0 {
+            let pagesLeft = pageCount - Int(item.readingProgress * Double(pageCount))
+            return "\(pagesLeft)p left"
+        }
+        return "\(Int(item.readingProgress * 100))%"
     }
 
     @ViewBuilder

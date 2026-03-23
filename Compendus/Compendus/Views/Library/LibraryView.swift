@@ -123,7 +123,6 @@ struct LibraryView: View {
     @State private var paginationFailed = false
     /// Book IDs that should auto-open in the reader once their download completes
     @State private var pendingReadBookIds: Set<String> = []
-    @State private var selectedChipId: String = "all"
     @State private var showingSortSheet = false
     @FocusState private var isSearchFocused: Bool
 
@@ -135,10 +134,10 @@ struct LibraryView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
     }
 
-    private var isSeriesChipSelected: Bool { selectedChipId == "series" }
+    private var isSeriesChipSelected: Bool { appNavigation.libraryFilterChipId == "series" }
 
     private var chipDrivenFilter: BookFilter {
-        switch selectedChipId {
+        switch appNavigation.libraryFilterChipId {
         case "ebooks": return .ebooks
         case "audiobooks": return .audiobooks
         case "comics": return .comics
@@ -249,8 +248,14 @@ struct LibraryView: View {
             }
     }
 
+    @ViewBuilder
     private var librarySearchable: some View {
+        @Bindable var nav = appNavigation
         mainContent
+            #if targetEnvironment(macCatalyst)
+            .searchable(text: $searchText, prompt: searchPrompt)
+            .navigationTitle(macSectionTitle)
+            #else
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
@@ -280,12 +285,13 @@ struct LibraryView: View {
                     .padding(.top, 8)
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused || !searchText.isEmpty)
 
-                    FilterChipBar(chips: libraryChips, selectedId: $selectedChipId, trailingContent: isSeriesChipSelected ? nil : sortChipView)
+                    FilterChipBar(chips: libraryChips, selectedId: $nav.libraryFilterChipId, trailingContent: isSeriesChipSelected ? nil : sortChipView)
                         .padding(.vertical, 4)
                     Divider()
                 }
                 .background(.ultraThinMaterial)
             }
+            #endif
             .onChange(of: searchText) { _, newValue in
                 searchTask?.cancel()
                 guard !isSeriesChipSelected else { return } // series search is local
@@ -300,7 +306,7 @@ struct LibraryView: View {
                     await searchBooks(query: trimmed)
                 }
             }
-            .onChange(of: selectedChipId) { _, newId in
+            .onChange(of: appNavigation.libraryFilterChipId) { _, newId in
                 if newId == "series" {
                     viewMode = .series
                     Task { await loadSeries() }
@@ -440,9 +446,19 @@ struct LibraryView: View {
 
     // MARK: - Navigation Title
 
-    private var navigationTitle: String {
-        "Library"
+    private var navigationTitle: String { "Library" }
+
+    #if targetEnvironment(macCatalyst)
+    private var macSectionTitle: String {
+        switch appNavigation.libraryFilterChipId {
+        case "ebooks": return "Ebooks"
+        case "audiobooks": return "Audiobooks"
+        case "comics": return "Comics"
+        case "series": return "Series"
+        default: return "All"
+        }
     }
+    #endif
 
     // MARK: - Series Grid
 
@@ -455,18 +471,21 @@ struct LibraryView: View {
                 Task { await loadSeries() }
             }
         } else if filteredSeriesItems.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-                Text(searchText.isEmpty ? "No series found" : "No matching series")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text(searchText.isEmpty ? "Books with series metadata will appear here." : "Try a different search term.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+            ScrollView {
+                VStack(spacing: 12) {
+                    Image(systemName: "books.vertical")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                    Text(searchText.isEmpty ? "No series found" : "No matching series")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text(searchText.isEmpty ? "Books with series metadata will appear here." : "Try a different search term.")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 80)
             }
-            .padding(.top, 80)
         } else {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 16) {
@@ -494,9 +513,27 @@ struct LibraryView: View {
     private func applyPendingSeriesFilter() {
         if let seriesName = appNavigation.pendingSeriesFilter {
             appNavigation.pendingSeriesFilter = nil
-            selectedChipId = "series"
+            appNavigation.libraryFilterChipId = "series"
             seriesSheet = SeriesSheet(id: seriesName)
         }
+    }
+
+    /// Returns a human-readable error message, replacing raw HTML server responses with
+    /// a friendly string (e.g. 502 "Starting Up" pages).
+    private func friendlyErrorMessage(from error: Error) -> String {
+        let raw: String
+        if let apiError = error as? APIError {
+            raw = apiError.errorDescription ?? error.localizedDescription
+        } else if let urlError = error as? URLError {
+            return "Connection error: \(urlError.localizedDescription)"
+        } else {
+            return error.localizedDescription
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("<") {
+            return "The server is temporarily unavailable. It may still be starting up — please try again in a moment."
+        }
+        return raw
     }
 
     private func loadBooks() async {
@@ -511,15 +548,7 @@ struct LibraryView: View {
             hasMore = response.books.count >= limit
             offset = response.books.count
         } catch {
-            // Log detailed error for debugging
-            print("[LibraryView] Load error: \(error)")
-            if let apiError = error as? APIError {
-                errorMessage = apiError.errorDescription ?? error.localizedDescription
-            } else if let urlError = error as? URLError {
-                errorMessage = "Connection error: \(urlError.localizedDescription) (code: \(urlError.code.rawValue))"
-            } else {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = friendlyErrorMessage(from: error)
         }
 
         isLoading = false
@@ -551,8 +580,7 @@ struct LibraryView: View {
             let response = try await apiService.fetchSeries()
             seriesItems = response.series
         } catch {
-            print("[LibraryView] Load series error: \(error)")
-            seriesErrorMessage = error.localizedDescription
+            seriesErrorMessage = friendlyErrorMessage(from: error)
         }
 
         isLoadingSeries = false
@@ -568,7 +596,7 @@ struct LibraryView: View {
             totalCount = response.books.count  // Show search result count
             hasMore = false  // Search doesn't support pagination
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = friendlyErrorMessage(from: error)
         }
 
         isLoading = false

@@ -37,6 +37,8 @@ final class ReadingSession {
 
     // Audiobook tracking
     var audioPlaybackRate: Float?   // e.g. 1.0, 1.5, 2.0
+    var audioStartTimestamp: Double? // playback position (seconds) when session began
+    var audioEndTimestamp: Double?   // playback position (seconds) when session ended
 
     var profileId: String = ""      // Profile that owns this session (empty = legacy/unassigned)
 
@@ -95,7 +97,9 @@ final class ReadingSession {
         totalBookPages: Int? = nil,
         startCharacterOffset: Int? = nil,
         endCharacterOffset: Int? = nil,
-        audioPlaybackRate: Float? = nil
+        audioPlaybackRate: Float? = nil,
+        audioStartTimestamp: Double? = nil,
+        audioEndTimestamp: Double? = nil
     ) {
         self.id = id
         self.bookId = bookId
@@ -108,5 +112,7 @@ final class ReadingSession {
         self.startCharacterOffset = startCharacterOffset
         self.endCharacterOffset = endCharacterOffset
         self.audioPlaybackRate = audioPlaybackRate
+        self.audioStartTimestamp = audioStartTimestamp
+        self.audioEndTimestamp = audioEndTimestamp
     }
 }

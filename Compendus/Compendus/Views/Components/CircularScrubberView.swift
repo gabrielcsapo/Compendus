@@ -156,9 +156,9 @@ struct CircularScrubberView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: coverSize, height: coverSize)
-                    .clipShape(RoundedRectangle(cornerRadius: coverSize * 0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
-                RoundedRectangle(cornerRadius: coverSize * 0.08)
+                RoundedRectangle(cornerRadius: 10)
                     .fill(Color(.systemGray5))
                     .frame(width: coverSize, height: coverSize)
                     .overlay {

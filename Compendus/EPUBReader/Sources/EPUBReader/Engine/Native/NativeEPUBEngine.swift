@@ -599,38 +599,39 @@ public class NativeEPUBEngine: ReaderEngine {
             cssURLs.append(parser.resolveURL(for: item))
         }
 
-        let extractedURL = parser.extractedURL
-        let rootDir = parser.package.rootDirectoryPath
-
         let (combined, fonts) = await Task.detached { () -> (CSSStylesheet, [CGFont]) in
             var stylesheet = CSSStylesheet()
+            var registeredFonts: [CGFont] = []
+
             for cssURL in cssURLs {
                 guard let cssData = try? Data(contentsOf: cssURL),
                       let cssText = String(data: cssData, encoding: .utf8) else { continue }
                 let parsed = CSSParser.parse(cssText)
                 stylesheet.merge(with: parsed)
-            }
 
-            // Register @font-face fonts from EPUB
-            var registeredFonts: [CGFont] = []
-            for fontFace in stylesheet.fontFaces {
-                for src in fontFace.sources {
-                    // Skip WOFF/WOFF2 (not supported by CGFont)
-                    let lower = src.lowercased()
-                    if lower.hasSuffix(".woff") || lower.hasSuffix(".woff2") { continue }
+                // Resolve @font-face src URLs relative to the CSS file's own directory.
+                // (Using rootDir would be wrong for EPUBs where CSS lives in a subdirectory
+                // like EPUB/Style/ — the relative paths like ../Font/foo.otf would resolve
+                // to the wrong location.)
+                let cssBaseDir = cssURL.deletingLastPathComponent()
+                for fontFace in parsed.fontFaces {
+                    for src in fontFace.sources {
+                        // Skip WOFF/WOFF2 (CGFont cannot load them)
+                        let lower = src.lowercased()
+                        if lower.hasSuffix(".woff") || lower.hasSuffix(".woff2") { continue }
 
-                    let fontPath = rootDir.isEmpty ? src : rootDir + "/" + src
-                    let fontURL = extractedURL.appendingPathComponent(fontPath).standardizedFileURL
+                        let fontURL = cssBaseDir.appendingPathComponent(src).standardizedFileURL
 
-                    guard let fontData = try? Data(contentsOf: fontURL) as CFData,
-                          let provider = CGDataProvider(data: fontData),
-                          let cgFont = CGFont(provider) else { continue }
+                        guard let fontData = try? Data(contentsOf: fontURL) as CFData,
+                              let provider = CGDataProvider(data: fontData),
+                              let cgFont = CGFont(provider) else { continue }
 
-                    var error: Unmanaged<CFError>?
-                    if CTFontManagerRegisterGraphicsFont(cgFont, &error) {
-                        registeredFonts.append(cgFont)
+                        var error: Unmanaged<CFError>?
+                        if CTFontManagerRegisterGraphicsFont(cgFont, &error) {
+                            registeredFonts.append(cgFont)
+                        }
+                        break // Stop after first successful source for this font-face
                     }
-                    break // Stop after first successful source for this font-face
                 }
             }
 
@@ -713,8 +714,8 @@ public class NativeEPUBEngine: ReaderEngine {
             return
         }
 
-        // Dismiss any active FXL web page before switching to reflowable content
-        pageViewController?.clearFXLWebPage()
+        // Dismiss any active FXL page before switching to reflowable content
+        pageViewController?.clearFXLPage()
 
         // Cancel any in-flight chapter load
         chapterLoadTask?.cancel()
@@ -1216,35 +1217,51 @@ public class NativeEPUBEngine: ReaderEngine {
             return
         }
 
-        // FXL pages with properties="svg" are fully typeset SVG documents — the
-        // NSAttributedString pipeline cannot reproduce their layout. Load them
-        // directly in a WKWebView with access to the extracted EPUB directory so
-        // embedded fonts and relative CSS resolve correctly.
+        // FXL pages that are SVG documents cannot be reproduced by the
+        // NSAttributedString pipeline. Render them natively via UIImage+CoreSVG.
+        // Two cases:
+        //  1. XHTML wrapping SVG: manifest item has properties="svg"
+        //  2. Bare SVG in spine: manifest item has media-type="image/svg+xml"
         let manifestItem = parser.package.manifestItem(forSpineIndex: spineIndex)
-        if manifestItem?.properties?.contains("svg") == true {
-            let accessURL = parser.package.extractedURL
-            pageViewController?.clearFXLWebPage()  // reset any previous web page first
+        let isSVGSpineItem = manifestItem?.properties?.contains("svg") == true
+                          || manifestItem?.mediaType == "image/svg+xml"
+        if isSVGSpineItem {
+            pageViewController?.clearFXLPage()
+            // SVG spine items are always single-page; ensure spread layout is not active
+            // so secondTextView is not above fxlImageView in z-order.
+            pageViewController?.configureLayout(twoPage: false)
             pageViewController?.showLoadingIndicator(false)
-            pageViewController?.loadFXLWebPage(fileURL: chapterURL, allowingReadAccessTo: accessURL)
-            // Store a stub document so navigation logic (goForward/goBackward) can see a page count of 1
-            if chapterDocuments[spineIndex] == nil {
-                let stub = NSAttributedString(string: "")
-                chapterDocuments[spineIndex] = ChapterDocument(
-                    spineIndex: spineIndex,
-                    attributedString: stub,
-                    pages: [PageInfo(range: NSRange(location: 0, length: 0), pageIndex: 0)],
-                    offsetMap: OffsetMap(),
-                    plainTextMap: PlainTextToAttrStringMap(),
-                    mediaAttachments: [],
-                    floatingElements: []
-                )
-                if spineIndex < spinePageCounts.count {
-                    spinePageCounts[spineIndex] = 1
-                }
+
+            // Always store/refresh the stub so navigation logic sees a page count of 1.
+            // Do NOT check for nil: paginateAllChapters or prefetchAdjacentChapters may
+            // have stored a wrong XHTML-parsed document here before the SVG detection fix
+            // was applied, or in the event of a race. Overwrite unconditionally.
+            let stub = NSAttributedString(string: "")
+            chapterDocuments[spineIndex] = ChapterDocument(
+                spineIndex: spineIndex,
+                attributedString: stub,
+                pages: [PageInfo(range: NSRange(location: 0, length: 0), pageIndex: 0)],
+                offsetMap: OffsetMap(),
+                plainTextMap: PlainTextToAttrStringMap(),
+                mediaAttachments: [],
+                floatingElements: []
+            )
+            if spineIndex < spinePageCounts.count {
+                spinePageCounts[spineIndex] = 1
             }
-            isLoadingChapter = false
-            updateLocation()
-            prefetchAdjacentChapters()
+
+            // Render the SVG asynchronously so we don't block the main thread
+            let viewport = viewportSize
+            chapterLoadTask = Task { [weak self] in
+                guard let self else { return }
+                if let image = await Self.extractAndRenderSVG(from: chapterURL, size: viewport) {
+                    self.pageViewController?.loadFXLImagePage(image)
+                }
+                self.isLoadingChapter = false
+                self.isReady = true
+                self.updateLocation()
+                self.prefetchAdjacentChapters()
+            }
             return
         }
 
@@ -1540,6 +1557,17 @@ public class NativeEPUBEngine: ReaderEngine {
                 continue
             }
 
+            // SVG spine items are rendered as images by loadFXLChapter — never run them
+            // through the XHTML pipeline or the resulting NSAttributedString would contain
+            // SVG <text> content with absolute coordinates that overflows the UITextView.
+            let manifestItem = parser.package.manifestItem(forSpineIndex: index)
+            let isSVGItem = manifestItem?.properties?.contains("svg") == true
+                         || manifestItem?.mediaType == "image/svg+xml"
+            if isSVGItem {
+                spinePageCounts[index] = 1
+                continue
+            }
+
             guard let url = parser.resolveSpineItemURL(at: index) else { continue }
             chapterURLs.append((index, url))
         }
@@ -1737,6 +1765,297 @@ public class NativeEPUBEngine: ReaderEngine {
         logger.info("Full book pagination complete: \(self.totalPositions) total pages across \(spineCount) chapters")
     }
 
+    // MARK: - FXL SVG Rendering
+
+    /// Extract the first `<svg>…</svg>` block from an XHTML file and render it
+    /// to a `UIImage` at the given size via CoreSVG.
+    ///
+    /// We extract via raw string slicing rather than SwiftSoup because SwiftSoup
+    /// is an HTML parser: it lowercases attributes (`viewBox` → `viewbox`), strips
+    /// namespace declarations (`xmlns:xlink`), and unwraps CDATA in `<style>` blocks.
+    /// CoreSVG rejects or misrenders SVG with those mutations.
+    ///
+    /// Relative image references (`xlink:href="../Image/foo.jpg"`) are inlined as
+    /// base64 data URIs so CoreSVG can load them from in-memory data.
+    ///
+    /// Text elements are extracted via SwiftSoup and drawn natively with UIKit so
+    /// that per-tspan absolute y positioning (which CoreSVG ignores) is respected.
+    ///
+    /// Safe to call on any actor — all heavy work runs in a detached task.
+    nonisolated static func extractAndRenderSVG(from url: URL, size: CGSize) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url),
+                  let html = String(data: data, encoding: .utf8)
+                          ?? String(data: data, encoding: .isoLatin1) else { return nil }
+
+            // Parse the XHTML with SwiftSoup to extract <svg> element data cleanly
+            guard let doc = try? SwiftSoup.parse(html),
+                  let svgEl = try? doc.select("svg").first() else { return nil }
+
+            // viewBox gives us the SVG user-unit coordinate space
+            let vbStr = (try? svgEl.attr("viewBox")) ?? ""
+            let vbNums = vbStr.split(separator: " ").compactMap { Double($0) }
+            guard vbNums.count == 4 else { return nil }
+            let canvasW = CGFloat(vbNums[2])
+            let canvasH = CGFloat(vbNums[3])
+
+            // Parse embedded CSS classes (fill colour, font family, font size)
+            var cssText = (try? doc.select("style").first()?.data()) ?? ""
+            cssText = cssText.replacingOccurrences(of: "<![CDATA[", with: "")
+                             .replacingOccurrences(of: "]]>", with: "")
+            let css = Self.parseSVGCSS(cssText)
+
+            // Extract all <text>/<tspan> data before stripping them from the SVG
+            let textBlocks = Self.parseSVGTextBlocks(svgEl, css: css)
+
+            // Raw SVG string — strip <text>…</text> so CoreSVG only draws the
+            // background (images, shapes). We draw text natively below.
+            guard let svgStart = html.range(of: "<svg", options: .caseInsensitive),
+                  let svgEnd   = html.range(of: "</svg>", options: [.caseInsensitive, .backwards]),
+                  svgEnd.lowerBound > svgStart.lowerBound else { return nil }
+            var svgString = String(html[svgStart.lowerBound..<svgEnd.upperBound])
+            svgString = Self.stripSVGTextElements(from: svgString)
+
+            let baseURL = url.deletingLastPathComponent()
+            svgString = Self.inlineImageHrefs(in: svgString, baseURL: baseURL)
+
+            // Scale / centering offsets (viewBox → viewport)
+            let scale = min(size.width / canvasW, size.height / canvasH)
+            let cx    = (size.width  - canvasW * scale) / 2
+            let cy    = (size.height - canvasH * scale) / 2
+
+            let bgDoc = SVGDocument(Data(svgString.utf8))
+
+            return UIGraphicsImageRenderer(size: size).image { ctx in
+                // Background: images, shapes, etc. (no text).
+                // SVGDocument.draw flips the y-axis for CoreSVG; save/restore so
+                // the UIKit coordinate system is clean for native text drawing below.
+                ctx.cgContext.saveGState()
+                bgDoc?.draw(in: ctx.cgContext, size: size)
+                ctx.cgContext.restoreGState()
+
+                // Native text: each character placed at its SVG absolute position
+                for block in textBlocks {
+                    for tspan in block.tspans {
+                        let font = Self.resolveSVGFont(name: tspan.fontFamily,
+                                                       size: tspan.fontSize * scale)
+                        let attrs: [NSAttributedString.Key: Any] = [
+                            .font: font,
+                            .foregroundColor: tspan.fillColor,
+                        ]
+                        let scalars = Array(tspan.text.unicodeScalars)
+                        for (i, scalar) in scalars.enumerated() {
+                            guard i < tspan.xPositions.count else { break }
+                            let screenX = cx + (block.tx + tspan.xPositions[i]) * scale
+                            let screenY = cy + (block.ty + tspan.y) * scale
+                            String(scalar).draw(
+                                at: CGPoint(x: screenX, y: screenY - font.ascender),
+                                withAttributes: attrs
+                            )
+                        }
+                    }
+                }
+            }
+        }.value
+    }
+
+    // MARK: - SVG text-extraction helpers
+
+    private struct SVGCSSStyle {
+        var fillColor: UIColor = .label
+        var fontFamily: String = ""
+        var fontSize: CGFloat  = 0
+    }
+
+    private struct SVGTspanData {
+        let xPositions: [CGFloat]
+        let y:          CGFloat
+        let text:       String
+        let fontFamily: String
+        let fontSize:   CGFloat
+        let fillColor:  UIColor
+    }
+
+    private struct SVGTextBlockData {
+        let tx:     CGFloat
+        let ty:     CGFloat
+        let tspans: [SVGTspanData]
+    }
+
+    /// Parse `.className { … }` rules from an SVG embedded CSS block.
+    /// Only extracts `fill`, `font-family`, and `font-size`.
+    private nonisolated static func parseSVGCSS(_ css: String) -> [String: SVGCSSStyle] {
+        var result: [String: SVGCSSStyle] = [:]
+        for chunk in css.components(separatedBy: "}") {
+            guard let brace = chunk.firstIndex(of: "{") else { continue }
+            let selector = chunk[..<brace].trimmingCharacters(in: .whitespacesAndNewlines)
+            let body     = chunk[chunk.index(after: brace)...]
+                               .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard selector.hasPrefix(".") else { continue }
+            let name = String(selector.dropFirst())
+            var style = SVGCSSStyle()
+            for decl in body.components(separatedBy: ";") {
+                let kv = decl.components(separatedBy: ":")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                guard kv.count >= 2 else { continue }
+                let value = kv[1...].joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                switch kv[0].lowercased() {
+                case "fill" where value != "none":
+                    style.fillColor = UIColor(hex: value) ?? style.fillColor
+                case "font-family":
+                    style.fontFamily = value
+                case "font-size":
+                    let num = value.replacingOccurrences(of: "px", with: "")
+                                   .trimmingCharacters(in: .whitespaces)
+                    style.fontSize = CGFloat(Double(num) ?? 0)
+                default: break
+                }
+            }
+            result[name] = style
+        }
+        return result
+    }
+
+    /// Use SwiftSoup to walk every `<text>` element in the SVG, collecting
+    /// transform (tx, ty) and per-`<tspan>` positioning / style data.
+    private nonisolated static func parseSVGTextBlocks(
+        _ svgEl: SwiftSoup.Element,
+        css: [String: SVGCSSStyle]
+    ) -> [SVGTextBlockData] {
+        guard let textEls = try? svgEl.select("text") else { return [] }
+        var blocks: [SVGTextBlockData] = []
+
+        for textEl in textEls {
+            let (tx, ty) = Self.parseSVGMatrix((try? textEl.attr("transform")) ?? "")
+            guard let tspanEls = try? textEl.select("tspan") else { continue }
+            var tspans: [SVGTspanData] = []
+
+            for tspanEl in tspanEls {
+                let text = (try? tspanEl.ownText()) ?? ""
+                guard !text.isEmpty else { continue }
+
+                let xStr = (try? tspanEl.attr("x")) ?? ""
+                let yVal = CGFloat(Double((try? tspanEl.attr("y")) ?? "") ?? 0)
+                let xPos: [CGFloat] = xStr.split(separator: ",").compactMap {
+                    guard let d = Double($0.trimmingCharacters(in: .whitespaces)) else { return nil }
+                    return CGFloat(d)
+                }
+
+                // Merge CSS classes (later classes override earlier ones)
+                var style = SVGCSSStyle()
+                for cls in ((try? tspanEl.attr("class")) ?? "")
+                    .split(separator: " ").map(String.init) {
+                    guard let s = css[cls] else { continue }
+                    if !s.fontFamily.isEmpty { style.fontFamily = s.fontFamily }
+                    if s.fontSize > 0        { style.fontSize   = s.fontSize   }
+                    style.fillColor = s.fillColor
+                }
+
+                tspans.append(SVGTspanData(
+                    xPositions: xPos,
+                    y:          yVal,
+                    text:       text,
+                    fontFamily: style.fontFamily,
+                    fontSize:   style.fontSize,
+                    fillColor:  style.fillColor
+                ))
+            }
+
+            if !tspans.isEmpty {
+                blocks.append(SVGTextBlockData(tx: tx, ty: ty, tspans: tspans))
+            }
+        }
+        return blocks
+    }
+
+    /// Extract tx and ty from `matrix(a b c d tx ty)`.
+    private nonisolated static func parseSVGMatrix(_ transform: String) -> (CGFloat, CGFloat) {
+        guard let open  = transform.firstIndex(of: "("),
+              let close = transform.lastIndex(of: ")") else { return (0, 0) }
+        let nums = transform[transform.index(after: open)..<close]
+            .split(separator: " ")
+            .compactMap { Double($0) }
+        guard nums.count >= 6 else { return (0, 0) }
+        return (CGFloat(nums[4]), CGFloat(nums[5]))
+    }
+
+    /// Remove all `<text … >…</text>` blocks from an SVG string so CoreSVG only
+    /// renders the background layer.
+    private nonisolated static func stripSVGTextElements(from svg: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<text[\\s>][\\s\\S]*?</text>") else { return svg }
+        return regex.stringByReplacingMatches(
+            in: svg,
+            range: NSRange(svg.startIndex..., in: svg),
+            withTemplate: ""
+        )
+    }
+
+    /// Map a CSS font-family name (possibly with an InDesign export suffix like
+    /// `-0908`) to a registered UIFont name, falling back to the system font.
+    private nonisolated static func resolveSVGFont(name: String, size: CGFloat) -> UIFont {
+        if let f = UIFont(name: name, size: size) { return f }
+        // Strip trailing dash-suffixes one at a time (AGaramondPro-Regular-0908 → AGaramondPro-Regular)
+        let parts = name.components(separatedBy: "-")
+        for drop in 1..<parts.count {
+            let candidate = parts.dropLast(drop).joined(separator: "-")
+            if let f = UIFont(name: candidate, size: size) { return f }
+        }
+        return .systemFont(ofSize: size)
+    }
+
+    /// Replace relative file paths in SVG `xlink:href` / `href` attributes with
+    /// inline `data:` URIs. Skips anything that already starts with `data:`, `http`,
+    /// or `#` (fragment references).
+    nonisolated private static func inlineImageHrefs(in svg: String, baseURL: URL) -> String {
+        // Matches: xlink:href="..." or href="..."  (double-quoted only)
+        let pattern = #"(xlink:href|href)="([^"]+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return svg }
+
+        let ns = svg as NSString
+        let matches = regex.matches(in: svg, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return svg }
+
+        let result = NSMutableString(string: svg)
+        var delta = 0  // cumulative length change from prior replacements
+
+        for match in matches {
+            guard match.numberOfRanges == 3 else { continue }
+
+            let attrNameRange = match.range(at: 1)
+            let pathRange     = match.range(at: 2)
+            let path = ns.substring(with: pathRange)
+
+            // Skip non-file references
+            if path.hasPrefix("data:") || path.hasPrefix("http") || path.hasPrefix("#") { continue }
+
+            let fileURL = baseURL.appendingPathComponent(path).standardizedFileURL
+            guard let imageData = try? Data(contentsOf: fileURL) else { continue }
+
+            let ext  = fileURL.pathExtension.lowercased()
+            let mime: String
+            switch ext {
+            case "jpg", "jpeg": mime = "image/jpeg"
+            case "png":         mime = "image/png"
+            case "gif":         mime = "image/gif"
+            case "webp":        mime = "image/webp"
+            default:            mime = "image/png"
+            }
+
+            let attrName   = ns.substring(with: attrNameRange)   // "xlink:href" or "href"
+            let dataURI    = "data:\(mime);base64,\(imageData.base64EncodedString())"
+            let replacement = "\(attrName)=\"\(dataURI)\""
+
+            // Adjust the full-match NSRange for any previous replacements
+            let fullRange = NSRange(location: match.range.location + delta,
+                                    length:   match.range.length)
+            result.replaceCharacters(in: fullRange, with: replacement)
+            delta += replacement.count - match.range.length
+        }
+
+        return result as String
+    }
+
     // MARK: - Image Pre-loading
 
     /// Walk the AST and pre-load all referenced images into the shared cache.
@@ -1792,6 +2111,12 @@ public class NativeEPUBEngine: ReaderEngine {
         for index in indices {
             guard index >= 0, index < parser.package.spine.count,
                   chapterDocuments[index] == nil else { continue }
+
+            // SVG spine items are rendered as images — never parse through XHTML pipeline.
+            let adjManifestItem = parser.package.manifestItem(forSpineIndex: index)
+            let isAdjSVG = adjManifestItem?.properties?.contains("svg") == true
+                        || adjManifestItem?.mediaType == "image/svg+xml"
+            if isAdjSVG { continue }
 
             // Handle nav documents on the main actor
             if isNavDocument(at: index) {

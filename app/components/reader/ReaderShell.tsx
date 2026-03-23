@@ -462,6 +462,7 @@ export function ReaderShell({
                 onNavigateToPosition={(pos) => reader.goToPosition(pos)}
                 audioChapters={reader.bookInfo?.chapters}
                 audioDuration={reader.bookInfo?.duration}
+                coverPath={reader.bookInfo?.coverPath}
                 highlights={reader.highlights}
                 onAddHighlight={reader.addHighlight}
                 onRemoveHighlight={reader.removeHighlight}

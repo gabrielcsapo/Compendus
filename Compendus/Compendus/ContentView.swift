@@ -9,16 +9,59 @@ import SwiftUI
 import SwiftData
 import EPUBReader
 
+// MARK: - Mac Catalyst Sidebar Navigation
+
+#if targetEnvironment(macCatalyst)
+private enum MacSidebarItem: Hashable {
+    // On Device (downloaded books — DownloadsView)
+    case deviceAll, deviceEbooks, deviceAudiobooks, deviceComics, deviceSeries
+    // Library (server — LibraryView)
+    case libraryAll, libraryEbooks, libraryAudiobooks, libraryComics, librarySeries
+    // Other
+    case highlights
+    case settings
+    case profile
+
+    var chipId: String {
+        switch self {
+        case .deviceAll, .libraryAll: return "all"
+        case .deviceEbooks, .libraryEbooks: return "ebooks"
+        case .deviceAudiobooks, .libraryAudiobooks: return "audiobooks"
+        case .deviceComics, .libraryComics: return "comics"
+        case .deviceSeries, .librarySeries: return "series"
+        default: return "all"
+        }
+    }
+
+    var isLibrarySection: Bool {
+        switch self {
+        case .libraryAll, .libraryEbooks, .libraryAudiobooks, .libraryComics, .librarySeries:
+            return true
+        default:
+            return false
+        }
+    }
+}
+#endif
+
 struct ContentView: View {
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(ReaderSettings.self) private var readerSettings
     @Environment(AppNavigation.self) private var appNavigation
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
+    @Environment(APIService.self) private var apiService
+    @Environment(DownloadManager.self) private var downloadManager
+    @Environment(StorageManager.self) private var storageManager
+    @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(\.modelContext) private var modelContext
     @Environment(\.deepLinkBookId) private var deepLinkBookId
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var deepLinkedBook: DownloadedBook?
     @State private var showDataMigration = false
+    #if targetEnvironment(macCatalyst)
+    @State private var macSidebarSelection: MacSidebarItem = .deviceAll
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    #endif
 
     var body: some View {
         Group {
@@ -29,71 +72,226 @@ struct ContentView: View {
             } else if serverConfig.isConfigured && !serverConfig.isProfileSelected {
                 ProfilePickerView()
             } else if serverConfig.isConfigured {
-                @Bindable var nav = appNavigation
-                @Bindable var player = audiobookPlayer
-                VStack(spacing: 0) {
-                    TabView(selection: $nav.selectedTab) {
-                        DownloadsView()
-                            .tabItem { Label("Home", systemImage: "house") }
-                            .tag(0)
-                            .toolbar(.hidden, for: .tabBar)
-
-                        LibraryView()
-                            .tabItem { Label("Library", systemImage: "books.vertical") }
-                            .tag(1)
-                            .toolbar(.hidden, for: .tabBar)
-
-                        HighlightsView()
-                            .tabItem { Label("Highlights", systemImage: "highlighter") }
-                            .tag(2)
-                            .toolbar(.hidden, for: .tabBar)
-
-                        NavigationStack {
-                            ProfileView()
-                        }
-                            .tabItem { Label("Profile", systemImage: "person") }
-                            .tag(3)
-                            .toolbar(.hidden, for: .tabBar)
-
-                        SettingsView()
-                            .tabItem { Label("Settings", systemImage: "gear") }
-                            .tag(4)
-                            .toolbar(.hidden, for: .tabBar)
-                    }
-
-                    // Integrated bottom bar: mini player + tab icons
-                    CustomBottomBar(selectedTab: $nav.selectedTab)
-                }
-                .sheet(isPresented: $player.isFullPlayerPresented) {
-                    if let book = audiobookPlayer.currentBook {
-                        AudiobookPlayerView(book: book)
-                            .environment(readerSettings)
-                    }
-                }
-                .onChange(of: deepLinkBookId.wrappedValue) { _, newBookId in
-                    if let bookId = newBookId {
-                        openBookFromDeepLink(bookId)
-                    }
-                }
-                .fullScreenCover(item: $deepLinkedBook) { book in
-                    ReaderContainerView(book: book)
-                        .environment(readerSettings)
-                }
-                .sheet(isPresented: $showDataMigration) {
-                    DataMigrationView()
-                }
-                .task(id: serverConfig.selectedProfileId) {
-                    guard serverConfig.isProfileSelected else { return }
-                    let descriptor = FetchDescriptor<DownloadedBook>(predicate: #Predicate { $0.profileId == "" })
-                    if let count = try? modelContext.fetchCount(descriptor), count > 0 {
-                        showDataMigration = true
-                    }
-                }
+                configuredView
             } else {
                 ServerSetupView()
             }
         }
     }
+
+    // MARK: - Configured View
+
+    @ViewBuilder
+    private var configuredView: some View {
+        @Bindable var player = audiobookPlayer
+        mainNavigationView
+            .sheet(isPresented: $player.isFullPlayerPresented) {
+                if let book = audiobookPlayer.currentBook {
+                    AudiobookPlayerView(book: book)
+                        .environment(serverConfig)
+                        .environment(readerSettings)
+                        .environment(apiService)
+                        .environment(audiobookPlayer)
+                        .environment(downloadManager)
+                        .environment(storageManager)
+                        .environment(appNavigation)
+                        .environment(highlightColorManager)
+                }
+            }
+            .onChange(of: deepLinkBookId.wrappedValue) { _, newBookId in
+                if let bookId = newBookId {
+                    openBookFromDeepLink(bookId)
+                }
+            }
+            .fullScreenCover(item: $deepLinkedBook) { book in
+                ReaderContainerView(book: book)
+                    .environment(readerSettings)
+                    .environment(highlightColorManager)
+            }
+            .sheet(isPresented: $showDataMigration) {
+                DataMigrationView()
+                    .environment(serverConfig)
+            }
+            .task(id: serverConfig.selectedProfileId) {
+                guard serverConfig.isProfileSelected else { return }
+                let descriptor = FetchDescriptor<DownloadedBook>(predicate: #Predicate { $0.profileId == "" })
+                if let count = try? modelContext.fetchCount(descriptor), count > 0 {
+                    showDataMigration = true
+                }
+            }
+    }
+
+    // MARK: - Main Navigation (Mac vs iOS)
+
+    @ViewBuilder
+    private var mainNavigationView: some View {
+        #if targetEnvironment(macCatalyst)
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            macSidebarContent
+        } detail: {
+            macDetailContent
+        }
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    withAnimation {
+                        columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+            }
+        }
+        .onChange(of: macSidebarSelection) { _, selection in
+            if selection.isLibrarySection {
+                appNavigation.libraryFilterChipId = selection.chipId
+            } else {
+                appNavigation.homeFilterChipId = selection.chipId
+            }
+        }
+        #else
+        iOSTabView
+        #endif
+    }
+
+    // MARK: - Mac Catalyst Sidebar
+
+    #if targetEnvironment(macCatalyst)
+    @ViewBuilder
+    private var macSidebarContent: some View {
+        List {
+            Section("On Device") {
+                macSidebarButton("All", icon: "books.vertical.fill", item: .deviceAll)
+                macSidebarButton("Ebooks", icon: "book.closed", item: .deviceEbooks)
+                macSidebarButton("Audiobooks", icon: "headphones", item: .deviceAudiobooks)
+                macSidebarButton("Comics", icon: "book.pages", item: .deviceComics)
+                macSidebarButton("Series", icon: "books.vertical", item: .deviceSeries)
+            }
+            Section("Library") {
+                macSidebarButton("All", icon: "books.vertical.fill", item: .libraryAll)
+                macSidebarButton("Ebooks", icon: "book.closed", item: .libraryEbooks)
+                macSidebarButton("Audiobooks", icon: "headphones", item: .libraryAudiobooks)
+                macSidebarButton("Comics", icon: "book.pages", item: .libraryComics)
+                macSidebarButton("Series", icon: "books.vertical", item: .librarySeries)
+            }
+            Section {
+                macSidebarButton("Highlights", icon: "highlighter", item: .highlights)
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            macProfileRow
+        }
+    }
+
+    private func macSidebarButton(_ label: String, icon: String, item: MacSidebarItem) -> some View {
+        Button {
+            macSidebarSelection = item
+        } label: {
+            Label(label, systemImage: icon)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(macSidebarSelection == item ? Color.accentColor : .primary)
+        .listRowBackground(
+            macSidebarSelection == item
+                ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.18))
+                : nil
+        )
+    }
+
+    @ViewBuilder
+    private var macProfileRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                macSidebarSelection = .profile
+            } label: {
+                HStack(spacing: 10) {
+                    ProfileAvatarView(serverConfig: serverConfig, size: 32)
+                    Text(serverConfig.selectedProfileName ?? "Profile")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button {
+                macSidebarSelection = .settings
+            } label: {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var macDetailContent: some View {
+        if macSidebarSelection.isLibrarySection {
+            LibraryView()
+        } else if macSidebarSelection == .highlights {
+            HighlightsView()
+        } else if macSidebarSelection == .settings {
+            NavigationStack { SettingsView() }
+        } else if macSidebarSelection == .profile {
+            NavigationStack { ProfileView() }
+        } else {
+            DownloadsView()
+        }
+    }
+    #endif
+
+    // MARK: - iOS Tab View
+
+    @ViewBuilder
+    private var iOSTabView: some View {
+        @Bindable var nav = appNavigation
+        VStack(spacing: 0) {
+            TabView(selection: $nav.selectedTab) {
+                DownloadsView()
+                    .tabItem { Label("Home", systemImage: "house") }
+                    .tag(0)
+                    .toolbar(.hidden, for: .tabBar)
+
+                LibraryView()
+                    .tabItem { Label("Library", systemImage: "books.vertical") }
+                    .tag(1)
+                    .toolbar(.hidden, for: .tabBar)
+
+                HighlightsView()
+                    .tabItem { Label("Highlights", systemImage: "highlighter") }
+                    .tag(2)
+                    .toolbar(.hidden, for: .tabBar)
+
+                NavigationStack {
+                    ProfileView()
+                }
+                    .tabItem { Label("Profile", systemImage: "person") }
+                    .tag(3)
+                    .toolbar(.hidden, for: .tabBar)
+
+                SettingsView()
+                    .tabItem { Label("Settings", systemImage: "gear") }
+                    .tag(4)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+
+            // Integrated bottom bar: mini player + tab icons
+            CustomBottomBar(selectedTab: $nav.selectedTab)
+        }
+    }
+
+    // MARK: - Deep Link
 
     private func openBookFromDeepLink(_ bookId: String) {
         let pid = serverConfig.selectedProfileId ?? ""
@@ -202,13 +400,10 @@ struct ServerSetupView: View {
                         .font(.system(size: 80))
                         .foregroundStyle(.accent)
 
-                    Text("Compendus")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-
                     Text("Connect to your library server")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
                 }
 
                 VStack(spacing: 16) {

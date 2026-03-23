@@ -24,6 +24,9 @@ class SyncService {
     /// Books with reading progress that are not downloaded locally (read on other devices)
     private(set) var remoteBooksWithProgress: [Book] = []
 
+    /// Books with highlights but not downloaded locally (highlighted on other devices)
+    private(set) var remoteBooksWithHighlights: [Book] = []
+
     init(apiService: APIService) {
         self.apiService = apiService
     }
@@ -114,6 +117,7 @@ class SyncService {
                     try await self.pullHighlights(since: since, profileId: profileId, modelContext: modelContext)
                     try await self.pullBookmarks(since: since, profileId: profileId, modelContext: modelContext)
                     try await self.pullReadingSessions(since: since, profileId: profileId, modelContext: modelContext)
+                    try await self.pullHighlightedBooks()
 
                     try await self.pushReadingProgress(since: since, profileId: profileId, modelContext: modelContext)
                     try await self.pushHighlights(since: since, profileId: profileId, modelContext: modelContext)
@@ -228,6 +232,26 @@ class SyncService {
 
         print("[Sync:Pull:Progress] Merged: \(merged), Skipped (local newer): \(skipped), Not downloaded: \(notFound), Remote: \(remoteBooks.count)")
         try? modelContext.save()
+    }
+
+    // MARK: - Pull: Highlighted Books
+
+    private func pullHighlightedBooks() async throws {
+        guard let url = apiService.config.apiURL("/api/sync/highlighted-books") else {
+            print("[Sync:Pull:HighlightedBooks] Skipped — no API URL")
+            return
+        }
+
+        print("[Sync:Pull:HighlightedBooks] GET \(url)")
+
+        struct HighlightedBooksResponse: Decodable {
+            let success: Bool
+            let data: [Book]
+        }
+
+        let response: HighlightedBooksResponse = try await fetchJSON(url: url)
+        print("[Sync:Pull:HighlightedBooks] Received \(response.data.count) books with highlights")
+        remoteBooksWithHighlights = response.data
     }
 
     // MARK: - Pull: Highlights

@@ -317,7 +317,27 @@ struct DownloadedBookDetailView: View {
                         .tint(.accentColor)
 
                     HStack {
-                        if let pageCount = book.pageCount, pageCount > 0 {
+                        if book.isAudiobook, let duration = book.duration, duration > 0 {
+                            let elapsed = Int(book.readingProgress * Double(duration))
+                            let remaining = duration - elapsed
+                            let elapsedHours = elapsed / 3600
+                            let elapsedMinutes = (elapsed % 3600) / 60
+                            let remainingHours = remaining / 3600
+                            let remainingMinutes = (remaining % 3600) / 60
+                            let elapsedText = elapsedHours > 0 ? "\(elapsedHours)h \(elapsedMinutes)m" : "\(elapsedMinutes)m"
+                            let remainingText = remainingHours > 0 ? "\(remainingHours)h \(remainingMinutes)m" : "\(remainingMinutes)m"
+                            Text(elapsedText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+
+                            Text("\(remainingText) left")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if !book.isAudiobook, let pageCount = book.pageCount, pageCount > 0 {
                             let currentPage = Int(book.readingProgress * Double(pageCount))
                             Text("Page \(currentPage) of \(pageCount)")
                                 .font(.caption)

@@ -7,7 +7,6 @@
 //
 
 import UIKit
-import WebKit
 
 @MainActor
 public class NativePageViewController: UIViewController, UITextViewDelegate {
@@ -22,11 +21,10 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
     // Visual divider between pages in spread mode
     private var gutterView: UIView?
 
-    // WKWebView used for FXL pages whose spine items carry properties="svg".
-    // These pages are fully typeset SVGs (e.g. exported from InDesign) that cannot
-    // be reproduced by NSAttributedString. We render them in a WKWebView with local
-    // file access so embedded fonts and relative CSS load correctly.
-    private var fxlWebView: WKWebView?
+    // UIImageView used for FXL pages whose spine items carry properties="svg".
+    // These pages are fully typeset SVGs (e.g. exported from InDesign) rendered
+    // natively via UIImage+CoreSVG — no WKWebView process needed.
+    private var fxlImageView: UIImageView?
 
     // MARK: - Layout State
 
@@ -757,40 +755,47 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
     // MARK: - FXL Web Page (SVG-property spine items)
 
     /// Load an FXL XHTML page that contains inline SVG content.
-    /// Uses WKWebView with local file access so embedded fonts and CSS load from
-    /// the extracted EPUB directory.  The UITextView(s) are hidden while the
-    /// WKWebView is active; call `clearFXLWebPage()` to restore normal rendering.
-    public func loadFXLWebPage(fileURL: URL, allowingReadAccessTo accessURL: URL) {
-        if fxlWebView == nil {
-            let config = WKWebViewConfiguration()
-            let wv = WKWebView(frame: view.bounds, configuration: config)
-            wv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            wv.scrollView.isScrollEnabled = false
-            wv.isOpaque = true
-            wv.backgroundColor = view.backgroundColor ?? .systemBackground
-            // Insert below loading overlay so the indicator can still appear on top
-            if let overlay = loadingOverlay {
-                view.insertSubview(wv, belowSubview: overlay)
-            } else {
-                view.addSubview(wv)
-            }
-            fxlWebView = wv
+    /// Display a pre-rendered FXL page image. Hides the UITextView(s) and shows
+    /// a UIImageView sized to fill the viewport. Call `clearFXLPage()` to restore
+    /// normal text rendering when navigating away.
+    public func loadFXLImagePage(_ image: UIImage) {
+        if fxlImageView == nil {
+            let iv = UIImageView(frame: view.bounds)
+            iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            iv.contentMode = .scaleAspectFit
+            iv.backgroundColor = view.backgroundColor ?? .systemBackground
+            view.addSubview(iv)
+            fxlImageView = iv
         }
-        fxlWebView?.backgroundColor = view.backgroundColor ?? .systemBackground
-        fxlWebView?.isHidden = false
+        // Always bring above any spread-mode views (secondTextView/gutterView) that may
+        // have been added after fxlImageView was first created, but stay below the
+        // loading overlay if present.
+        if let iv = fxlImageView {
+            if let overlay = loadingOverlay {
+                view.insertSubview(iv, belowSubview: overlay)
+            } else {
+                view.bringSubviewToFront(iv)
+            }
+        }
+        fxlImageView?.backgroundColor = view.backgroundColor ?? .systemBackground
+        fxlImageView?.image = image
+        fxlImageView?.isHidden = false
         textView.isHidden = true
         secondTextView?.isHidden = true
         gutterView?.isHidden = true
-        fxlWebView?.loadFileURL(fileURL, allowingReadAccessTo: accessURL)
     }
 
-    /// Restore normal UITextView rendering, hiding the FXL WKWebView.
-    public func clearFXLWebPage() {
-        fxlWebView?.isHidden = true
+    /// Restore normal UITextView rendering, hiding the FXL image view.
+    public func clearFXLPage() {
+        fxlImageView?.isHidden = true
         textView.isHidden = false
         secondTextView?.isHidden = false
         gutterView?.isHidden = false
     }
+
+    /// Legacy name kept for call sites that haven't migrated yet.
+    @available(*, deprecated, renamed: "clearFXLPage")
+    public func clearFXLWebPage() { clearFXLPage() }
 
     // MARK: - Theme
 
@@ -801,7 +806,7 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
         textView.backgroundColor = backgroundColor
         secondTextView?.backgroundColor = backgroundColor
         gutterView?.backgroundColor = backgroundColor
-        fxlWebView?.backgroundColor = backgroundColor
+        fxlImageView?.backgroundColor = backgroundColor
 
         if let theme = theme {
             currentTheme = theme

@@ -406,8 +406,10 @@ class AudiobookPlayer: NSObject {
         let session = ReadingSession(
             bookId: book.id,
             format: "audiobook",
-            audioPlaybackRate: playbackRate
+            audioPlaybackRate: playbackRate,
+            audioStartTimestamp: currentTime
         )
+        session.profileId = book.profileId
 
         context.insert(session)
         try? context.save()
@@ -420,6 +422,7 @@ class AudiobookPlayer: NSObject {
 
         session.endedAt = Date()
         session.audioPlaybackRate = playbackRate
+        session.audioEndTimestamp = currentTime
 
         // Discard sessions shorter than 10 seconds
         if session.durationSeconds < 10 {

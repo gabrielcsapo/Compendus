@@ -11,6 +11,7 @@ import SwiftData
 struct HeroContinueReadingCard: View {
     let item: ContinueReadingItem
     var onTap: () -> Void
+    var onDownload: (() -> Void)?
 
     var body: some View {
         Button(action: onTap) {
@@ -23,7 +24,7 @@ struct HeroContinueReadingCard: View {
 
                 // Info
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("CONTINUE READING")
+                    Text(item.isDownloaded ? "CONTINUE READING" : "NEEDS DOWNLOAD")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .kerning(0.5)
@@ -41,18 +42,30 @@ struct HeroContinueReadingCard: View {
 
                     Spacer(minLength: 4)
 
-                    ProgressView(value: item.readingProgress)
-                        .tint(.accentColor)
+                    if item.readingProgress > 0 {
+                        ProgressView(value: item.readingProgress)
+                            .tint(.accentColor)
 
-                    Text("\(Int(item.readingProgress * 100))% complete")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    Button(action: onTap) {
-                        Text(item.isAudiobook ? "Continue Listening" : "Continue")
+                        Text(progressLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+
+                    if item.isDownloaded {
+                        Button(action: onTap) {
+                            Text(item.isAudiobook ? "Continue Listening" : "Continue")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    } else {
+                        Button {
+                            onDownload?()
+                        } label: {
+                            Label("Download", systemImage: "arrow.down.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -75,6 +88,20 @@ struct HeroContinueReadingCard: View {
         case .remote(let book):
             CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
         }
+    }
+
+    private var progressLabel: String {
+        if let duration = item.duration, duration > 0 {
+            let remaining = Int(Double(duration) * (1 - item.readingProgress))
+            let hours = remaining / 3600
+            let minutes = (remaining % 3600) / 60
+            let timeText = hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+            return "\(timeText) left"
+        } else if let pageCount = item.pageCount, pageCount > 0 {
+            let pagesLeft = pageCount - Int(item.readingProgress * Double(pageCount))
+            return "\(pagesLeft) pages left"
+        }
+        return "\(Int(item.readingProgress * 100))% complete"
     }
 
     private var authorText: String {

@@ -23,7 +23,7 @@ let package = Package(
         ),
         .testTarget(
             name: "EPUBReaderTests",
-            dependencies: ["EPUBReader"],
+            dependencies: ["EPUBReader", "SwiftSoup"],
             path: "Tests/EPUBReaderTests",
             resources: [
                 .copy("Samples"),
