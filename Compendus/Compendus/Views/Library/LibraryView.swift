@@ -134,6 +134,7 @@ struct LibraryView: View {
         return Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
     }
 
+    private var isExploreChipSelected: Bool { appNavigation.libraryFilterChipId == "explore" }
     private var isSeriesChipSelected: Bool { appNavigation.libraryFilterChipId == "series" }
 
     private var chipDrivenFilter: BookFilter {
@@ -147,6 +148,7 @@ struct LibraryView: View {
 
     private var libraryChips: [FilterChip] {
         [
+            FilterChip(id: "explore", label: "Explore", systemImage: "sparkles"),
             FilterChip(id: "all", label: "All", systemImage: nil),
             FilterChip(id: "ebooks", label: "Ebooks", systemImage: "book.closed"),
             FilterChip(id: "audiobooks", label: "Audiobooks", systemImage: "headphones"),
@@ -272,6 +274,10 @@ struct LibraryView: View {
                             Button("Cancel") {
                                 searchText = ""
                                 isSearchFocused = false
+                                // Return to explore if we left it to search
+                                if appNavigation.libraryFilterChipId == "all" {
+                                    appNavigation.libraryFilterChipId = "explore"
+                                }
                             }
                             .font(.subheadline)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -285,7 +291,7 @@ struct LibraryView: View {
                     .padding(.top, 8)
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused || !searchText.isEmpty)
 
-                    FilterChipBar(chips: libraryChips, selectedId: $nav.libraryFilterChipId, trailingContent: isSeriesChipSelected ? nil : sortChipView)
+                    FilterChipBar(chips: libraryChips, selectedId: $nav.libraryFilterChipId, trailingContent: (isSeriesChipSelected || isExploreChipSelected) ? nil : sortChipView)
                         .padding(.vertical, 4)
                     Divider()
                 }
@@ -294,7 +300,11 @@ struct LibraryView: View {
             #endif
             .onChange(of: searchText) { _, newValue in
                 searchTask?.cancel()
-                guard !isSeriesChipSelected else { return } // series search is local
+                guard !isSeriesChipSelected else { return }
+                // When typing from explore, switch to all-books view to show results
+                if isExploreChipSelected && !newValue.isEmpty {
+                    appNavigation.libraryFilterChipId = "all"
+                }
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
                     searchTask = Task { await loadBooks() }
@@ -307,7 +317,9 @@ struct LibraryView: View {
                 }
             }
             .onChange(of: appNavigation.libraryFilterChipId) { _, newId in
-                if newId == "series" {
+                if newId == "explore" {
+                    // No-op: ExploreView manages its own data
+                } else if newId == "series" {
                     viewMode = .series
                     Task { await loadSeries() }
                 } else {
@@ -331,7 +343,13 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if isSeriesChipSelected {
+        if isExploreChipSelected {
+            ExploreView(
+                onBookTap: { book in selectedBook = book },
+                onSeriesTap: { name in seriesSheet = SeriesSheet(id: name) },
+                onSeeAllSeries: { name in seriesSheet = SeriesSheet(id: name) }
+            )
+        } else if isSeriesChipSelected {
             seriesGridContent
         } else if books.isEmpty && isLoading {
             SkeletonBookGrid(count: 8)
@@ -451,6 +469,7 @@ struct LibraryView: View {
     #if targetEnvironment(macCatalyst)
     private var macSectionTitle: String {
         switch appNavigation.libraryFilterChipId {
+        case "explore": return "Explore"
         case "ebooks": return "Ebooks"
         case "audiobooks": return "Audiobooks"
         case "comics": return "Comics"

@@ -5,6 +5,8 @@ import { getCoverUrl } from "../lib/cover";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
 import { getTagsForBook } from "../actions/tags";
 import { getCollectionsForBook } from "../actions/collections";
+import { getSeriesDetails } from "../actions/series";
+import { SeriesSection } from "../components/SeriesSection";
 import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCover } from "../components/BookCover";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
@@ -349,6 +351,13 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             </dl>
           </section>
 
+          {/* Series — streamed via Suspense, only shown when book belongs to a series */}
+          {book.series && (
+            <Suspense fallback={<SectionSkeleton title="In this series" />}>
+              <SeriesSectionData book={book} />
+            </Suspense>
+          )}
+
           {/* Related Books — streamed via Suspense */}
           <Suspense fallback={<SectionSkeleton title="Related Books" />}>
             <RelatedBooksSection book={book} />
@@ -453,11 +462,24 @@ async function OrganizationSection({
   );
 }
 
+// Async server component — streams series section (only rendered when book.series is set)
+async function SeriesSectionData({ book }: { book: Awaited<ReturnType<typeof getBook>> }) {
+  if (!book?.series) return null;
+  const details = await getSeriesDetails(book.series);
+  // Only show if there's more than just this book (otherwise no value)
+  if (details.ownedBooks.length <= 1 && details.wantedBooks.length === 0) return null;
+  return <SeriesSection currentBookId={book.id} details={details} />;
+}
+
 // Async server component — streams related books (requires DB query for related books)
 async function RelatedBooksSection({ book }: { book: Awaited<ReturnType<typeof getBook>> }) {
   if (!book) return null;
   const relatedBooks = await getRelatedBooks(book);
-  if (relatedBooks.length === 0) return null;
+  // Series books are shown in SeriesSectionData — exclude them here to avoid duplication
+  const filtered = book.series
+    ? relatedBooks.filter((r) => r.series !== book.series)
+    : relatedBooks;
+  if (filtered.length === 0) return null;
 
   return (
     <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">

@@ -14,5 +14,5 @@ class AppNavigation {
     /// Drives the active filter chip in DownloadsView (shared between Mac sidebar and iOS chip bar)
     var homeFilterChipId: String = "all"
     /// Drives the active filter chip in LibraryView (shared between Mac sidebar and iOS chip bar)
-    var libraryFilterChipId: String = "all"
+    var libraryFilterChipId: String = "explore"
 }

@@ -93,6 +93,19 @@ class APIService {
         return try await fetch(url)
     }
 
+    /// Fetch the server-driven explore view model
+    func fetchExplore() async throws -> ExploreViewModel {
+        guard config.isConfigured else {
+            throw APIError.serverNotConfigured
+        }
+
+        guard let url = config.apiURL("/api/explore") else {
+            throw APIError.invalidURL
+        }
+
+        return try await fetch(url)
+    }
+
     /// Fetch a single book by ID
     func fetchBook(id: String) async throws -> BookResponse {
         guard config.isConfigured else {

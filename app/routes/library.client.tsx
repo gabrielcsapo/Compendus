@@ -7,7 +7,9 @@ import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from
 import { SeriesCard } from "../components/SeriesCard";
 import { BookCover } from "../components/BookCover";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
+import { getExploreData, type ExploreData } from "../actions/explore";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
+import { LibraryExploreView } from "../components/LibraryExploreView";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 import { TypeTabs, type TypeFilter } from "../components/TypeTabs";
 import { FormatDropdown } from "../components/FormatDropdown";
@@ -33,7 +35,8 @@ function getSortParams(sort: SortOption): {
 }
 
 type LibraryData = {
-  view: "series" | "books";
+  view: "series" | "books" | "explore";
+  exploreData?: ExploreData;
   seriesList: Array<{
     name: string;
     bookCount: number;
@@ -88,6 +91,25 @@ export default function LibraryPage({
     async function loadData() {
       const { orderBy, order } = getSortParams(sort);
       const typeFilter = type !== "all" ? type : undefined;
+
+      // Default explore view (no view param, no series filter)
+      if (!view && !seriesFilter) {
+        const exploreData = await getExploreData();
+        return {
+          view: "explore" as const,
+          exploreData,
+          seriesList: [] as LibraryData["seriesList"],
+          seriesFilter: null,
+          books: [],
+          totalCount: exploreData.totalCount,
+          unmatchedCount: exploreData.unmatchedCount,
+          currentSort: sort,
+          currentType: type,
+          currentFormats: format ?? [],
+          formatCounts: [],
+          otherFormatBooks: [],
+        };
+      }
 
       // Series grid view
       if (view === "series") {
@@ -211,13 +233,9 @@ export default function LibraryPage({
               <>
                 <h1 className="text-2xl font-bold text-foreground">Library</h1>
                 <p className="text-foreground-muted">
-                  {currentView === "series" ? (
-                    `${seriesList.length} ${seriesList.length === 1 ? "series" : "series"}`
-                  ) : (
-                    <>
-                      {totalCount} {totalCount === 1 ? "book" : "books"}
-                    </>
-                  )}
+                  {currentView === "series"
+                    ? `${seriesList.length} ${seriesList.length === 1 ? "series" : "series"}`
+                    : `${totalCount} ${totalCount === 1 ? "book" : "books"}`}
                 </p>
               </>
             )}
@@ -239,8 +257,8 @@ export default function LibraryPage({
                 <span className="font-medium">{unmatchedCount}</span>
               </Link>
             )}
-            {/* Browse by links */}
-            {!currentSeriesFilter && currentView !== "series" && (
+            {/* Browse by links — only on explore view */}
+            {!currentSeriesFilter && currentView === "explore" && (
               <>
                 <Link
                   to="/collections"
@@ -276,12 +294,30 @@ export default function LibraryPage({
         </div>
         {!currentSeriesFilter && (
           <div className="flex flex-wrap items-center gap-3">
-            {/* View mode toggle */}
+            {/* View mode toggle: Explore | Browse | Series */}
             <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
               <Link
-                to={`/library?${currentType !== "all" ? `type=${currentType}&` : ""}${currentSort !== "recent" ? `sort=${currentSort}` : ""}`}
+                to={`/library${currentType !== "all" ? `?type=${currentType}` : ""}`}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  currentView !== "series"
+                  currentView === "explore"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-foreground-muted hover:text-foreground hover:bg-surface"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                  />
+                </svg>
+                Explore
+              </Link>
+              <Link
+                to={`/library?view=grid${currentType !== "all" ? `&type=${currentType}` : ""}${currentSort !== "recent" ? `&sort=${currentSort}` : ""}`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+                  currentView === "books"
                     ? "bg-primary text-white shadow-sm"
                     : "text-foreground-muted hover:text-foreground hover:bg-surface"
                 }`}
@@ -294,7 +330,7 @@ export default function LibraryPage({
                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                   />
                 </svg>
-                Books
+                Browse
               </Link>
               <Link
                 to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
@@ -315,14 +351,14 @@ export default function LibraryPage({
                 Series
               </Link>
             </div>
-            <TypeTabs
-              currentType={currentType}
-              currentSort={currentSort}
-              currentView={currentView}
-              basePath="/library"
-            />
-            {currentView !== "series" && (
+            {currentView === "books" && (
               <>
+                <TypeTabs
+                  currentType={currentType}
+                  currentSort={currentSort}
+                  currentView="grid"
+                  basePath="/library"
+                />
                 {formatCounts.length > 1 && (
                   <FormatDropdown
                     formatCounts={formatCounts}
@@ -336,100 +372,116 @@ export default function LibraryPage({
                 </div>
               </>
             )}
+            {currentView === "series" && (
+              <TypeTabs
+                currentType={currentType}
+                currentSort={currentSort}
+                currentView="series"
+                basePath="/library"
+              />
+            )}
           </div>
         )}
       </div>
 
-      {/* Series grid view */}
-      {currentView === "series" ? (
-        <section>
-          {seriesList.length === 0 ? (
-            <div className="text-center py-16">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-elevated flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-foreground-muted"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                  />
-                </svg>
-              </div>
-              <p className="text-foreground-muted">No series found in your library.</p>
-              <p className="text-foreground-muted/60 text-sm mt-1">
-                Books with series metadata will appear here.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-              {seriesList.map((series) => (
-                <SeriesCard
-                  key={series.name}
-                  name={series.name}
-                  bookCount={series.bookCount}
-                  coverBooks={series.coverBooks}
-                  currentType={currentType}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-        <>
-          {/* Books grid with infinite scroll */}
-          <section>
-            <InfiniteBookGrid
-              initialBooks={books}
-              totalCount={totalCount}
-              currentSort={currentSort}
-              currentType={currentType}
-              currentFormats={currentFormats}
-              seriesFilter={currentSeriesFilter}
-              emptyMessage={
-                currentSeriesFilter
-                  ? "No books found in this series."
-                  : "Your library is empty. Drop some books above to get started!"
-              }
-            />
-          </section>
+      {/* Explore view */}
+      {currentView === "explore" && data.exploreData && (
+        <LibraryExploreView data={data.exploreData} />
+      )}
 
-          {/* Other formats for this series */}
-          {currentSeriesFilter && otherFormatBooks.length > 0 && (
-            <section className="mt-10 pt-8 border-t border-border">
-              <h2 className="text-lg font-semibold mb-1 text-foreground">In a different format</h2>
-              <p className="text-sm text-foreground-muted mb-4">
-                {otherFormatBooks.length} {otherFormatBooks.length === 1 ? "book" : "books"} from
-                this series in other formats
-              </p>
+      {/* Series / Browse grid views */}
+      {currentView !== "explore" &&
+        (currentView === "series" ? (
+          <section>
+            {seriesList.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-elevated flex items-center justify-center">
+                  <svg
+                    className="w-8 h-8 text-foreground-muted"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                    />
+                  </svg>
+                </div>
+                <p className="text-foreground-muted">No series found in your library.</p>
+                <p className="text-foreground-muted/60 text-sm mt-1">
+                  Books with series metadata will appear here.
+                </p>
+              </div>
+            ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-                {otherFormatBooks.map((book) => (
-                  <Link key={book.id} to={`/book/${book.id}`} className="group">
-                    <div className="aspect-[2/3] rounded-lg overflow-hidden bg-surface-elevated shadow-md">
-                      <BookCover
-                        book={book}
-                        fallback={
-                          <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
-                            <span className="text-xs text-foreground-muted">{book.title}</span>
-                          </div>
-                        }
-                      />
-                    </div>
-                    <p className="text-xs font-medium mt-1 text-foreground line-clamp-1">
-                      {book.title}
-                    </p>
-                    <p className="text-[10px] text-foreground-muted uppercase">{book.format}</p>
-                  </Link>
+                {seriesList.map((series) => (
+                  <SeriesCard
+                    key={series.name}
+                    name={series.name}
+                    bookCount={series.bookCount}
+                    coverBooks={series.coverBooks}
+                    currentType={currentType}
+                  />
                 ))}
               </div>
+            )}
+          </section>
+        ) : (
+          <>
+            {/* Books grid with infinite scroll */}
+            <section>
+              <InfiniteBookGrid
+                initialBooks={books}
+                totalCount={totalCount}
+                currentSort={currentSort}
+                currentType={currentType}
+                currentFormats={currentFormats}
+                seriesFilter={currentSeriesFilter}
+                emptyMessage={
+                  currentSeriesFilter
+                    ? "No books found in this series."
+                    : "Your library is empty. Drop some books above to get started!"
+                }
+              />
             </section>
-          )}
-        </>
-      )}
+
+            {/* Other formats for this series */}
+            {currentSeriesFilter && otherFormatBooks.length > 0 && (
+              <section className="mt-10 pt-8 border-t border-border">
+                <h2 className="text-lg font-semibold mb-1 text-foreground">
+                  In a different format
+                </h2>
+                <p className="text-sm text-foreground-muted mb-4">
+                  {otherFormatBooks.length} {otherFormatBooks.length === 1 ? "book" : "books"} from
+                  this series in other formats
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                  {otherFormatBooks.map((book) => (
+                    <Link key={book.id} to={`/book/${book.id}`} className="group">
+                      <div className="aspect-[2/3] rounded-lg overflow-hidden bg-surface-elevated shadow-md">
+                        <BookCover
+                          book={book}
+                          fallback={
+                            <div className="w-full h-full flex items-center justify-center p-2 bg-gradient-to-br from-primary-light to-accent-light">
+                              <span className="text-xs text-foreground-muted">{book.title}</span>
+                            </div>
+                          }
+                        />
+                      </div>
+                      <p className="text-xs font-medium mt-1 text-foreground line-clamp-1">
+                        {book.title}
+                      </p>
+                      <p className="text-[10px] text-foreground-muted uppercase">{book.format}</p>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        ))}
     </main>
   );
 }

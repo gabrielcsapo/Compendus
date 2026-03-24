@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { getRequest } from "react-flight-router/server";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
+import { getExploreData } from "../actions/explore";
 import { getCoverUrl } from "../lib/cover";
 import type { BookType } from "../lib/book-types";
 import type { SortOption } from "../components/SortDropdown";
@@ -51,6 +52,30 @@ async function LibraryData() {
 
   const { orderBy, order } = getSortParams(sort);
   const typeFilter = type !== "all" ? type : undefined;
+
+  // Default view (no view param and no series filter) → curated explore view
+  if (!view && !seriesFilter) {
+    const exploreData = await getExploreData();
+    return (
+      <LibraryClient
+        initialData={{
+          view: "explore",
+          exploreData,
+          seriesList: [],
+          seriesFilter: null,
+          books: [],
+          totalCount: exploreData.totalCount,
+          unmatchedCount: exploreData.unmatchedCount,
+          currentSort: sort,
+          currentType: type,
+          currentFormats: format ?? [],
+          formatCounts: [],
+          otherFormatBooks: [],
+        }}
+        initialSearchParamsKey={searchParams.toString()}
+      />
+    );
+  }
 
   if (view === "series") {
     const rawSeriesList = await getSeriesWithCovers(typeFilter);

@@ -63,12 +63,14 @@ const TYPE_OPTIONS: { value: TypeFilter; label: string; icon: React.ReactNode }[
 function buildUrl(
   type: TypeFilter,
   currentSort: string,
-  currentView?: "series" | "books",
+  currentView?: "series" | "books" | "grid",
   basePath = "/library",
 ): string {
   const params = new URLSearchParams();
   if (currentView === "series") {
     params.set("view", "series");
+  } else if (currentView === "grid" || currentView === "books") {
+    params.set("view", "grid");
   }
   if (type !== "all") {
     params.set("type", type);
@@ -88,7 +90,7 @@ export function TypeTabs({
 }: {
   currentType: TypeFilter;
   currentSort: string;
-  currentView?: "series" | "books";
+  currentView?: "series" | "books" | "grid";
   basePath?: string;
 }) {
   return (

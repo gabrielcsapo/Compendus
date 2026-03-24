@@ -60,16 +60,6 @@ export const routes: RouteConfig[] = [
             index: true,
             component: () => import("./routes/discover-index.js"),
           },
-          {
-            id: "discover-wishlist",
-            path: "wishlist",
-            component: () => import("./routes/discover-wishlist.js"),
-          },
-          {
-            id: "discover-series",
-            path: "series",
-            component: () => import("./routes/discover-series.js"),
-          },
         ],
       },
       { id: "profile", path: "profile", component: () => import("./routes/profile.js") },

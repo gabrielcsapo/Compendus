@@ -294,14 +294,14 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
             <li className="ml-auto">
               <SearchInput />
             </li>
-            <li>
-              <DarkModeToggle />
-            </li>
             {profileLoaded && profile && (
               <li>
                 <ProfileDropdown profile={profile} />
               </li>
             )}
+            <li>
+              <DarkModeToggle />
+            </li>
           </ul>
         </nav>
       </header>
