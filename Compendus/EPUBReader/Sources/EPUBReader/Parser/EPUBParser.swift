@@ -296,7 +296,13 @@ private func parseOPF(_ data: Data) throws -> (EPUBMetadata, [String: ManifestIt
         for itemref in try doc.select("spine itemref").array() {
             guard let idref = try? itemref.attr("idref"), !idref.isEmpty else { continue }
             let linear = (try? itemref.attr("linear")) != "no"
-            spine.append(SpineItem(idref: idref, linear: linear))
+            let props = (try? itemref.attr("properties")) ?? ""
+            let pageSpread: String?
+            if props.contains("page-spread-left") { pageSpread = "left" }
+            else if props.contains("page-spread-right") { pageSpread = "right" }
+            else if props.contains("page-spread-center") { pageSpread = "center" }
+            else { pageSpread = nil }
+            spine.append(SpineItem(idref: idref, linear: linear, pageSpread: pageSpread))
         }
 
         return (metadata, manifest, spine)

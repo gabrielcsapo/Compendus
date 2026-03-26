@@ -58,7 +58,13 @@ struct DownloadsView: View {
     @Environment(StorageManager.self) private var storageManager
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(ComicExtractor.self) private var comicExtractor
     @Environment(ServerConfig.self) private var serverConfig
     @Environment(SyncService.self) private var syncService
     @Environment(AppNavigation.self) private var appNavigation
@@ -246,6 +252,16 @@ struct DownloadsView: View {
                 .fullScreenCover(item: $bookToRead) { book in
                     ReaderContainerView(book: book)
                         .environment(readerSettings)
+                        .environment(highlightColorManager)
+                        .environment(readAlongService)
+                        .environment(audiobookPlayer)
+                        .environment(transcriptionService)
+                        .environment(apiService)
+                        .environment(storageManager)
+                        .environment(pocketTTSModelManager)
+                        .environment(ttsAudioCache)
+                        .environment(backgroundProcessingManager)
+                        .environment(comicExtractor)
                 }
                 .sheet(item: $seriesSheet) { sheet in
                     DownloadedSeriesDetailView(seriesName: sheet.id)

@@ -90,6 +90,14 @@ struct LibraryView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(StorageManager.self) private var storageManager
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(ComicExtractor.self) private var comicExtractor
     @Environment(\.modelContext) private var modelContext
 
     // Query for all downloaded books (to check download status)
@@ -221,6 +229,16 @@ struct LibraryView: View {
             .fullScreenCover(item: $bookToRead) { book in
                 ReaderContainerView(book: book)
                     .environment(readerSettings)
+                    .environment(highlightColorManager)
+                    .environment(readAlongService)
+                    .environment(audiobookPlayer)
+                    .environment(transcriptionService)
+                    .environment(apiService)
+                    .environment(storageManager)
+                    .environment(pocketTTSModelManager)
+                    .environment(ttsAudioCache)
+                    .environment(backgroundProcessingManager)
+                    .environment(comicExtractor)
             }
             .alert("Download Failed", isPresented: $showingDownloadError) {
                 Button("OK", role: .cancel) { }

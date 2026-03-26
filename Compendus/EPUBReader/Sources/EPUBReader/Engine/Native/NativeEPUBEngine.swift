@@ -107,7 +107,16 @@ public class NativeEPUBEngine: ReaderEngine {
     private var pendingCharOffset: Int?
 
     /// Number of pages visible in a single spread (1 or 2).
+    /// Whether a FXL book should display two spine items side-by-side.
+    private var isFXLSpreadActive: Bool {
+        guard let parser = parser, parser.package.isFixedLayout else { return false }
+        let spread = parser.package.metadata.renditionSpread
+        guard let spread = spread, spread != .none else { return false }
+        return viewportSize.width >= 700
+    }
+
     private var pagesPerSpread: Int {
+        if isFXLSpreadActive { return 2 }
         let settings = currentSettings ?? ReaderSettings()
         let resolved = settings.resolvedLayout(for: viewportSize.width)
         return resolved == .twoPage ? 2 : 1
@@ -1227,15 +1236,11 @@ public class NativeEPUBEngine: ReaderEngine {
                           || manifestItem?.mediaType == "image/svg+xml"
         if isSVGSpineItem {
             pageViewController?.clearFXLPage()
-            // SVG spine items are always single-page; ensure spread layout is not active
-            // so secondTextView is not above fxlImageView in z-order.
+            // Ensure text spread views don't sit above the FXL image views in z-order.
             pageViewController?.configureLayout(twoPage: false)
             pageViewController?.showLoadingIndicator(false)
 
-            // Always store/refresh the stub so navigation logic sees a page count of 1.
-            // Do NOT check for nil: paginateAllChapters or prefetchAdjacentChapters may
-            // have stored a wrong XHTML-parsed document here before the SVG detection fix
-            // was applied, or in the event of a race. Overwrite unconditionally.
+            // Store stub so navigation logic sees a page count of 1 per spine item.
             let stub = NSAttributedString(string: "")
             chapterDocuments[spineIndex] = ChapterDocument(
                 spineIndex: spineIndex,
@@ -1250,13 +1255,42 @@ public class NativeEPUBEngine: ReaderEngine {
                 spinePageCounts[spineIndex] = 1
             }
 
-            // Render the SVG asynchronously so we don't block the main thread
             let viewport = viewportSize
+            let spreadActive = isFXLSpreadActive
+
+            // In spread mode, snap to even spine index so left page is always 0, 2, 4…
+            let leftIndex = spreadActive ? spineIndex - (spineIndex % 2) : spineIndex
+            let rightIndex = leftIndex + 1
+            let hasRightPage = spreadActive && rightIndex < (parser.package.spine.count)
+
+            // Resolve URLs for the right-side partner if needed
+            let rightURL: URL? = hasRightPage ? parser.resolveSpineItemURL(at: rightIndex) : nil
+
+            // Update currentSpineIndex to the snapped left index so navigation is consistent
+            if spreadActive && leftIndex != spineIndex {
+                currentSpineIndex = leftIndex
+                onSpineIndexChanged?(leftIndex)
+            }
+
             chapterLoadTask = Task { [weak self] in
                 guard let self else { return }
-                if let image = await Self.extractAndRenderSVG(from: chapterURL, size: viewport) {
-                    self.pageViewController?.loadFXLImagePage(image)
+
+                if spreadActive, let leftURL = parser.resolveSpineItemURL(at: leftIndex) {
+                    let halfSize = CGSize(width: viewport.width / 2, height: viewport.height)
+                    async let leftRender = Self.extractAndRenderSVG(from: leftURL, size: halfSize)
+                    async let rightRender: UIImage? = rightURL != nil
+                        ? Self.extractAndRenderSVG(from: rightURL!, size: halfSize)
+                        : nil
+                    let (leftImage, rightImage) = await (leftRender, rightRender)
+                    self.pageViewController?.loadFXLSpreadPage(left: leftImage, right: rightImage)
+                    self.isSpreadMode = true
+                } else {
+                    if let image = await Self.extractAndRenderSVG(from: chapterURL, size: viewport) {
+                        self.pageViewController?.loadFXLImagePage(image)
+                    }
+                    self.isSpreadMode = false
                 }
+
                 self.isLoadingChapter = false
                 self.isReady = true
                 self.updateLocation()
@@ -2389,11 +2423,9 @@ public class NativeEPUBEngine: ReaderEngine {
             pageViewController?.showPage(currentPageIndex)
             updateLocation()
         } else {
-            // End of chapter — load next spine item.
-            // Note: `linear="no"` items are intentionally included in sequential navigation
-            // here; the `linear` flag only affects global progress calculation.
-            // Direct-link navigation (go(to:)) always allows all spine items regardless.
-            let nextIndex = currentSpineIndex + 1
+            // End of chapter — advance by spread step (2 for FXL spread, 1 otherwise)
+            let step = isFXLSpreadActive ? 2 : 1
+            let nextIndex = currentSpineIndex + step
             if nextIndex < (parser?.package.spine.count ?? 0) {
                 loadChapter(at: nextIndex)
             }
@@ -2413,8 +2445,9 @@ public class NativeEPUBEngine: ReaderEngine {
             pageViewController?.showPage(currentPageIndex)
             updateLocation()
         } else {
-            // Start of chapter — load previous spine item at last page
-            let prevIndex = currentSpineIndex - 1
+            // Start of chapter — retreat by spread step (2 for FXL spread, 1 otherwise)
+            let step = isFXLSpreadActive ? 2 : 1
+            let prevIndex = currentSpineIndex - step
             if prevIndex >= 0 {
                 loadChapter(at: prevIndex, startAtEnd: true)
             }

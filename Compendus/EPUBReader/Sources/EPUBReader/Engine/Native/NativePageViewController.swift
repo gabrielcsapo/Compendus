@@ -25,6 +25,7 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
     // These pages are fully typeset SVGs (e.g. exported from InDesign) rendered
     // natively via UIImage+CoreSVG — no WKWebView process needed.
     private var fxlImageView: UIImageView?
+    private var secondFXLImageView: UIImageView?
 
     // MARK: - Layout State
 
@@ -767,6 +768,9 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
             view.addSubview(iv)
             fxlImageView = iv
         }
+        // Hide second FXL view when showing single-page
+        secondFXLImageView?.isHidden = true
+
         // Always bring above any spread-mode views (secondTextView/gutterView) that may
         // have been added after fxlImageView was first created, but stay below the
         // loading overlay if present.
@@ -785,9 +789,79 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
         gutterView?.isHidden = true
     }
 
+    /// Show two FXL SVG pages side-by-side in spread mode.
+    public func loadFXLSpreadPage(left: UIImage?, right: UIImage?) {
+        let bg = view.backgroundColor ?? .systemBackground
+
+        // Create/configure left image view (reuse fxlImageView)
+        if fxlImageView == nil {
+            let iv = UIImageView()
+            iv.contentMode = .scaleAspectFit
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            iv.backgroundColor = bg
+            view.addSubview(iv)
+            fxlImageView = iv
+        }
+        fxlImageView?.translatesAutoresizingMaskIntoConstraints = false
+
+        // Create/configure right image view
+        if secondFXLImageView == nil {
+            let iv = UIImageView()
+            iv.contentMode = .scaleAspectFit
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            iv.backgroundColor = bg
+            view.addSubview(iv)
+            secondFXLImageView = iv
+        }
+
+        // Bring both above text views, below loading overlay
+        for iv in [fxlImageView, secondFXLImageView].compactMap({ $0 }) {
+            if let overlay = loadingOverlay {
+                view.insertSubview(iv, belowSubview: overlay)
+            } else {
+                view.bringSubviewToFront(iv)
+            }
+        }
+
+        // Layout: left half | gutter | right half using Auto Layout
+        // Remove any old constraints from single-page mode (autoresizingMask-based)
+        fxlImageView?.removeFromSuperview()
+        secondFXLImageView?.removeFromSuperview()
+        fxlImageView?.translatesAutoresizingMaskIntoConstraints = false
+        secondFXLImageView?.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(fxlImageView!)
+        view.addSubview(secondFXLImageView!)
+
+        if let lv = fxlImageView, let rv = secondFXLImageView {
+            NSLayoutConstraint.activate([
+                lv.topAnchor.constraint(equalTo: view.topAnchor),
+                lv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                lv.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                lv.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.5, constant: -gutterWidth / 2),
+
+                rv.topAnchor.constraint(equalTo: view.topAnchor),
+                rv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                rv.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                rv.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.5, constant: -gutterWidth / 2),
+            ])
+        }
+
+        fxlImageView?.backgroundColor = bg
+        secondFXLImageView?.backgroundColor = bg
+        fxlImageView?.image = left
+        secondFXLImageView?.image = right
+        fxlImageView?.isHidden = false
+        secondFXLImageView?.isHidden = right == nil
+
+        textView.isHidden = true
+        secondTextView?.isHidden = true
+        gutterView?.isHidden = true
+    }
+
     /// Restore normal UITextView rendering, hiding the FXL image view.
     public func clearFXLPage() {
         fxlImageView?.isHidden = true
+        secondFXLImageView?.isHidden = true
         textView.isHidden = false
         secondTextView?.isHidden = false
         gutterView?.isHidden = false
@@ -807,6 +881,7 @@ public class NativePageViewController: UIViewController, UITextViewDelegate {
         secondTextView?.backgroundColor = backgroundColor
         gutterView?.backgroundColor = backgroundColor
         fxlImageView?.backgroundColor = backgroundColor
+        secondFXLImageView?.backgroundColor = backgroundColor
 
         if let theme = theme {
             currentTheme = theme

@@ -55,6 +55,8 @@ public struct SpineItem {
     public let idref: String
     /// Whether this item is part of the linear reading order
     public let linear: Bool
+    /// Declared page spread position: "left", "right", "center", or nil
+    public let pageSpread: String?
 }
 
 /// A table-of-contents entry parsed from the nav document or NCX

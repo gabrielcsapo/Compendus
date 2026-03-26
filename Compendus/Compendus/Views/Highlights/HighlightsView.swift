@@ -173,6 +173,16 @@ private struct BookHighlightsDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(APIService.self) private var apiService
+    @Environment(StorageManager.self) private var storageManager
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(ComicExtractor.self) private var comicExtractor
     @State private var bookToOpen: DownloadedBook?
     @State private var highlightPosition: String?
     @State private var editingHighlight: BookHighlight?
@@ -228,6 +238,16 @@ private struct BookHighlightsDetailView: View {
         .fullScreenCover(item: $bookToOpen) { book in
             ReaderContainerView(book: book, initialPosition: highlightPosition)
                 .environment(readerSettings)
+                .environment(highlightColorManager)
+                .environment(readAlongService)
+                .environment(audiobookPlayer)
+                .environment(transcriptionService)
+                .environment(apiService)
+                .environment(storageManager)
+                .environment(pocketTTSModelManager)
+                .environment(ttsAudioCache)
+                .environment(backgroundProcessingManager)
+                .environment(comicExtractor)
         }
         .onChange(of: bookToOpen) { _, newValue in
             if newValue == nil {

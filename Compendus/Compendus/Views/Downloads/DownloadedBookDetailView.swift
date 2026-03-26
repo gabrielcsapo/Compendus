@@ -20,6 +20,13 @@ struct DownloadedBookDetailView: View {
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(ComicExtractor.self) private var comicExtractor
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -117,9 +124,17 @@ struct DownloadedBookDetailView: View {
         }
         .fullScreenCover(item: $bookToRead) { bookToOpen in
             ReaderContainerView(book: bookToOpen)
+                .environment(readerSettings)
+                .environment(highlightColorManager)
+                .environment(readAlongService)
+                .environment(audiobookPlayer)
+                .environment(transcriptionService)
                 .environment(apiService)
                 .environment(storageManager)
-                .environment(readerSettings)
+                .environment(pocketTTSModelManager)
+                .environment(ttsAudioCache)
+                .environment(backgroundProcessingManager)
+                .environment(comicExtractor)
                 .modelContext(modelContext)
         }
         .alert("Delete Failed", isPresented: $showingDeleteError) {
