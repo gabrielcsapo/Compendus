@@ -59,6 +59,7 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
   svg: "image/svg+xml",
   css: "text/css",
   js: "application/javascript",
+  mjs: "application/javascript",
   xhtml: "application/xhtml+xml",
   html: "text/html",
   xml: "application/xml",

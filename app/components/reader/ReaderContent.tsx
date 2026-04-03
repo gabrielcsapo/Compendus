@@ -208,6 +208,7 @@ export function ReaderContent({
             onTotalPagesChange={onTextTotalPagesChange}
             onChapterChange={onChapterChange}
             isJumpNavigation={isJumpNavigation}
+            isSpreadMode={isSpreadMode}
             settings={settings}
             onPrevPage={onPrevPage}
             onNextPage={onNextPage}
@@ -292,6 +293,7 @@ function ColumnPaginatedText({
   onTotalPagesChange,
   onChapterChange,
   isJumpNavigation,
+  isSpreadMode,
   settings,
   onPrevPage,
   onNextPage,
@@ -312,6 +314,7 @@ function ColumnPaginatedText({
   onTotalPagesChange?: (totalPages: number) => void;
   onChapterChange?: (chapterTitle: string) => void;
   isJumpNavigation?: boolean;
+  isSpreadMode?: boolean;
   settings: ReaderSettings;
   onPrevPage?: () => void;
   onNextPage?: () => void;
@@ -384,12 +387,15 @@ function ColumnPaginatedText({
 
   // Column layout calculations
   const containerWidth = readingArea.width;
+  // In spread mode, each CSS column occupies half the container (2 columns visible per page)
+  const columnSlotWidth =
+    isSpreadMode && containerWidth >= 600 ? containerWidth / 2 : containerWidth;
   const readingWidth =
     containerWidth > 0
-      ? Math.min(containerWidth * (1 - (2 * settings.margins) / 100), settings.maxWidth)
+      ? Math.min(columnSlotWidth * (1 - (2 * settings.margins) / 100), settings.maxWidth)
       : 0;
-  const marginPx = containerWidth > 0 ? (containerWidth - readingWidth) / 2 : 0;
-  const columnGap = containerWidth > 0 ? containerWidth - readingWidth : 40;
+  const marginPx = containerWidth > 0 ? (columnSlotWidth - readingWidth) / 2 : 0;
+  const columnGap = containerWidth > 0 ? columnSlotWidth - readingWidth : 40;
 
   // Measure reading area with ResizeObserver
   useEffect(() => {
@@ -410,7 +416,7 @@ function ColumnPaginatedText({
       requestAnimationFrame(() => {
         if (!paginatorRef.current) return;
         const scrollW = paginatorRef.current.scrollWidth;
-        const pages = Math.max(1, Math.round(scrollW / containerWidth));
+        const pages = Math.max(1, Math.round(scrollW / columnSlotWidth));
         setTotalPages(pages);
         onTotalPagesChange?.(pages);
       });
@@ -418,6 +424,7 @@ function ColumnPaginatedText({
   }, [
     fullContent.html,
     containerWidth,
+    columnSlotWidth,
     readingArea.height,
     settings.fontSize,
     settings.lineHeight,
@@ -688,7 +695,11 @@ function ColumnPaginatedText({
       {/* Padding wrapper for toolbar space */}
       <div className="h-full flex flex-col">
         {/* Reading area - measured by ResizeObserver */}
-        <div ref={readingAreaRef} className="flex-1 overflow-hidden" onClick={handleContentClick}>
+        <div
+          ref={readingAreaRef}
+          className="flex-1 overflow-hidden relative"
+          onClick={handleContentClick}
+        >
           {readingArea.width > 0 && readingArea.height > 0 && (
             <div
               ref={paginatorRef}
@@ -699,7 +710,7 @@ function ColumnPaginatedText({
                 columnFill: "auto" as const,
                 paddingLeft: `${marginPx}px`,
                 paddingRight: `${marginPx}px`,
-                transform: `translateX(-${pageIndex * containerWidth}px)`,
+                transform: `translateX(-${pageIndex * columnSlotWidth}px)`,
                 transition: isJump ? "none" : "transform 0.3s ease",
                 willChange: "transform",
               }}
@@ -712,6 +723,17 @@ function ColumnPaginatedText({
                 dangerouslySetInnerHTML={{ __html: fullContent.html }}
               />
             </div>
+          )}
+          {/* Spread mode center divider */}
+          {isSpreadMode && containerWidth >= 600 && (
+            <div
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{
+                left: "50%",
+                width: "1px",
+                backgroundColor: `${theme.foreground}12`,
+              }}
+            />
           )}
         </div>
       </div>
@@ -1901,7 +1923,7 @@ function AudioContent({
           style={{
             filter: "blur(60px) saturate(1.8)",
             transform: "scale(1.15)",
-            opacity: 0.70,
+            opacity: 0.7,
           }}
         />
       )}
@@ -1975,7 +1997,10 @@ function AudioContent({
             className="w-full h-1 rounded-lg appearance-none cursor-pointer"
             style={{ accentColor: "#fff" }}
           />
-          <div className="flex justify-between text-xs mt-1.5" style={{ color: "rgba(255,255,255,0.65)" }}>
+          <div
+            className="flex justify-between text-xs mt-1.5"
+            style={{ color: "rgba(255,255,255,0.65)" }}
+          >
             <span>{formatTime(currentTime)}</span>
             <span>-{formatTime(Math.max(0, duration - currentTime))}</span>
           </div>
@@ -1990,7 +2015,9 @@ function AudioContent({
           >
             <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
-              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">15</text>
+              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">
+                15
+              </text>
             </svg>
           </button>
 
@@ -2017,7 +2044,9 @@ function AudioContent({
           >
             <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
-              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">30</text>
+              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">
+                30
+              </text>
             </svg>
           </button>
         </div>
@@ -2026,7 +2055,11 @@ function AudioContent({
         <div className="flex items-center justify-between w-full max-w-lg gap-4">
           {/* Volume */}
           <div className="flex items-center gap-2 flex-1">
-            <svg className="w-4 h-4 flex-shrink-0 opacity-70" fill="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="w-4 h-4 flex-shrink-0 opacity-70"
+              fill="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path d="M3 9v6h4l5 5V4L7 9H3z" />
             </svg>
             <input
@@ -2039,7 +2072,11 @@ function AudioContent({
               className="flex-1 h-1 rounded-lg appearance-none cursor-pointer"
               style={{ accentColor: "#fff" }}
             />
-            <svg className="w-4 h-4 flex-shrink-0 opacity-70" fill="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="w-4 h-4 flex-shrink-0 opacity-70"
+              fill="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
             </svg>
           </div>

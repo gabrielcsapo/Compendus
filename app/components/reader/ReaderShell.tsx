@@ -242,9 +242,12 @@ export function ReaderShell({
     [reader],
   );
 
-  // Add bookmark at current position
+  // Toggle bookmark at current position
   const handleAddBookmark = useCallback(() => {
-    if (reader.pageContent) {
+    const existing = reader.bookmarks.find((b) => Math.abs(b.position - reader.position) < 0.001);
+    if (existing) {
+      reader.removeBookmark(existing.id);
+    } else if (reader.pageContent) {
       const title = reader.pageContent.chapterTitle || `Page ${reader.currentPage}`;
       reader.addBookmark(reader.pageContent.position, title);
     }

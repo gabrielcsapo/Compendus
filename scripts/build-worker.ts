@@ -33,6 +33,14 @@ const SHARED_EXTERNALS = [
   "sharp",
   // CBR/RAR parsing - has dynamic requires that don't work when bundled
   "node-unrar-js",
+  // PDF cover rendering via GraphicsMagick CLI wrapper - breaks when bundled
+  "gm",
+  "pdf2pic",
+  // ZIP handling - CJS module with dynamic requires that break in ESM bundles
+  "adm-zip",
+  // pdfjs-dist - complex init that fails in esbuild's __esm lazy-init pattern
+  "pdfjs-dist",
+  "pdfjs-dist/legacy/build/pdf.mjs",
 ];
 
 const SHARED_OPTIONS = {
@@ -45,6 +53,10 @@ const SHARED_OPTIONS = {
   keepNames: true,
   sourcemap: true,
   logLevel: "info" as const,
+  // Provide `require` for bundled CJS modules that use require() for Node built-ins
+  banner: {
+    js: `import { createRequire as __createRequire } from "module"; const require = __createRequire(import.meta.url);`,
+  },
 };
 
 async function buildWorkers() {

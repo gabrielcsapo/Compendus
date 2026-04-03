@@ -77,6 +77,84 @@ function shouldSaveResource(mediaType: string): boolean {
   return false;
 }
 
+/**
+ * Extract content between opening and closing XML tags by name,
+ * handling optional namespace prefixes. Uses indexOf for performance
+ * on large XML strings (avoids regex backtracking).
+ */
+function extractBlock(xml: string, tagName: string): string | null {
+  const xmlLower = xml.toLowerCase();
+  // Find opening tag: <tagName or <prefix:tagName
+  let startIdx = -1;
+  let searchFrom = 0;
+  while (searchFrom < xmlLower.length) {
+    const idx = xmlLower.indexOf(`<${tagName}`, searchFrom);
+    const idxNs = xmlLower.indexOf(`:${tagName}`, searchFrom);
+    // Pick the earliest valid match
+    let candidate = -1;
+    if (idx >= 0 && (idxNs < 0 || idx <= idxNs)) {
+      // Check it's actually a tag start (char before tagName should be < or :)
+      const charAfter = xmlLower[idx + tagName.length + 1];
+      if (
+        charAfter === " " ||
+        charAfter === ">" ||
+        charAfter === "\n" ||
+        charAfter === "\r" ||
+        charAfter === "\t"
+      ) {
+        candidate = idx;
+      }
+    }
+    if (candidate < 0 && idxNs >= 0) {
+      // Namespaced: find the < before the prefix
+      const ltIdx = xml.lastIndexOf("<", idxNs);
+      if (ltIdx >= 0) {
+        const charAfterTag = xmlLower[idxNs + tagName.length + 1];
+        if (
+          charAfterTag === " " ||
+          charAfterTag === ">" ||
+          charAfterTag === "\n" ||
+          charAfterTag === "\r" ||
+          charAfterTag === "\t"
+        ) {
+          candidate = ltIdx;
+        }
+      }
+    }
+    if (candidate < 0) break;
+    startIdx = candidate;
+    break;
+  }
+  if (startIdx < 0) return null;
+
+  // Find end of opening tag
+  const openEnd = xml.indexOf(">", startIdx);
+  if (openEnd < 0) return null;
+
+  // Find closing tag: </tagName> or </prefix:tagName>
+  const contentStart = openEnd + 1;
+  // Search for closing tag case-insensitively
+  const closingPatterns = [`</${tagName}>`, `:${tagName}>`];
+  let closeIdx = -1;
+  for (const pattern of closingPatterns) {
+    const idx = xmlLower.indexOf(pattern.toLowerCase(), contentStart);
+    if (idx >= 0 && (closeIdx < 0 || idx < closeIdx)) {
+      // For namespaced closing, find the actual </
+      if (pattern.startsWith(":")) {
+        const ltSlash = xml.lastIndexOf("</", idx);
+        if (ltSlash >= contentStart) {
+          closeIdx = ltSlash;
+        }
+      } else {
+        closeIdx = idx;
+      }
+    }
+  }
+  if (closeIdx < 0) return null;
+
+  return xml.substring(contentStart, closeIdx);
+}
+
 // ── Path utilities ──
 
 /** Join POSIX-style paths (for ZIP internal paths) */
@@ -146,7 +224,31 @@ class EpubFileParser implements EpubParser {
   }
 
   private getActualName(name: string): string | undefined {
-    return this.namesMap.get(name.toLowerCase());
+    // Try exact (case-insensitive) match first
+    const exact = this.namesMap.get(name.toLowerCase());
+    if (exact) return exact;
+    // Try URL-encoded version (ZIP entries may use percent-encoding)
+    try {
+      const encoded = name
+        .split("/")
+        .map((s) => encodeURIComponent(s))
+        .join("/");
+      const encodedMatch = this.namesMap.get(encoded.toLowerCase());
+      if (encodedMatch) return encodedMatch;
+    } catch {
+      /* ignore */
+    }
+    // Try URL-decoded version (manifest hrefs may be percent-encoded)
+    try {
+      const decoded = decodeURIComponent(name);
+      if (decoded !== name) {
+        const decodedMatch = this.namesMap.get(decoded.toLowerCase());
+        if (decodedMatch) return decodedMatch;
+      }
+    } catch {
+      /* ignore */
+    }
+    return undefined;
   }
 
   private async readFile(name: string): Promise<string> {
@@ -179,7 +281,22 @@ class EpubFileParser implements EpubParser {
 
     // 2. Parse OPF
     const opfXml = await this.readFile(opfPath);
-    this.parseOpf(opfXml);
+    if (!opfXml) {
+      // Try URL-decoded version of the path
+      const decodedPath = decodeURIComponent(opfPath);
+      const opfXmlDecoded = decodedPath !== opfPath ? await this.readFile(decodedPath) : "";
+      if (opfXmlDecoded) {
+        this.opfDir = dirnamePosix(decodedPath);
+        this.parseOpf(opfXmlDecoded);
+      } else {
+        console.error(
+          `[epub-parser] OPF file not found at path: "${opfPath}" (ZIP entries: ${[...this.namesMap.keys()].slice(0, 20).join(", ")})`,
+        );
+        this.parseOpf("");
+      }
+    } else {
+      this.parseOpf(opfXml);
+    }
 
     // 3. Save resources to disk
     await this.saveResources();
@@ -206,7 +323,7 @@ class EpubFileParser implements EpubParser {
 
   private parseMetadata(xml: string): EpubMetadata {
     // Extract the <metadata> block
-    const metaBlock = xml.match(/<metadata[^>]*>([\s\S]*?)<\/metadata>/i)?.[1] || "";
+    const metaBlock = extractBlock(xml, "metadata") || "";
 
     const getText = (tag: string): string => {
       const re = new RegExp(`<(?:dc:)?${tag}[^>]*>([\\s\\S]*?)<\\/(?:dc:)?${tag}>`, "i");
@@ -299,9 +416,18 @@ class EpubFileParser implements EpubParser {
   }
 
   private parseManifest(xml: string) {
-    const manifestBlock = xml.match(/<manifest[^>]*>([\s\S]*?)<\/manifest>/i)?.[1] || "";
-    const itemRe = /<item\s+([^>]+?)\/?>/gi;
+    // Use indexOf-based extraction for large OPF files where regex backtracking is expensive
+    const manifestBlock = extractBlock(xml, "manifest");
+    if (!manifestBlock) {
+      // Log a snippet of the OPF to understand its structure
+      console.error(
+        `[epub-parser] No <manifest> block found in OPF. First 500 chars: ${xml.substring(0, 500)}`,
+      );
+      return;
+    }
+    const itemRe = /<(?:\w+:)?item\s+([^>]+?)\/?>/gi;
     let m;
+    let count = 0;
     while ((m = itemRe.exec(manifestBlock)) !== null) {
       const attrs = m[1];
       const id = attrs.match(/id\s*=\s*["']([^"']+)["']/i)?.[1];
@@ -314,20 +440,31 @@ class EpubFileParser implements EpubParser {
       const fullHref = joinPosix(this.opfDir, decodeURIComponent(href));
       this.manifest[id] = { id, href: fullHref, mediaType, properties, mediaOverlay };
       this.hrefToIdMap[fullHref] = id;
+      count++;
     }
+    console.error(`[epub-parser] Parsed ${count} manifest items`);
   }
 
   private parseSpine(xml: string) {
-    const spineBlock = xml.match(/<spine[^>]*>([\s\S]*?)<\/spine>/i)?.[1] || "";
-    const itemrefRe = /<itemref\s+([^>]+?)\/?>/gi;
+    const spineBlock = extractBlock(xml, "spine") || "";
+    if (!spineBlock) {
+      console.error(`[epub-parser] No <spine> block found in OPF`);
+      return;
+    }
+    const itemrefRe = /<(?:\w+:)?itemref\s+([^>]+?)\/?>/gi;
     let m;
+    let count = 0;
+    let missingRefs: string[] = [];
     while ((m = itemrefRe.exec(spineBlock)) !== null) {
       const attrs = m[1];
       const idref = attrs.match(/idref\s*=\s*["']([^"']+)["']/i)?.[1];
       const linear = attrs.match(/linear\s*=\s*["']([^"']+)["']/i)?.[1] || "yes";
       if (!idref) continue;
       const item = this.manifest[idref];
-      if (!item) continue;
+      if (!item) {
+        missingRefs.push(idref);
+        continue;
+      }
       this.spine.push({
         id: item.id,
         href: item.href,
@@ -335,7 +472,11 @@ class EpubFileParser implements EpubParser {
         properties: item.properties,
         linear,
       });
+      count++;
     }
+    console.error(
+      `[epub-parser] Parsed ${count} spine items${missingRefs.length > 0 ? `, ${missingRefs.length} missing refs: ${missingRefs.join(", ")}` : ""}`,
+    );
   }
 
   // ── Save resources to disk ──

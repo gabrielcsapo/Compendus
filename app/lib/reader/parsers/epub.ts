@@ -116,7 +116,8 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
   let epub;
   try {
     epub = await initEpubFile(buffer, resourceDir);
-  } catch {
+  } catch (e) {
+    console.error(`[parseEpub] Failed to init EPUB for ${bookId}:`, e);
     return createEmptyContent(bookId);
   }
 
@@ -125,7 +126,9 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
   try {
     spine = epub.getSpine();
     toc = epub.getToc();
-  } catch {
+    console.error(`[parseEpub] ${bookId}: spine=${spine.length} items, toc=${toc.length} entries`);
+  } catch (e) {
+    console.error(`[parseEpub] Failed to get spine/toc for ${bookId}:`, e);
     return createEmptyContent(bookId);
   }
 
@@ -174,8 +177,8 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
       });
 
       totalCharacters += text.length;
-    } catch {
-      // Skip chapters that fail to load
+    } catch (e) {
+      console.error(`[parseEpub] Failed to load chapter ${spineItem.id} (${spineItem.href}):`, e);
     }
 
     // Yield to event loop every 5 chapters to prevent blocking
@@ -183,6 +186,10 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
       await yieldToEventLoop();
     }
   }
+
+  console.error(
+    `[parseEpub] ${bookId}: parsed ${chapters.length}/${spine.length} chapters, totalCharacters=${totalCharacters}`,
+  );
 
   // Build chapter href map for internal link resolution
   const chapterHrefMap: Record<string, number> = {};
