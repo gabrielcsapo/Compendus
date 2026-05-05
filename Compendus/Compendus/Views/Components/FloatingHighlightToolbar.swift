@@ -13,12 +13,31 @@ struct FloatingHighlightToolbar: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager
 
     var bookId: String? = nil
+    let selectedText: String
     let selectionRect: CGRect
     let containerSize: CGSize
     let onSelectColor: (String) -> Void
     let onAddNote: () -> Void
     let onCopy: () -> Void
     let onDismiss: () -> Void
+    let onSearchInBook: ((String) -> Void)?
+    let onShare: ((String) -> Void)?
+
+    @State private var showingDefinition = false
+
+    private var firstWord: String {
+        let pattern = try? NSRegularExpression(pattern: "[\\p{L}\\p{N}'-]+")
+        guard let pattern else { return "" }
+        let range = NSRange(selectedText.startIndex..., in: selectedText)
+        guard let match = pattern.firstMatch(in: selectedText, range: range),
+              let r = Range(match.range, in: selectedText) else { return "" }
+        return String(selectedText[r]).lowercased()
+    }
+
+    private var canDefine: Bool {
+        let words = selectedText.split(whereSeparator: { $0.isWhitespace })
+        return !firstWord.isEmpty && words.count <= 4
+    }
 
     // Show above selection when there's enough room; otherwise below.
     private var showAbove: Bool {
@@ -75,6 +94,49 @@ struct FloatingHighlightToolbar: View {
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Add note")
+
+                // Define (only for short selections — single word lookup is most useful)
+                if canDefine {
+                    Button {
+                        showingDefinition = true
+                    } label: {
+                        Image(systemName: "character.book.closed")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Define \(firstWord)")
+                }
+
+                // Search in book
+                if let onSearchInBook {
+                    Button {
+                        onSearchInBook(selectedText)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Search in book")
+                }
+
+                // Share
+                if let onShare {
+                    Button {
+                        onShare(selectedText)
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Share")
+                }
 
                 // Copy
                 Button {
@@ -86,6 +148,7 @@ struct FloatingHighlightToolbar: View {
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Copy")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -103,5 +166,45 @@ struct FloatingHighlightToolbar: View {
             .fixedSize()
             .position(x: toolbarX, y: toolbarY)
         }
+        .sheet(isPresented: $showingDefinition) {
+            DefinitionSheet(term: firstWord)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+/// Wraps UIReferenceLibraryViewController for inline system dictionary lookup.
+private struct DefinitionSheet: UIViewControllerRepresentable {
+    let term: String
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        if UIReferenceLibraryViewController.dictionaryHasDefinition(forTerm: term) {
+            return UIReferenceLibraryViewController(term: term)
+        }
+        // Fallback: a simple "no definition" view. Wrap in a UIHostingController for SwiftUI text.
+        let host = UIHostingController(rootView: NoDefinitionView(term: term))
+        return host
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
+
+private struct NoDefinitionView: View {
+    let term: String
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "book.closed")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("No definition available")
+                .font(.headline)
+            Text("\u{201C}\(term)\u{201D} isn\u{2019}t in the system dictionary.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

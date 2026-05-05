@@ -10,6 +10,8 @@ export const profiles = sqliteTable(
     avatar: text("avatar"), // emoji character or relative path to uploaded image
     pinHash: text("pin_hash"), // "salt:sha256hash", null = no PIN
     isAdmin: integer("is_admin", { mode: "boolean" }).default(false),
+    /** User-set daily reading goal in minutes (powers the goal ring + celebrations). */
+    dailyGoalMinutes: integer("daily_goal_minutes").notNull().default(15),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

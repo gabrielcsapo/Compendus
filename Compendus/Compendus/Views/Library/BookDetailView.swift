@@ -63,6 +63,9 @@ struct BookDetailView: View {
                     metadataRow
                         .padding(.top, 12)
 
+                    progressSection
+                        .padding(.top, 12)
+
                     VStack(spacing: 12) {
                         actionButton
                         epubReadingOption
@@ -92,6 +95,11 @@ struct BookDetailView: View {
                 }
                 .padding(.bottom, 40)
             }
+            // Pin the scroll position to the top when content height changes.
+            // Without this, async-loading sections (related books, progress
+            // section appearing after sync) cause SwiftUI to shift the
+            // ScrollView's offset, cropping the hero cover.
+            .defaultScrollAnchor(.top)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -260,6 +268,42 @@ struct BookDetailView: View {
                 .font(.caption)
         }
         .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Reading Progress
+
+    @ViewBuilder
+    private var progressSection: some View {
+        if let progress = displayBook.readingProgress, progress > 0 {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Reading Progress")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(displayBook.readingProgressPercent)%")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(.accentColor)
+                if let relativeLastRead = relativeLastReadString {
+                    Text(relativeLastRead)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private var relativeLastReadString: String? {
+        guard let iso = displayBook.lastReadAt,
+              let date = ISO8601DateFormatter().date(from: iso) else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Last read " + formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Action Button

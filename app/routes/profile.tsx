@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { getCurrentProfile } from "../actions/profiles";
+import { getReadingStats } from "../actions/stats";
 import ProfileClient from "./profile.client";
 
 export default function ProfilePage() {
@@ -11,8 +12,8 @@ export default function ProfilePage() {
 }
 
 async function ProfileData() {
-  const profile = await getCurrentProfile();
-  return <ProfileClient initialProfile={profile} />;
+  const [profile, stats] = await Promise.all([getCurrentProfile(), getReadingStats()]);
+  return <ProfileClient initialProfile={profile} initialStats={stats} />;
 }
 
 function ProfileSkeleton() {

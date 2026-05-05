@@ -75,11 +75,12 @@ RUN ldconfig
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install pnpm -g
+RUN npm install -g --force corepack && corepack enable
 
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
+RUN corepack install
 RUN pnpm install --frozen-lockfile
 
 COPY . .

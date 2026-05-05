@@ -10,15 +10,23 @@ import EPUBReader
 
 struct ReaderSearchView: View {
     let engine: any ReaderEngine
+    var initialQuery: String = ""
     let onNavigate: (ReaderLocation) -> Void
 
-    @State private var query = ""
+    @State private var query: String
     @State private var results: [ReaderSearchResult] = []
     @State private var isSearching = false
     @State private var hasSearched = false
     @State private var searchTask: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var themeManager
+
+    init(engine: any ReaderEngine, initialQuery: String = "", onNavigate: @escaping (ReaderLocation) -> Void) {
+        self.engine = engine
+        self.initialQuery = initialQuery
+        self.onNavigate = onNavigate
+        _query = State(initialValue: initialQuery)
+    }
 
     var body: some View {
         NavigationStack {
@@ -108,6 +116,13 @@ struct ReaderSearchView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .task(id: initialQuery) {
+                // If we were opened with a pre-filled query (e.g. from selection toolbar's
+                // "Search in book"), kick off the search immediately.
+                let trimmed = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                await runSearch(trimmed)
             }
         }
     }

@@ -46,6 +46,9 @@ struct UnifiedReaderView: View {
     @State private var showingThumbnails = false
     @State private var showingPageJump = false
     @State private var showingSearch = false
+    @State private var searchQuery: String = ""
+    @State private var showingShareSheet = false
+    @State private var shareText: String = ""
     @State private var scrubberValue: Double = 0
     @State private var isScrubbing = false
     @State private var showingHighlightSetup = false
@@ -188,6 +191,10 @@ struct UnifiedReaderView: View {
             }) {
                 ReaderSettingsView(format: engine?.isComic == true ? .comic : (engine?.isPDF == true ? .pdf : .epub), bookId: book.id)
                     .readerThemed(readerSettings)
+                    // Detent + background interaction so the page redraws live behind the sheet.
+                    .presentationDetents([.fraction(0.55), .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.55)))
+                    .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showingTOC) {
                 if let comicEngine = engine as? ComicEngine {
@@ -464,11 +471,15 @@ struct UnifiedReaderView: View {
             }
             .sheet(isPresented: $showingSearch) {
                 if let engine = engine {
-                    ReaderSearchView(engine: engine) { location in
+                    ReaderSearchView(engine: engine, initialQuery: searchQuery) { location in
                         Task { await engine.go(to: location) }
                     }
                     .readerThemed(readerSettings)
                 }
+            }
+            .sheet(isPresented: $showingShareSheet) {
+                ShareSheet(activityItems: [shareText])
+                    .presentationDetents([.medium, .large])
             }
             .sheet(isPresented: $showingFootnote) {
                 NavigationStack {
@@ -515,19 +526,29 @@ struct UnifiedReaderView: View {
                 }
             }
             .onChange(of: readerSettings.theme) { _, _ in
-                if !showingSettings { engine?.applySettings(readerSettings) }
+                // Apply settings live so the user sees changes behind the
+                // settings sheet (it now uses detents + backgroundInteraction).
+                engine?.applySettings(readerSettings)
             }
             .onChange(of: readerSettings.fontFamily) { _, _ in
-                if !showingSettings { engine?.applySettings(readerSettings) }
+                // Apply settings live so the user sees changes behind the
+                // settings sheet (it now uses detents + backgroundInteraction).
+                engine?.applySettings(readerSettings)
             }
             .onChange(of: readerSettings.fontSize) { _, _ in
-                if !showingSettings { engine?.applySettings(readerSettings) }
+                // Apply settings live so the user sees changes behind the
+                // settings sheet (it now uses detents + backgroundInteraction).
+                engine?.applySettings(readerSettings)
             }
             .onChange(of: readerSettings.lineHeight) { _, _ in
-                if !showingSettings { engine?.applySettings(readerSettings) }
+                // Apply settings live so the user sees changes behind the
+                // settings sheet (it now uses detents + backgroundInteraction).
+                engine?.applySettings(readerSettings)
             }
             .onChange(of: readerSettings.layout) { _, _ in
-                if !showingSettings { engine?.applySettings(readerSettings) }
+                // Apply settings live so the user sees changes behind the
+                // settings sheet (it now uses detents + backgroundInteraction).
+                engine?.applySettings(readerSettings)
             }
             .bannerToast($saveError, type: .error)
     }
@@ -544,6 +565,33 @@ struct UnifiedReaderView: View {
                     .ignoresSafeArea()
                     .opacity(showingOverlay || readerModeActive ? 0 : 1)
                     .allowsHitTesting(!showingOverlay && !readAlongService.isActive && !readerModeActive)
+
+                // Corner-tap bookmark (Kindle convention) — invisible top-right
+                // hot zone toggles a bookmark on the current page. Active state
+                // shows a small dog-ear glyph in the accent color.
+                if !showingOverlay && !readerModeActive {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button {
+                                bookmarkCurrentPage()
+                            } label: {
+                                Image(systemName: currentPageBookmark != nil
+                                    ? "bookmark.fill" : "bookmark")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(currentPageBookmark != nil
+                                        ? Color.accentColor : Color.primary.opacity(0.0))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel(currentPageBookmark != nil
+                                ? "Remove bookmark from this page"
+                                : "Bookmark this page")
+                        }
+                        Spacer()
+                    }
+                    .ignoresSafeArea(edges: [])
+                }
 
                 // Reader mode replaces the engine view when active
                 if readerModeActive, let segments = readerModeSegments(engine: engine) {
@@ -623,6 +671,7 @@ struct UnifiedReaderView: View {
                 if showingFloatingToolbar, let frame = selectionFrame {
                     FloatingHighlightToolbar(
                         bookId: book.id,
+                        selectedText: pendingSelection?.text ?? "",
                         selectionRect: frame,
                         containerSize: geometry.size,
                         onSelectColor: { color in
@@ -645,6 +694,17 @@ struct UnifiedReaderView: View {
                             engine.clearSelection()
                             pendingSelection = nil
                             showingFloatingToolbar = false
+                        },
+                        onSearchInBook: { text in
+                            searchQuery = text
+                            showingSearch = true
+                            engine.clearSelection()
+                            pendingSelection = nil
+                            showingFloatingToolbar = false
+                        },
+                        onShare: { text in
+                            shareText = text
+                            showingShareSheet = true
                         }
                     )
                 }
@@ -1113,35 +1173,47 @@ struct UnifiedReaderView: View {
     private func pageInfoLabel(engine: any ReaderEngine) -> some View {
         let progression = engine.currentLocation?.totalProgression ?? 0
         let percentage = Int(progression * 100)
+        let chapterTitle = engine.currentLocation?.title
 
-        Group {
-            if engine.isPDF {
-                let page = (engine.currentLocation?.pageIndex ?? 0) + 1
-                Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-            } else if let comicEngine = engine as? ComicEngine {
-                let page = comicEngine.currentPage + 1
-                if comicEngine.pagesPerSpread == 2 {
-                    let rightPage = min(page + 1, engine.totalPositions)
-                    Text("Pages \(page)-\(rightPage) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-                } else {
+        VStack(spacing: 2) {
+            Group {
+                if engine.isPDF {
+                    let page = (engine.currentLocation?.pageIndex ?? 0) + 1
                     Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-                }
-            } else if let nativeEngine = engine as? NativeEPUBEngine,
-                      engine.currentLocation?.pageIndex != nil {
-                let globalPage = nativeEngine.globalPageIndex + 1
-                let totalPages = nativeEngine.totalPositions
-                if nativeEngine.isSpreadMode {
-                    let rightPage = min(globalPage + 1, totalPages)
-                    Text("Pages \(globalPage)-\(rightPage) of \(totalPages) \u{00B7} \(percentage)%")
+                } else if let comicEngine = engine as? ComicEngine {
+                    let page = comicEngine.currentPage + 1
+                    if comicEngine.pagesPerSpread == 2 {
+                        let rightPage = min(page + 1, engine.totalPositions)
+                        Text("Pages \(page)-\(rightPage) of \(engine.totalPositions) \u{00B7} \(percentage)%")
+                    } else {
+                        Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
+                    }
+                } else if let nativeEngine = engine as? NativeEPUBEngine,
+                          engine.currentLocation?.pageIndex != nil {
+                    let globalPage = nativeEngine.globalPageIndex + 1
+                    let totalPages = nativeEngine.totalPositions
+                    if nativeEngine.isSpreadMode {
+                        let rightPage = min(globalPage + 1, totalPages)
+                        Text("Pages \(globalPage)-\(rightPage) of \(totalPages) \u{00B7} \(percentage)%")
+                    } else {
+                        Text("Page \(globalPage) of \(totalPages) \u{00B7} \(percentage)%")
+                    }
                 } else {
-                    Text("Page \(globalPage) of \(totalPages) \u{00B7} \(percentage)%")
+                    Text("\(percentage)%")
                 }
-            } else {
-                Text("\(percentage)%")
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+
+            if let chapterTitle, !chapterTitle.isEmpty {
+                Text(chapterTitle)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 8)
             }
         }
-        .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
     }
 
     // MARK: - Page Scrubber
@@ -1390,9 +1462,9 @@ struct UnifiedReaderView: View {
     }
 
     private func showHighlightSetupIfNeeded() {
-        if book.lastReadAt == nil && !highlightColorManager.hasCustomColors(for: book.id) {
-            showingHighlightSetup = true
-        }
+        // Forced first-read setup was friction; defaults are now applied silently.
+        // Per-book customization is still available via the in-reader overflow menu
+        // (showingBookColorEditor) and global settings.
     }
 
     private func configureEngineCallbacks(_ engine: any ReaderEngine) {

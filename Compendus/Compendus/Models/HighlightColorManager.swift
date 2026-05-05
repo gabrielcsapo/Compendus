@@ -37,10 +37,14 @@ class HighlightColorManager {
     static let maxColors = 5
     static let minColors = 1
 
+    // 5 named defaults — aligned with web's palette so that highlights round-trip cleanly across
+    // platforms via /api/sync/highlights. Users can rename or trim to as few as 1.
     static let defaultColors: [HighlightPresetColor] = [
         HighlightPresetColor(id: "default-yellow", name: "Highlight", hex: "#ffeb3b"),
-        HighlightPresetColor(id: "default-blue", name: "Note", hex: "#42a5f5"),
-        HighlightPresetColor(id: "default-pink", name: "Important", hex: "#ef5350"),
+        HighlightPresetColor(id: "default-green",  name: "Question",  hex: "#66bb6a"),
+        HighlightPresetColor(id: "default-blue",   name: "Note",      hex: "#42a5f5"),
+        HighlightPresetColor(id: "default-pink",   name: "Quote",     hex: "#ec407a"),
+        HighlightPresetColor(id: "default-red",    name: "Important", hex: "#ef5350"),
     ]
 
     var canAddMore: Bool {

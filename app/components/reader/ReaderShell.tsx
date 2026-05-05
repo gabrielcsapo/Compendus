@@ -83,16 +83,20 @@ export function ReaderShell({
   // Track if mouse is in toolbar/slider zone
   const mouseInOverlayZoneRef = useRef(false);
 
-  // Auto-hide overlay timer
+  // Auto-hide overlay timer.
+  // 3s on touch (matches Kindle / Apple Books), 5s on desktop where mouse hover is signal.
   const resetOverlayTimer = useCallback(() => {
     if (overlayTimerRef.current) {
       clearTimeout(overlayTimerRef.current);
     }
+    const isCoarsePointer =
+      typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)")?.matches;
+    const delay = isCoarsePointer ? 3000 : 5000;
     overlayTimerRef.current = setTimeout(() => {
       if (!sidebarOpen && !settingsOpen && !mouseInOverlayZoneRef.current) {
         setShowOverlay(false);
       }
-    }, 5000);
+    }, delay);
   }, [sidebarOpen, settingsOpen]);
 
   // Start timer when overlay becomes visible
@@ -238,6 +242,19 @@ export function ReaderShell({
     (position: number) => {
       reader.goToPosition(position);
       setSidebarOpen(false);
+    },
+    [reader],
+  );
+
+  // Open search sidebar pre-populated with selected text
+  const handleSearchInBook = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      void reader.searchBook(trimmed);
+      setSidebarTab("search");
+      setSidebarOpen(true);
+      setShowOverlay(true);
     },
     [reader],
   );
@@ -442,6 +459,7 @@ export function ReaderShell({
               onRemoveHighlight={reader.removeHighlight}
               onUpdateHighlightColor={reader.updateHighlightColor}
               onUpdateHighlightNote={reader.updateHighlightNote}
+              onSearchInBook={handleSearchInBook}
               theme={theme}
             />
           ) : (
@@ -484,6 +502,7 @@ export function ReaderShell({
                 onRemoveHighlight={reader.removeHighlight}
                 onUpdateHighlightColor={reader.updateHighlightColor}
                 onUpdateHighlightNote={reader.updateHighlightNote}
+                onSearchInBook={handleSearchInBook}
                 textContentRef={textContentRef}
               />
 
@@ -526,24 +545,125 @@ export function ReaderShell({
         visible={showOverlay}
       />
 
-      {/* Thin progress bar when overlay is hidden */}
+      {/* Thin progress bar when overlay is hidden — with hover tooltip
+       * showing current page + chapter (P3.4 lightweight version of the
+       * hover-thumbnail scrubber). */}
       {!showOverlay && (
         <div
-          className="absolute bottom-0 left-0 right-0 z-30"
-          style={{
-            height: "2px",
-            backgroundColor: `${theme.foreground}10`,
-          }}
+          className="absolute bottom-0 left-0 right-0 z-30 group cursor-default"
+          style={{ height: "12px" }}
+          aria-label="Reading progress"
         >
           <div
-            className="h-full transition-all duration-300"
+            className="absolute bottom-0 left-0 right-0"
+            style={{ height: "2px", backgroundColor: `${theme.foreground}10` }}
+          >
+            <div
+              className="h-full transition-all duration-300"
+              style={{
+                width: `${reader.position * 100}%`,
+                backgroundColor: theme.accent,
+              }}
+            />
+          </div>
+          <div
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap px-2.5 py-1 rounded-md text-xs font-medium shadow-md"
             style={{
-              width: `${reader.position * 100}%`,
-              backgroundColor: theme.accent,
+              backgroundColor: `${theme.foreground}E0`,
+              color: theme.background,
             }}
-          />
+          >
+            {reader.pageContent?.chapterTitle ? `${reader.pageContent.chapterTitle} · ` : ""}
+            Page {reader.currentPage} of {reader.totalPages}
+          </div>
         </div>
       )}
+
+      {/* Adjacent-page peek hints (P2.6) — when overlay is visible, render
+       * subtle page-edge shadows on left/right to suggest adjacent pages
+       * exist. Lightweight visual cue without paying the cost of rendering
+       * full prev/next paginators. */}
+      {showOverlay && !isNativePdf && (
+        <>
+          {reader.currentPage > 1 && (
+            <div
+              className="absolute top-14 bottom-12 left-0 z-20 pointer-events-none transition-opacity duration-200"
+              style={{
+                width: "8px",
+                background: `linear-gradient(to right, ${theme.foreground}18 0%, transparent 100%)`,
+                borderRight: `1px solid ${theme.foreground}10`,
+              }}
+              aria-hidden="true"
+            />
+          )}
+          {reader.currentPage < reader.totalPages && (
+            <div
+              className="absolute top-14 bottom-12 right-0 z-20 pointer-events-none transition-opacity duration-200"
+              style={{
+                width: "8px",
+                background: `linear-gradient(to left, ${theme.foreground}18 0%, transparent 100%)`,
+                borderLeft: `1px solid ${theme.foreground}10`,
+              }}
+              aria-hidden="true"
+            />
+          )}
+        </>
+      )}
+
+      {/* Corner-tap bookmark (Kindle convention) — top-right hot zone toggles
+       * bookmark at current position. Subtle dog-ear glyph fades in when set. */}
+      <button
+        onClick={handleAddBookmark}
+        className="absolute top-0 right-0 z-20 w-12 h-12 flex items-start justify-end p-1.5 cursor-pointer group"
+        aria-label={
+          reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)
+            ? "Remove bookmark from this page"
+            : "Bookmark this page"
+        }
+        title="Bookmark this page"
+        style={{ background: "transparent" }}
+      >
+        <svg
+          className="w-5 h-5 transition-opacity duration-200"
+          fill={
+            reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)
+              ? theme.accent
+              : "none"
+          }
+          stroke={
+            reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)
+              ? theme.accent
+              : `${theme.foreground}50`
+          }
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+          style={{
+            opacity: reader.bookmarks.some((b) => Math.abs(b.position - reader.position) < 0.001)
+              ? 1
+              : 0,
+          }}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+          />
+        </svg>
+        {/* Invisible hover glyph reveal */}
+        <svg
+          className="w-5 h-5 absolute opacity-0 group-hover:opacity-60 transition-opacity duration-200"
+          fill="none"
+          stroke={`${theme.foreground}80`}
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+          />
+        </svg>
+      </button>
 
       {/* Floating page indicator on page turn */}
       <div

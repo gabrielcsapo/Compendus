@@ -150,6 +150,8 @@ interface ReaderContentProps {
   onRemoveHighlight?: (highlightId: string) => void;
   onUpdateHighlightColor?: (highlightId: string, color: string) => void;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
+  // Selection toolbar action: open in-book search with the selected text
+  onSearchInBook?: (text: string) => void;
   // Navigation
   onNavigateToPosition?: (position: number) => void;
   // Ref for TTS access to text DOM
@@ -183,6 +185,7 @@ export function ReaderContent({
   onRemoveHighlight,
   onUpdateHighlightColor,
   onUpdateHighlightNote,
+  onSearchInBook,
   onNavigateToPosition,
   textContentRef,
 }: ReaderContentProps) {
@@ -220,6 +223,7 @@ export function ReaderContent({
             onRemoveHighlight={onRemoveHighlight}
             onUpdateHighlightColor={onUpdateHighlightColor}
             onUpdateHighlightNote={onUpdateHighlightNote}
+            onSearchInBook={onSearchInBook}
             onNavigateToPosition={onNavigateToPosition}
             theme={theme}
             textContentRef={textContentRef}
@@ -245,6 +249,7 @@ export function ReaderContent({
             onRemoveHighlight={onRemoveHighlight}
             onUpdateHighlightColor={onUpdateHighlightColor}
             onUpdateHighlightNote={onUpdateHighlightNote}
+            onSearchInBook={onSearchInBook}
             onNavigateToPosition={onNavigateToPosition}
             theme={theme}
             textContentRef={textContentRef}
@@ -305,6 +310,7 @@ function ColumnPaginatedText({
   onRemoveHighlight,
   onUpdateHighlightColor,
   onUpdateHighlightNote,
+  onSearchInBook,
   onNavigateToPosition,
   theme,
   textContentRef,
@@ -332,6 +338,7 @@ function ColumnPaginatedText({
   onRemoveHighlight?: (highlightId: string) => void;
   onUpdateHighlightColor?: (highlightId: string, color: string) => void;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
+  onSearchInBook?: (text: string) => void;
   onNavigateToPosition?: (position: number) => void;
   theme: {
     background: string;
@@ -809,6 +816,7 @@ function ColumnPaginatedText({
             setShowToolbar(false);
             window.getSelection()?.removeAllRanges();
           }}
+          onSearchInBook={onSearchInBook}
           theme={theme}
         />
       )}
@@ -838,6 +846,7 @@ function ColumnPaginatedText({
             setShowEditToolbar(false);
             setEditingHighlight(null);
           }}
+          onSearchInBook={onSearchInBook}
           theme={theme}
         />
       )}
@@ -888,6 +897,7 @@ function TextContent({
   onRemoveHighlight,
   onUpdateHighlightColor,
   onUpdateHighlightNote,
+  onSearchInBook,
   onNavigateToPosition,
   theme,
   textContentRef,
@@ -913,6 +923,7 @@ function TextContent({
   onRemoveHighlight?: (highlightId: string) => void;
   onUpdateHighlightColor?: (highlightId: string, color: string) => void;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => void;
+  onSearchInBook?: (text: string) => void;
   onNavigateToPosition?: (position: number) => void;
   theme: {
     background: string;
@@ -1333,13 +1344,13 @@ function TextContent({
       }}
       onClick={handleContentClick}
     >
-      {/* Page transition wrapper */}
+      {/* Page transition wrapper — real slide, like turning a page */}
       <div
-        className="transition-all duration-200 ease-in-out"
+        className="transition-all duration-300 ease-out"
         style={{
           opacity: isTransitioning ? 0 : 1,
           transform: isTransitioning
-            ? `translateX(${transitionDirection === "left" ? "-20px" : "20px"})`
+            ? `translateX(${transitionDirection === "left" ? "-100%" : "100%"})`
             : "translateX(0)",
         }}
       >
@@ -1456,6 +1467,7 @@ function TextContent({
             setShowToolbar(false);
             window.getSelection()?.removeAllRanges();
           }}
+          onSearchInBook={onSearchInBook}
           theme={theme}
         />
       )}
@@ -1494,6 +1506,7 @@ function TextContent({
             setShowEditToolbar(false);
             setEditingHighlight(null);
           }}
+          onSearchInBook={onSearchInBook}
           theme={theme}
         />
       )}

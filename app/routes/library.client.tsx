@@ -94,7 +94,7 @@ export default function LibraryPage({
 
       // Default explore view (no view param, no series filter)
       if (!view && !seriesFilter) {
-        const exploreData = await getExploreData();
+        const exploreData = await getExploreData(undefined, typeFilter);
         return {
           view: "explore" as const,
           exploreData,
@@ -294,92 +294,94 @@ export default function LibraryPage({
         </div>
         {!currentSeriesFilter && (
           <div className="flex flex-wrap items-center gap-3">
-            {/* View mode toggle: Explore | Browse | Series */}
-            <div className="inline-flex gap-1 p-1 bg-surface-elevated rounded-lg">
-              <Link
-                to={`/library${currentType !== "all" ? `?type=${currentType}` : ""}`}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  currentView === "explore"
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 6h16M4 10h16M4 14h16M4 18h16"
-                  />
-                </svg>
-                Explore
-              </Link>
-              <Link
-                to={`/library?view=grid${currentType !== "all" ? `&type=${currentType}` : ""}${currentSort !== "recent" ? `&sort=${currentSort}` : ""}`}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  currentView === "books"
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                  />
-                </svg>
-                Browse
-              </Link>
-              <Link
-                to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  currentView === "series"
-                    ? "bg-primary text-white shadow-sm"
-                    : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                  />
-                </svg>
-                Series
-              </Link>
-            </div>
-            {currentView === "books" && (
-              <>
-                <TypeTabs
-                  currentType={currentType}
-                  currentSort={currentSort}
-                  currentView="grid"
-                  basePath="/library"
-                />
-                {formatCounts.length > 1 && (
-                  <FormatDropdown
-                    formatCounts={formatCounts}
-                    selectedFormats={currentFormats}
-                    currentType={currentType}
-                    currentSort={currentSort}
-                  />
-                )}
-                <div className="ml-auto">
-                  <SortDropdown currentSort={currentSort} />
-                </div>
-              </>
-            )}
-            {currentView === "series" && (
-              <TypeTabs
+            {/* PRIMARY: Content-type filter — always visible, matches iOS */}
+            <TypeTabs
+              currentType={currentType}
+              currentSort={currentSort}
+              currentView={
+                currentView === "series" ? "series" : currentView === "books" ? "grid" : undefined
+              }
+              basePath="/library"
+            />
+
+            {/* Format dropdown — only meaningful in Browse */}
+            {currentView === "books" && formatCounts.length > 1 && (
+              <FormatDropdown
+                formatCounts={formatCounts}
+                selectedFormats={currentFormats}
                 currentType={currentType}
                 currentSort={currentSort}
-                currentView="series"
-                basePath="/library"
               />
             )}
+
+            {/* Right edge: view-mode icons (Explore / Browse / Series) + sort */}
+            <div className="ml-auto flex items-center gap-2">
+              <div
+                className="inline-flex gap-0.5 p-0.5 bg-surface-elevated rounded-lg"
+                role="tablist"
+                aria-label="View mode"
+              >
+                <Link
+                  to={`/library${currentType !== "all" ? `?type=${currentType}` : ""}`}
+                  title="Explore — curated sections"
+                  aria-label="Explore view"
+                  className={`p-1.5 rounded-md transition-colors ${
+                    currentView === "explore"
+                      ? "bg-primary text-white"
+                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                    />
+                  </svg>
+                </Link>
+                <Link
+                  to={`/library?view=grid${currentType !== "all" ? `&type=${currentType}` : ""}${currentSort !== "recent" ? `&sort=${currentSort}` : ""}`}
+                  title="Browse — full grid"
+                  aria-label="Grid view"
+                  className={`p-1.5 rounded-md transition-colors ${
+                    currentView === "books"
+                      ? "bg-primary text-white"
+                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z"
+                    />
+                  </svg>
+                </Link>
+                <Link
+                  to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
+                  title="Series — group by series"
+                  aria-label="Series view"
+                  className={`p-1.5 rounded-md transition-colors ${
+                    currentView === "series"
+                      ? "bg-primary text-white"
+                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                    />
+                  </svg>
+                </Link>
+              </div>
+
+              {currentView === "books" && <SortDropdown currentSort={currentSort} />}
+            </div>
           </div>
         )}
       </div>

@@ -47,6 +47,7 @@ function toApiProfile(profile: Profile) {
     avatarUrl,
     hasPin: !!profile.pinHash,
     isAdmin: profile.isAdmin ?? false,
+    dailyGoalMinutes: profile.dailyGoalMinutes ?? 15,
     createdAt: profile.createdAt
       ? profile.createdAt instanceof Date
         ? profile.createdAt.toISOString()
@@ -168,6 +169,7 @@ app.put("/api/profiles/:id", async (c) => {
     avatar?: string;
     pin?: string | null; // null = remove PIN
     isAdmin?: boolean;
+    dailyGoalMinutes?: number;
   }>();
 
   const updates: Partial<{
@@ -175,6 +177,7 @@ app.put("/api/profiles/:id", async (c) => {
     avatar: string | null;
     pinHash: string | null;
     isAdmin: boolean;
+    dailyGoalMinutes: number;
     updatedAt: Date;
   }> = {
     updatedAt: new Date(),
@@ -203,6 +206,17 @@ app.put("/api/profiles/:id", async (c) => {
   // Only admins can change admin status, and not on themselves
   if (body.isAdmin !== undefined && isAdmin && targetId !== currentProfileId) {
     updates.isAdmin = body.isAdmin;
+  }
+
+  if (body.dailyGoalMinutes !== undefined) {
+    const g = Math.round(body.dailyGoalMinutes);
+    if (!Number.isFinite(g) || g < 1 || g > 480) {
+      return c.json(
+        { success: false, error: "dailyGoalMinutes must be between 1 and 480", code: "VALIDATION" },
+        400,
+      );
+    }
+    updates.dailyGoalMinutes = g;
   }
 
   db.update(profiles).set(updates).where(eq(profiles.id, targetId)).run();

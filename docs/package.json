@@ -11,9 +11,9 @@
   "dependencies": {
     "@mdx-js/rollup": "^3.1.1",
     "gray-matter": "^4.0.3",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "react-router": "^7.14.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router": "^7.15.0",
     "rehype-slug": "^6.0.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
@@ -21,13 +21,13 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
-    "@tailwindcss/vite": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "tailwindcss": "^4.2.2",
+    "tailwindcss": "^4.2.4",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2",
-    "vite": "^8.0.3"
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
   }
 }

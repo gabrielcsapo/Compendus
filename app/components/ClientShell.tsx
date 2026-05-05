@@ -10,6 +10,9 @@ import { Footer } from "./Footer";
 import { CompendusLogo } from "./CompendusLogo";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { ToastProvider } from "./ToastContext";
+import { GoalRing } from "./GoalRing";
+import { useReadingStats } from "../lib/useReadingStats";
+import { useReadingMilestones } from "../lib/useReadingMilestones";
 
 /** Paths that don't require a profile to be selected */
 const PROFILE_GATE_SKIP_PATHS = ["/profiles", "/about", "/docs"];
@@ -20,6 +23,13 @@ interface ProfileInfo {
   avatar: string | null;
   avatarUrl: string | null;
   isAdmin: boolean;
+}
+
+/** Mounts inside ToastProvider so it can call useToast(). Watches reading
+ * stats and fires celebration toasts on milestones. */
+function MilestoneTracker() {
+  useReadingMilestones();
+  return null;
 }
 
 function GlobalNavigationLoadingBar() {
@@ -37,6 +47,10 @@ function GlobalNavigationLoadingBar() {
 function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const stats = useReadingStats();
+  const todayMinutes = stats?.todayMinutes ?? 0;
+  const goal = stats?.dailyGoalMinutes ?? 15;
+  const streak = stats?.currentStreak ?? 0;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -65,9 +79,35 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-elevated transition-colors"
-        title={`Profile: ${profile.name}`}
+        title={`Profile: ${profile.name} — ${todayMinutes}m of ${goal}m goal today${streak > 0 ? ` · ${streak}-day streak` : ""}`}
       >
-        <ProfileAvatar profile={profile} size="sm" />
+        <div className="relative">
+          <GoalRing
+            value={todayMinutes}
+            goal={goal}
+            size={36}
+            strokeWidth={2.5}
+            className="shrink-0"
+          >
+            <ProfileAvatar profile={profile} size="sm" />
+          </GoalRing>
+          {streak > 0 && (
+            <span
+              className="absolute -bottom-1 -right-1 inline-flex items-center gap-0.5 px-1.5 py-px rounded-full bg-orange-500 text-white text-[10px] font-bold leading-none border-2 border-background"
+              aria-label={`${streak}-day reading streak`}
+            >
+              <svg
+                className="w-2.5 h-2.5"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z" />
+              </svg>
+              {streak}
+            </span>
+          )}
+        </div>
         <span className="text-sm font-medium text-foreground-muted hidden sm:inline">
           {profile.name}
         </span>
@@ -262,6 +302,7 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastProvider>
+      <MilestoneTracker />
       <header
         ref={headerRef}
         className="sticky top-0 z-40 backdrop-blur-md bg-background/80 border-b border-border"
@@ -279,17 +320,11 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
             </li>
             <li>
               <NavLink to="/" exact>
-                Dashboard
+                Library
               </NavLink>
             </li>
             <li>
-              <NavLink to="/library">Library</NavLink>
-            </li>
-            <li>
               <NavLink to="/highlights">Highlights</NavLink>
-            </li>
-            <li>
-              <NavLink to="/discover">Discover</NavLink>
             </li>
             <li className="ml-auto">
               <SearchInput />

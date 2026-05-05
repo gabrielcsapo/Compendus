@@ -25,6 +25,7 @@ interface PdfReaderViewProps {
   onRemoveHighlight?: (highlightId: string) => Promise<void>;
   onUpdateHighlightColor?: (highlightId: string, color: string) => Promise<void>;
   onUpdateHighlightNote?: (highlightId: string, note: string | null) => Promise<void>;
+  onSearchInBook?: (text: string) => void;
   theme: {
     background: string;
     foreground: string;
@@ -154,6 +155,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       onRemoveHighlight,
       onUpdateHighlightColor,
       onUpdateHighlightNote,
+      onSearchInBook,
       theme,
     },
     ref,
@@ -650,6 +652,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
               setShowToolbar(false);
               setCurrentSelection(null);
             }}
+            onSearchInBook={onSearchInBook}
             theme={theme}
           />
         )}
@@ -680,6 +683,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
               setShowEditToolbar(false);
               setEditHighlight(null);
             }}
+            onSearchInBook={onSearchInBook}
             theme={theme}
           />
         )}

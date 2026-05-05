@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-flight-router/client";
 import { ProfileAvatar } from "../components/ProfileAvatar";
+import { ProfileStatsPanel } from "../components/ProfileStatsPanel";
 import { buttonStyles, badgeStyles } from "../lib/styles";
 import { isAvatarImage } from "../lib/avatar";
+import type { StatsResponse } from "../actions/stats";
 
 interface Profile {
   id: string;
@@ -35,7 +37,13 @@ const EMOJI_SUGGESTIONS = [
   "\u{26A1}",
 ];
 
-export default function ProfileClient({ initialProfile }: { initialProfile?: Profile | null }) {
+export default function ProfileClient({
+  initialProfile,
+  initialStats,
+}: {
+  initialProfile?: Profile | null;
+  initialStats?: StatsResponse | null;
+}) {
   const [profile, setProfile] = useState<Profile | null>(initialProfile ?? null);
   const [loading, setLoading] = useState(initialProfile === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -263,7 +271,7 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
   }
 
   return (
-    <main className="container mx-auto px-6 py-12 max-w-xl">
+    <main className="container mx-auto px-6 py-12 max-w-3xl">
       <h1 className="text-2xl font-bold text-foreground mb-8">Profile</h1>
 
       {/* Avatar Section */}
@@ -439,6 +447,8 @@ export default function ProfileClient({ initialProfile }: { initialProfile?: Pro
           Switch Profile
         </Link>
       </div>
+
+      <ProfileStatsPanel initialStats={initialStats ?? null} />
 
       {/* Name Modal */}
       {showNameModal && (

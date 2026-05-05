@@ -1,12 +1,23 @@
-import { db, readingSessions, userBookState, books } from "./db";
+import { db, readingSessions, userBookState, books, profiles } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
+
+/**
+ * Fallback daily reading goal in minutes when a profile somehow doesn't have a
+ * value (shouldn't happen — schema default is 15 — but defensive). The
+ * authoritative source is `profiles.dailyGoalMinutes`.
+ */
+export const DEFAULT_DAILY_GOAL_MINUTES = 15;
 
 export type StatsResponse = {
   totalMinutes: number;
   booksRead: number;
   currentStreak: number;
   bestStreak: number;
+  /** True if a streak-freeze (1 missed day per rolling 7-day window) is currently
+   * propping up the streak. UI surfaces this with a small shield indicator. */
+  streakHasFreeze: boolean;
   todayMinutes: number;
+  dailyGoalMinutes: number;
   last7Days: { date: string; minutes: number }[];
   last30Days: { date: string; minutes: number }[];
   topBooks: {
@@ -50,6 +61,14 @@ function toDateKey(value: Date | number): string {
 }
 
 export function computeReadingStats(profileId: string): StatsResponse {
+  // Per-profile daily goal (falls back to the default if the row somehow lacks one).
+  const profileRow = db
+    .select({ dailyGoalMinutes: profiles.dailyGoalMinutes })
+    .from(profiles)
+    .where(eq(profiles.id, profileId))
+    .get();
+  const dailyGoalMinutes = profileRow?.dailyGoalMinutes ?? DEFAULT_DAILY_GOAL_MINUTES;
+
   // All completed sessions for this profile
   const allSessions = db
     .select()
@@ -109,17 +128,37 @@ export function computeReadingStats(profileId: string): StatsResponse {
   // Streak calculation from all sessions
   const allReadingDays = new Set(allSessions.map((s) => toDateKey(s.startedAt)));
 
-  // Current streak: count consecutive days backward from today
+  // Current streak: count consecutive days backward from today.
+  // Allow up to 1 "freeze" — a missed day inside the rolling 7-day window —
+  // so casual readers don't get punished for a single off-day.
   let currentStreak = 0;
-  for (let i = 0; i <= allReadingDays.size; i++) {
+  let streakHasFreeze = false;
+  const FREEZE_WINDOW_DAYS = 7;
+  let freezeUsedAtIdx: number | null = null;
+  const maxBack = allReadingDays.size + FREEZE_WINDOW_DAYS;
+  for (let i = 0; i <= maxBack; i++) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.toISOString().slice(0, 10);
     if (allReadingDays.has(key)) {
       currentStreak++;
-    } else if (i > 0) {
+    } else if (i === 0) {
+      // Today — don't count, don't break (you can still read today)
+    } else if (freezeUsedAtIdx === null || i - freezeUsedAtIdx >= FREEZE_WINDOW_DAYS) {
+      // No prior freeze in the active 7-day window → forgive this miss.
+      // Count the frozen day toward the streak so the user-visible number
+      // matches the spirit of "I read every day this week."
+      freezeUsedAtIdx = i;
+      streakHasFreeze = true;
+      currentStreak++;
+    } else {
       break;
     }
+  }
+  // If the freeze went out-of-window during the walk back, the user is no
+  // longer "currently being protected" — clear the indicator.
+  if (freezeUsedAtIdx !== null && currentStreak - freezeUsedAtIdx > FREEZE_WINDOW_DAYS) {
+    streakHasFreeze = false;
   }
 
   // Best streak
@@ -313,7 +352,9 @@ export function computeReadingStats(profileId: string): StatsResponse {
     booksRead,
     currentStreak,
     bestStreak,
+    streakHasFreeze,
     todayMinutes,
+    dailyGoalMinutes,
     last7Days,
     last30Days,
     topBooks,

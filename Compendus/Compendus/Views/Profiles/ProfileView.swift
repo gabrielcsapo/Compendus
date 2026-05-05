@@ -28,6 +28,7 @@ struct ProfileView: View {
     @State private var customEmoji = ""
     @State private var streakDays: Int = 0
     @State private var todayMinutes: Int = 0
+    @State private var streakHasFreeze: Bool = false
     @State private var showingStreakStats = false
 
     private let emojiSuggestions = [
@@ -35,9 +36,12 @@ struct ProfileView: View {
         "\u{1F308}", "\u{1F680}", "\u{1F431}", "\u{1F33A}", "\u{1F989}", "\u{1F340}",
     ]
 
+    @State private var showingGoalEditor = false
+
     var body: some View {
         Form {
             streakSliverSection
+            dailyGoalRowSection
             avatarSection
             profileInfoSection
             actionsSection
@@ -192,6 +196,15 @@ struct ProfileView: View {
     @ViewBuilder
     private var actionsSection: some View {
         Section {
+            // Push the full Settings view onto the Profile nav stack. Mirrors
+            // web's "Settings is under the profile avatar dropdown" pattern so
+            // there's one Profile surface across both platforms.
+            NavigationLink {
+                SettingsView()
+            } label: {
+                Label("Settings", systemImage: "gear")
+            }
+
             Button {
                 serverConfig.clearProfile()
             } label: {
@@ -251,25 +264,50 @@ struct ProfileView: View {
         .onDisappear { customEmoji = "" }
     }
 
+    /// User-set daily reading goal in minutes. Mirrored from the server profile
+    /// (see `APIService.fetchCurrentProfile`) and persisted in @AppStorage so
+    /// every view reads the same value reactively.
+    @AppStorage("compendus.dailyGoalMinutes") private var dailyGoalMinutes: Int = 15
+
     @ViewBuilder
     private var streakSliverSection: some View {
         Section {
             Button {
                 showingStreakStats = true
             } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: streakDays > 0 ? "flame.fill" : "flame")
-                        .font(.title3)
-                        .foregroundStyle(streakDays > 0 ? .orange : .secondary)
+                HStack(spacing: 14) {
+                    GoalRing(
+                        value: Double(todayMinutes),
+                        goal: Double(dailyGoalMinutes),
+                        size: 44,
+                        lineWidth: 3
+                    ) {
+                        Image(systemName: streakDays > 0 ? "flame.fill" : "flame")
+                            .font(.callout)
+                            .foregroundStyle(streakDays > 0 ? .orange : .secondary)
+                    }
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(streakDays == 1 ? "1 day streak" : "\(streakDays) day streak")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                        Text(todayMinutes > 0 ? "\(todayMinutes)m read today" : "Read today to keep your streak")
+                        HStack(spacing: 4) {
+                            Text(streakDays == 1 ? "1 day streak" : "\(streakDays) day streak")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.primary)
+                            if streakHasFreeze {
+                                Image(systemName: "shield.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                                    .accessibilityLabel("Streak protected by freeze")
+                            }
+                        }
+                        Text(streakSubtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if streakHasFreeze {
+                            Text("Streak protected by freeze (1 missed day forgiven)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
 
                     Spacer()
@@ -283,6 +321,53 @@ struct ProfileView: View {
         }
     }
 
+    @ViewBuilder
+    private var dailyGoalRowSection: some View {
+        Section {
+            Button {
+                showingGoalEditor = true
+            } label: {
+                HStack {
+                    Image(systemName: "target")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Daily reading goal")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Text("\(dailyGoalMinutes) minutes per day")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .sheet(isPresented: $showingGoalEditor) {
+            DailyGoalSheet(
+                currentGoal: dailyGoalMinutes,
+                profileId: currentProfile?.id ?? serverConfig.selectedProfileId ?? ""
+            )
+            .presentationDetents([.medium])
+        }
+    }
+
+    /// Goal-aware subtitle: tells the user how close they are to the day's goal,
+    /// celebrates when they finish, and nudges when they haven't started.
+    private var streakSubtitle: String {
+        if todayMinutes >= dailyGoalMinutes {
+            return "\u{1F389} Daily goal complete · \(todayMinutes)m today"
+        }
+        if todayMinutes > 0 {
+            let remaining = dailyGoalMinutes - todayMinutes
+            return "\(remaining)m to today's \(dailyGoalMinutes)m goal"
+        }
+        return "Read \(dailyGoalMinutes)m today to keep your streak"
+    }
+
     // MARK: - Actions
 
     private func calculateStreak() async {
@@ -290,40 +375,15 @@ struct ProfileView: View {
             sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
         )
         guard let allSessions = try? modelContext.fetch(descriptor), !allSessions.isEmpty else {
-            streakDays = 0; todayMinutes = 0; return
+            streakDays = 0; todayMinutes = 0; streakHasFreeze = false; return
         }
         let pid = serverConfig.selectedProfileId ?? ""
-        let sessions = allSessions.filter { $0.profileId == pid || $0.profileId.isEmpty }
-        guard !sessions.isEmpty else { streakDays = 0; todayMinutes = 0; return }
-
-        let sessionData = sessions.map { (startedAt: $0.startedAt, durationSeconds: $0.durationSeconds) }
-        let (streak, minutes) = await Task.detached {
-            let calendar = Calendar.current
-            let today = calendar.startOfDay(for: Date())
-            var daysWithReading: Set<Date> = []
-            var todaySeconds = 0
-            for s in sessionData {
-                let day = calendar.startOfDay(for: s.startedAt)
-                daysWithReading.insert(day)
-                if day == today { todaySeconds += s.durationSeconds }
-            }
-            var count = 0
-            var check = today
-            if daysWithReading.contains(check) {
-                count = 1
-                check = calendar.date(byAdding: .day, value: -1, to: check)!
-            } else {
-                check = calendar.date(byAdding: .day, value: -1, to: check)!
-                if !daysWithReading.contains(check) { return (0, todaySeconds / 60) }
-            }
-            while daysWithReading.contains(check) {
-                count += 1
-                check = calendar.date(byAdding: .day, value: -1, to: check)!
-            }
-            return (count, todaySeconds / 60)
+        let result = await Task.detached {
+            StreakCalculator.compute(sessions: allSessions, profileId: pid)
         }.value
-        streakDays = streak
-        todayMinutes = minutes
+        streakDays = result.streak
+        todayMinutes = result.todayMinutes
+        streakHasFreeze = result.hasFreeze
     }
 
     private func loadProfile() async {

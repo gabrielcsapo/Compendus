@@ -43,24 +43,25 @@ export function ReaderSettings({
   const isPdf = contentType === "pdf";
   const isComic = contentType === "comic";
   const isAudio = contentType === "audio";
-  if (!isOpen) return null;
-
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-
-      {/* Settings panel */}
+      {/* Settings panel — slides in from the right; non-modal so the page redraws live behind it. */}
       <div
-        className="fixed right-0 inset-y-0 w-80 z-50 flex flex-col shadow-xl overflow-auto"
-        style={{ backgroundColor: theme.background }}
+        className="fixed right-0 inset-y-0 w-80 z-50 flex flex-col shadow-2xl overflow-auto border-l transition-transform duration-200 ease-out"
+        style={{
+          backgroundColor: theme.background,
+          borderColor: `${theme.foreground}20`,
+          transform: isOpen ? "translateX(0)" : "translateX(100%)",
+          pointerEvents: isOpen ? "auto" : "none",
+        }}
+        aria-hidden={!isOpen}
       >
         {/* Header */}
         <div
           className="flex items-center justify-between px-4 py-3 border-b"
           style={{ borderColor: `${theme.foreground}20` }}
         >
-          <h2 className="text-lg font-semibold">Settings</h2>
+          <h2 className="text-lg font-semibold">Reader Settings</h2>
           <button
             onClick={onClose}
             className="p-2 rounded-md hover:bg-black/10"

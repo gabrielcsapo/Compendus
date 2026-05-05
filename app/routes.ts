@@ -8,8 +8,9 @@ export const routes: RouteConfig[] = [
     error: () => import("./routes/error.js"),
     notFound: () => import("./routes/not-found.js"),
     children: [
-      { id: "dashboard", index: true, component: () => import("./routes/dashboard.js") },
+      { id: "library-home", index: true, component: () => import("./routes/library.js") },
       { id: "library", path: "library", component: () => import("./routes/library.js") },
+      { id: "dashboard", path: "dashboard", component: () => import("./routes/dashboard.js") },
       { id: "search", path: "search", component: () => import("./routes/search.js") },
       { id: "book-detail", path: "book/:id", component: () => import("./routes/book-detail.js") },
       { id: "book-read", path: "book/:id/read", component: () => import("./routes/book-read.js") },

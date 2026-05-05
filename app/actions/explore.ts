@@ -272,7 +272,10 @@ async function getGenreSections(
   return results;
 }
 
-export async function getExploreData(profileId?: string): Promise<ExploreData> {
+export async function getExploreData(
+  profileId?: string,
+  typeFilter?: import("../lib/book-types").BookType,
+): Promise<ExploreData> {
   const [
     lastReadBooks,
     recentlyAdded,
@@ -285,11 +288,11 @@ export async function getExploreData(profileId?: string): Promise<ExploreData> {
     moreByAuthor,
     genreSections,
   ] = await Promise.all([
-    getBooks({ orderBy: "lastReadAt", order: "desc", limit: 30, profileId }),
-    getBooks({ orderBy: "createdAt", order: "desc", limit: 16, profileId }),
-    getBooksCount(),
+    getBooks({ orderBy: "lastReadAt", order: "desc", limit: 30, profileId, type: typeFilter }),
+    getBooks({ orderBy: "createdAt", order: "desc", limit: 16, profileId, type: typeFilter }),
+    getBooksCount(typeFilter),
     getUnmatchedBooksCount(),
-    getSeriesWithCovers(),
+    getSeriesWithCovers(typeFilter),
     getTagsWithCounts(),
     getReadNextInSeries(profileId),
     getStaleReads(profileId),

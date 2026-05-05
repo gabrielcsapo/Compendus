@@ -443,6 +443,39 @@ class APIService {
         guard let profile = decoded.profile else {
             throw APIError.invalidResponse
         }
+        // Mirror the server's daily goal into local @AppStorage so the goal
+        // ring + celebrations across the app reflect changes the user made
+        // on web (or another iOS device after sync).
+        if let goal = profile.dailyGoalMinutes {
+            UserDefaults.standard.set(goal, forKey: "compendus.dailyGoalMinutes")
+        }
+        return profile
+    }
+
+    /// Update the current profile's daily reading goal. Returns the refreshed
+    /// profile so callers can update local state.
+    @discardableResult
+    func updateDailyGoal(profileId: String, minutes: Int) async throws -> Profile {
+        guard let url = config.apiURL("/api/profiles/\(profileId)") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["dailyGoalMinutes": minutes]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(ProfileResponse.self, from: data)
+        guard let profile = decoded.profile else {
+            throw APIError.invalidResponse
+        }
+        if let goal = profile.dailyGoalMinutes {
+            UserDefaults.standard.set(goal, forKey: "compendus.dailyGoalMinutes")
+        }
         return profile
     }
 

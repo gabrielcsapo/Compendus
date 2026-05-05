@@ -12,6 +12,9 @@ import SwiftUI
 enum BannerToastType {
     case success
     case error
+    /// Larger, two-line celebration with leading emoji. Used by the milestone
+    /// tracker for daily-goal hits, streak milestones, and book completions.
+    case celebration(emoji: String, title: String)
 }
 
 struct BannerToastModifier: ViewModifier {
@@ -49,6 +52,7 @@ struct BannerToastView: View {
         switch type {
         case .success: return Color(.systemGreen).opacity(0.15)
         case .error: return Color(.systemRed).opacity(0.15)
+        case .celebration: return Color.accentColor.opacity(0.15)
         }
     }
 
@@ -56,6 +60,7 @@ struct BannerToastView: View {
         switch type {
         case .success: return Color(.systemGreen).opacity(0.4)
         case .error: return Color(.systemRed).opacity(0.4)
+        case .celebration: return Color.accentColor.opacity(0.5)
         }
     }
 
@@ -63,6 +68,7 @@ struct BannerToastView: View {
         switch type {
         case .success: return "checkmark.circle.fill"
         case .error: return "exclamationmark.circle.fill"
+        case .celebration: return ""
         }
     }
 
@@ -70,19 +76,33 @@ struct BannerToastView: View {
         switch type {
         case .success: return Color(.systemGreen)
         case .error: return Color(.systemRed)
+        case .celebration: return Color.accentColor
         }
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: iconName)
-                .foregroundStyle(iconColor)
-                .font(.system(size: 16, weight: .semibold))
+        HStack(spacing: 12) {
+            switch type {
+            case .celebration(let emoji, _):
+                Text(emoji)
+                    .font(.system(size: 28))
+            default:
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
+                    .font(.system(size: 16, weight: .semibold))
+            }
 
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 2) {
+                if case .celebration(_, let title) = type {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+            }
 
             Spacer(minLength: 0)
 
@@ -95,13 +115,13 @@ struct BannerToastView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .fill(backgroundColor)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: 14)
                         .strokeBorder(borderColor, lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 2)
+                .shadow(color: .black.opacity(0.10), radius: 12, x: 0, y: 4)
         )
         .padding(.horizontal, 16)
     }

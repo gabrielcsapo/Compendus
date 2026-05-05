@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `daily_goal_minutes` integer DEFAULT 15 NOT NULL;

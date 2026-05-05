@@ -14,6 +14,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
     case light = "light"
     case dark = "dark"
     case sepia = "sepia"
+    case night = "night"
 
     public var id: String { rawValue }
 
@@ -22,6 +23,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return "Light"
         case .dark: return "Dark"
         case .sepia: return "Sepia"
+        case .night: return "Night"
         }
     }
 
@@ -30,6 +32,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return "sun.max"
         case .dark: return "moon"
         case .sepia: return "book"
+        case .night: return "moon.stars.fill"
         }
     }
 
@@ -38,6 +41,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return UIColor.white
         case .dark: return UIColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 1.0) // #1C1C1E
         case .sepia: return UIColor(red: 0.957, green: 0.925, blue: 0.91, alpha: 1.0) // #faf4e8
+        case .night: return UIColor(red: 0.04, green: 0.04, blue: 0.04, alpha: 1.0) // #0A0A0A — true black, OLED-friendly
         }
     }
 
@@ -46,6 +50,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return UIColor(red: 0.071, green: 0.071, blue: 0.071, alpha: 1.0) // #121212
         case .dark: return UIColor(red: 0.996, green: 0.996, blue: 0.996, alpha: 1.0) // #FEFEFE
         case .sepia: return UIColor(red: 0.071, green: 0.071, blue: 0.071, alpha: 1.0) // #121212
+        case .night: return UIColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1.0) // #D9D9D9 — softer than full white on OLED
         }
     }
 
@@ -58,6 +63,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return .gray.opacity(0.3)
         case .dark: return .gray.opacity(0.5)
         case .sepia: return .brown.opacity(0.3)
+        case .night: return .gray.opacity(0.6)
         }
     }
 
@@ -74,7 +80,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
     /// SwiftUI ColorScheme for sheets and controls
     public var colorScheme: ColorScheme {
         switch self {
-        case .dark: return .dark
+        case .dark, .night: return .dark
         case .light, .sepia: return .light
         }
     }
@@ -90,6 +96,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return UIColor.systemFill
         case .dark: return UIColor(white: 0.2, alpha: 1.0)
         case .sepia: return UIColor(red: 0.92, green: 0.89, blue: 0.85, alpha: 1.0)
+        case .night: return UIColor(white: 0.08, alpha: 1.0)
         }
     }
 
@@ -99,6 +106,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return UIColor.black.withAlphaComponent(0.15)
         case .dark: return UIColor.white.withAlphaComponent(0.3)
         case .sepia: return UIColor.brown.withAlphaComponent(0.25)
+        case .night: return UIColor.white.withAlphaComponent(0.18)
         }
     }
 
@@ -108,6 +116,7 @@ public enum ReaderTheme: String, CaseIterable, Identifiable, Hashable {
         case .light: return UIColor.systemGray5
         case .dark: return UIColor(white: 0.18, alpha: 1.0)
         case .sepia: return UIColor(red: 0.91, green: 0.88, blue: 0.83, alpha: 1.0)
+        case .night: return UIColor(white: 0.1, alpha: 1.0)
         }
     }
 

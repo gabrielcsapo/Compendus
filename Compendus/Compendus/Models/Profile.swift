@@ -14,6 +14,9 @@ struct Profile: Codable, Identifiable, Hashable {
     let avatarUrl: String?
     let hasPin: Bool
     let isAdmin: Bool
+    /// User-set daily reading goal in minutes. Drives the goal ring + celebrations.
+    /// Optional in the JSON for backwards-compatibility with older server builds.
+    let dailyGoalMinutes: Int?
     let createdAt: String?
 
     /// Whether the avatar is an uploaded image (vs emoji or nil)
