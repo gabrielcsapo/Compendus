@@ -22,6 +22,8 @@ struct CircularScrubberView: View {
     let coverImage: UIImage?
     /// Format identifier for placeholder icon.
     let bookFormat: String
+    /// Chapters for tick marks + snap + live tooltip resolution (P2.6).
+    var chapters: [Chapter] = []
 
     @Environment(ThemeManager.self) private var themeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -30,11 +32,17 @@ struct CircularScrubberView: View {
     private let ringLineWidth: CGFloat = 8
     /// Degrees of dead zone gap centred at the top (12 o'clock).
     private let deadZoneDegrees: Double = 20
+    /// Snap window — drag thumb within this distance of a chapter boundary
+    /// to snap onto it.
+    private let snapWindowSeconds: Double = 30
 
     // Drag state
     @GestureState private var isDragging = false
     @State private var dragProgress: Double? = nil   // non-nil while dragging
     @State private var tooltipAngle: Double = 0       // radians, for tooltip position
+    /// The chapter index we last snapped to during this drag — used to
+    /// suppress repeat haptics while the thumb hovers over the same boundary.
+    @State private var lastSnappedChapterIdx: Int? = nil
 
     private var displayProgress: Double {
         dragProgress ?? (duration > 0 ? currentTime / duration : 0)
@@ -67,6 +75,23 @@ struct CircularScrubberView: View {
                         style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round)
                     )
                     .rotationEffect(.degrees(90))
+
+                // Chapter tick marks (P2.6) — small notches on the track at
+                // each chapter boundary. Brighten while dragging so users
+                // can see what they're snapping to.
+                if !chapters.isEmpty && duration > 0 {
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { _, chapter in
+                        let progress = min(max(chapter.startTime / duration, 0), 1)
+                        if progress > 0.001 { // skip the very-start (covered by dead zone)
+                            chapterTick(
+                                progress: progress,
+                                center: center,
+                                radius: radius,
+                                emphasized: isDragging
+                            )
+                        }
+                    }
+                }
 
                 // Progress arc
                 Circle()
@@ -104,11 +129,11 @@ struct CircularScrubberView: View {
                                     point: value.location,
                                     center: center
                                 )
-                                if let progress = progressFromAngle(angle) {
-                                    dragProgress = progress
+                                if let rawProgress = progressFromAngle(angle) {
+                                    let snapped = applySnap(to: rawProgress)
+                                    dragProgress = snapped
                                     tooltipAngle = angle
-                                    onSeek(progress * duration)
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    onSeek(snapped * duration)
                                 }
                             }
                             .onEnded { value in
@@ -116,10 +141,12 @@ struct CircularScrubberView: View {
                                     point: value.location,
                                     center: center
                                 )
-                                if let progress = progressFromAngle(angle) {
-                                    onSeek(progress * duration)
+                                if let rawProgress = progressFromAngle(angle) {
+                                    let snapped = applySnap(to: rawProgress)
+                                    onSeek(snapped * duration)
                                 }
                                 dragProgress = nil
+                                lastSnappedChapterIdx = nil
                             }
                     )
             }
@@ -174,24 +201,103 @@ struct CircularScrubberView: View {
     @ViewBuilder
     private func tooltipView(progress: Double, center: CGPoint, radius: CGFloat) -> some View {
         let time = progress * duration
-        let label = formatTime(time)
+        let timeLabel = formatTime(time)
+        let remaining = max(0, duration - time)
+        let chapter = chapterAtTime(time)
 
         // Position tooltip toward center, offset from thumb
         let angle = tooltipAngle
-        let tooltipRadius = radius * 0.55
+        let tooltipRadius = radius * 0.5
         let x = center.x + cos(angle) * tooltipRadius
         let y = center.y + sin(angle) * tooltipRadius
 
-        Text(label)
-            .font(.callout.monospacedDigit().weight(.semibold))
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
-            .position(x: x, y: y)
-            .transition(.opacity.combined(with: .scale(scale: 0.85)))
-            .animation(.spring(response: 0.15), value: isDragging)
-            .allowsHitTesting(false)
+        VStack(spacing: 2) {
+            if let chapterTitle = chapter?.title, !chapterTitle.isEmpty {
+                Text(chapterTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            Text("\(timeLabel) elapsed · \(formatTime(remaining)) left")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(maxWidth: radius * 1.4)
+        .position(x: x, y: y)
+        .transition(.opacity.combined(with: .scale(scale: 0.85)))
+        .animation(.spring(response: 0.15), value: isDragging)
+        .allowsHitTesting(false)
+    }
+
+    /// A small notch drawn perpendicular to the ring at the given progress.
+    /// Used for chapter boundaries (P2.6).
+    @ViewBuilder
+    private func chapterTick(progress: Double, center: CGPoint, radius: CGFloat, emphasized: Bool) -> some View {
+        let arcStart = startAngle.radians
+        let arcSpan = arcSpanDegrees * (.pi / 180)
+        let angle = arcStart + progress * arcSpan
+        // Inner / outer endpoints of the tick (a small radial line)
+        let inner = radius - ringLineWidth / 2 - 1
+        let outer = radius + ringLineWidth / 2 + 1
+        let p1 = CGPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner)
+        let p2 = CGPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer)
+
+        Path { path in
+            path.move(to: p1)
+            path.addLine(to: p2)
+        }
+        .stroke(
+            Color.primary.opacity(emphasized ? 0.6 : 0.3),
+            style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+        )
+        .animation(.easeInOut(duration: 0.15), value: emphasized)
+    }
+
+    /// Maps raw drag-progress to a snapped value when within
+    /// `snapWindowSeconds` of a chapter boundary. Emits a haptic on entry
+    /// to a snap window (debounced via `lastSnappedChapterIdx`).
+    private func applySnap(to rawProgress: Double) -> Double {
+        guard !chapters.isEmpty, duration > 0 else {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return rawProgress
+        }
+        let rawTime = rawProgress * duration
+        var bestIdx: Int? = nil
+        var bestDelta: Double = .infinity
+        for (idx, chapter) in chapters.enumerated() {
+            let delta = abs(chapter.startTime - rawTime)
+            if delta < snapWindowSeconds && delta < bestDelta {
+                bestDelta = delta
+                bestIdx = idx
+            }
+        }
+        if let idx = bestIdx {
+            if lastSnappedChapterIdx != idx {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                Task { @MainActor in lastSnappedChapterIdx = idx }
+            }
+            return min(max(chapters[idx].startTime / duration, 0), 1)
+        }
+        // Not snapping — soft scrub haptic, reset snap memory
+        if lastSnappedChapterIdx != nil {
+            Task { @MainActor in lastSnappedChapterIdx = nil }
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        return rawProgress
+    }
+
+    /// Resolve the chapter containing a given playback time (or nearest
+    /// preceding chapter). Returns nil if no chapters.
+    private func chapterAtTime(_ time: Double) -> Chapter? {
+        guard !chapters.isEmpty else { return nil }
+        var result: Chapter? = nil
+        for chapter in chapters {
+            if chapter.startTime <= time { result = chapter } else { break }
+        }
+        return result ?? chapters.first
     }
 
     // MARK: - Geometry helpers

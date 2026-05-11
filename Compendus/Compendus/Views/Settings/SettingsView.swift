@@ -29,6 +29,10 @@ struct SettingsView: View {
     @State private var showingSwitchProfileConfirmation = false
     @State private var showingStorageChart = false
 
+    // P2.2 — user-configurable audiobook skip intervals
+    @AppStorage("compendus.audiobook.skipBackward") private var skipBackwardSeconds: Double = 15
+    @AppStorage("compendus.audiobook.skipForward") private var skipForwardSeconds: Double = 30
+
     enum ConnectionStatus {
         case unknown, testing, connected, failed
     }
@@ -136,6 +140,24 @@ struct SettingsView: View {
                     Toggle("Haptic Feedback", isOn: $appSettings.hapticsEnabled)
                 } header: {
                     Text("Appearance")
+                }
+
+                // Audiobook section (P2.2 — configurable skip intervals)
+                Section {
+                    Picker("Skip backward", selection: $skipBackwardSeconds) {
+                        ForEach([5.0, 10.0, 15.0, 30.0, 45.0, 60.0], id: \.self) { v in
+                            Text("\(Int(v))s").tag(v)
+                        }
+                    }
+                    Picker("Skip forward", selection: $skipForwardSeconds) {
+                        ForEach([10.0, 15.0, 30.0, 45.0, 60.0, 90.0], id: \.self) { v in
+                            Text("\(Int(v))s").tag(v)
+                        }
+                    }
+                } header: {
+                    Text("Audiobook")
+                } footer: {
+                    Text("How far the transport buttons jump. Apple Books and Audible default to 15s back / 30s forward.")
                 }
 
                 // Background Processing section

@@ -22,8 +22,30 @@ struct AudiobookPlayerView: View {
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(StorageManager.self) private var storageManager
     @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(\.modelContext) private var modelContext
 
     @State private var showingChapters = false
+    /// Brief visual confirmation after the user taps the bookmark button —
+    /// flips the SF Symbol to `.fill` for ~1.2s before fading back.
+    @State private var justBookmarked = false
+
+    // P2.1 — fine-grained speed slider (long-press the speed button)
+    @State private var showingSpeedSlider = false
+    // P2.2 — user-configurable skip intervals (Settings → Audio)
+    @AppStorage("compendus.audiobook.skipForward") private var skipForwardSeconds: Double = 30
+    @AppStorage("compendus.audiobook.skipBackward") private var skipBackwardSeconds: Double = 15
+
+    /// Map skip seconds to the closest SF Symbol available (10/15/30/45/60/75/90).
+    private var skipForwardIcon: String { skipIcon(seconds: skipForwardSeconds, forward: true) }
+    private var skipBackwardIcon: String { skipIcon(seconds: skipBackwardSeconds, forward: false) }
+
+    private func skipIcon(seconds: Double, forward: Bool) -> String {
+        let buckets: [Int] = [5, 10, 15, 30, 45, 60, 75, 90]
+        let target = Int(seconds)
+        let closest = buckets.min(by: { abs($0 - target) < abs($1 - target) }) ?? (forward ? 30 : 15)
+        let prefix = forward ? "goforward" : "gobackward"
+        return "\(prefix).\(closest)"
+    }
     @State private var showLyrics = false
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
@@ -39,6 +61,14 @@ struct AudiobookPlayerView: View {
     @State private var sleepTimer: Timer?
     @State private var sleepTimerFireDate: Date?
     @State private var showSleepTimerMenu = false
+    // P2.7 — auto-detect chapters via silence scan when the book has none.
+    @State private var chapterDetectionService = ChapterDetectionService()
+    @State private var detectionToast: String?
+    @State private var detectionToastType: BannerToastType = .success
+    // P3.1 — next-in-series handoff. Card surfaces in the last 30s of a book
+    // when the next entry in the series is already downloaded.
+    @State private var nextInSeries: DownloadedBook?
+    @State private var nextInSeriesDismissed = false
 
     private var showTranscriptionPill: Bool {
         !transcriptionPillDismissed && (
@@ -177,10 +207,16 @@ struct AudiobookPlayerView: View {
                                 duration: player.duration,
                                 onSeek: { player.seek(to: $0) },
                                 coverImage: CoverImageDecoder.decode(bookId: book.id, data: book.coverData),
-                                bookFormat: book.format
+                                bookFormat: book.format,
+                                chapters: book.chapters ?? []
                             )
                             .frame(width: scrubberSize, height: scrubberSize)
                             .onTapGesture { showBookDetail = true }
+                            // P3.2 — long-press cover for quick moment bookmark.
+                            // Spotify / Audible-style affordance.
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                bookmarkCurrentMoment()
+                            }
 
                             // Elapsed / remaining time
                             HStack {
@@ -244,6 +280,15 @@ struct AudiobookPlayerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 // ── Controls zone (outside bloom) ────────────────────────────
+                // Next-in-series handoff card (P3.1) — fades in during the
+                // final 30s of playback when the next series entry is downloaded.
+                if showNextInSeriesCard, let next = nextInSeries {
+                    nextInSeriesCard(next: next)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 // Transcription pill
                 if showTranscriptionPill {
                     TranscriptionPill(
@@ -283,6 +328,8 @@ struct AudiobookPlayerView: View {
             if loadedTranscript == nil, let transcript = book.transcript {
                 loadedTranscript = transcript
             }
+            // P3.1 — find next downloaded audiobook in the same series.
+            loadNextInSeries()
         }
         .sheet(isPresented: $showingChapters) {
             ChaptersListView(
@@ -306,39 +353,210 @@ struct AudiobookPlayerView: View {
             .environment(storageManager)
             .environment(readerSettings)
         }
+        .sheet(isPresented: $showingSpeedSlider) {
+            SpeedSliderSheet(
+                rate: Binding(
+                    get: { Double(player.playbackRate) },
+                    set: { player.setPlaybackRate(Float($0)) }
+                )
+            )
+            .presentationDetents([.height(280)])
+        }
         .onChange(of: transcriptionService.partialTranscript?.segments.count) { _, _ in
             checkTranscriptBuffer()
         }
+        .bannerToast($detectionToast, type: detectionToastType)
     }
 
     // MARK: - Player Controls
 
+    // MARK: - Next-in-Series Card (P3.1)
+
+    private var showNextInSeriesCard: Bool {
+        guard nextInSeries != nil,
+              !nextInSeriesDismissed,
+              player.duration > 0 else { return false }
+        let remaining = player.duration - player.currentTime
+        return remaining > 0 && remaining < 30
+    }
+
+    @ViewBuilder
+    private func nextInSeriesCard(next: DownloadedBook) -> some View {
+        Button {
+            playNextInSeries(next)
+        } label: {
+            HStack(spacing: 12) {
+                if let uiImage = CoverImageDecoder.decode(bookId: next.id, data: next.coverData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 52, height: 78)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(width: 52, height: 78)
+                        .overlay {
+                            Image(systemName: "headphones")
+                                .foregroundStyle(.secondary)
+                        }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("UP NEXT IN SERIES")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .tracking(0.5)
+                    Text(next.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let narrator = next.narrator, !narrator.isEmpty {
+                        Text(narrator)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(next.authorsDisplay)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.tint)
+            }
+            .padding(.vertical, 10)
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+            }
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    withAnimation { nextInSeriesDismissed = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                .offset(x: 8, y: -8)
+                .accessibilityLabel("Dismiss")
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func loadNextInSeries() {
+        guard let series = book.series, !series.isEmpty,
+              let currentNumber = book.seriesNumber else {
+            nextInSeries = nil
+            return
+        }
+        let currentId = book.id
+        let descriptor = FetchDescriptor<DownloadedBook>(
+            predicate: #Predicate { $0.series == series }
+        )
+        guard let books = try? modelContext.fetch(descriptor) else {
+            nextInSeries = nil
+            return
+        }
+        nextInSeries = books
+            .filter { other in
+                guard other.id != currentId,
+                      other.isAudiobook,
+                      let num = other.seriesNumber else { return false }
+                return num > currentNumber
+            }
+            .sorted { ($0.seriesNumber ?? .infinity) < ($1.seriesNumber ?? .infinity) }
+            .first
+    }
+
+    private func playNextInSeries(_ next: DownloadedBook) {
+        HapticFeedback.success()
+        Task {
+            await player.loadBook(next)
+            player.play()
+        }
+    }
+
+    @ViewBuilder
+    private var chaptersButton: some View {
+        let hasChapters = !(book.chapters?.isEmpty ?? true)
+        if chapterDetectionService.isDetecting {
+            ZStack {
+                Circle()
+                    .stroke(Color.primary.opacity(0.15), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: max(0.02, chapterDetectionService.progress))
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.2), value: chapterDetectionService.progress)
+            }
+            .frame(width: 22, height: 22)
+            .frame(width: 44, height: 44)
+            .accessibilityLabel("Detecting chapters")
+        } else if hasChapters {
+            Button { showingChapters = true } label: {
+                Image(systemName: "list.bullet")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Chapters")
+        } else {
+            Button { detectChapters() } label: {
+                Image(systemName: "sparkles")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Detect chapters automatically")
+        }
+    }
+
     private var playerControls: some View {
         VStack(spacing: 0) {
-            // Single 5-button transport row
+            // 6-button transport row (chapters, bookmark, back, play, fwd, speed)
             HStack {
                 Spacer()
 
-                // Chapters
-                let hasChapters = !(book.chapters?.isEmpty ?? true)
-                Button { showingChapters = true } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.title3)
-                        .frame(width: 44, height: 44)
-                }
-                .disabled(!hasChapters)
-                .opacity(hasChapters ? 1.0 : 0.3)
-                .accessibilityLabel("Chapters")
+                // Chapters — falls back to a "Detect chapters" affordance when
+                // the book has no embedded chapter markers (P2.7).
+                chaptersButton
 
                 Spacer()
 
-                // Skip back 15s
+                // Moment bookmark (P1.1) — capture "this moment was important"
+                Button {
+                    bookmarkCurrentMoment()
+                } label: {
+                    Image(systemName: justBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.title3)
+                        .foregroundStyle(justBookmarked ? Color.accentColor : Color.primary)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Bookmark this moment")
+
+                Spacer()
+
+                // Skip back — configurable interval
                 Button { player.skipBackward() } label: {
-                    Image(systemName: "gobackward.15")
+                    Image(systemName: skipBackwardIcon)
                         .font(.title2)
                         .frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("Skip backward 15 seconds")
+                .accessibilityLabel("Skip backward \(Int(skipBackwardSeconds)) seconds")
 
                 Spacer()
 
@@ -354,17 +572,17 @@ struct AudiobookPlayerView: View {
 
                 Spacer()
 
-                // Skip forward 30s
+                // Skip forward — configurable interval
                 Button { player.skipForward() } label: {
-                    Image(systemName: "goforward.30")
+                    Image(systemName: skipForwardIcon)
                         .font(.title2)
                         .frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("Skip forward 30 seconds")
+                .accessibilityLabel("Skip forward \(Int(skipForwardSeconds)) seconds")
 
                 Spacer()
 
-                // Speed picker
+                // Speed picker — tap for presets, long-press for fine slider (P2.1)
                 Menu {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
                         Button {
@@ -378,11 +596,23 @@ struct AudiobookPlayerView: View {
                             }
                         }
                     }
+                    Divider()
+                    Button {
+                        showingSpeedSlider = true
+                    } label: {
+                        Label("Fine control…", systemImage: "slider.horizontal.3")
+                    }
                 } label: {
                     Text("\(player.playbackRate, specifier: "%.2g")x")
                         .font(.footnote.weight(.semibold))
                         .frame(width: 44, height: 44)
                 }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                        showingSpeedSlider = true
+                        HapticFeedback.lightImpact()
+                    }
+                )
                 .accessibilityLabel("Playback speed, currently \(player.playbackRate, specifier: "%.2g")x")
 
                 Spacer()
@@ -594,6 +824,117 @@ struct AudiobookPlayerView: View {
         )
         showLyrics = true
     }
+
+    // MARK: - Moment Bookmark (P1.1)
+
+    /// Capture the current playback timestamp as a `BookBookmark` so the user
+    /// can come back to "this exact moment". Surfaces in the Highlights tab
+    /// alongside ebook/comic bookmarks via the `format = "audiobook"` field.
+    private func bookmarkCurrentMoment() {
+        let timestamp = player.currentTime
+        let duration = player.duration > 0 ? player.duration : Double(book.duration ?? 0)
+        let progression = duration > 0 ? timestamp / duration : 0
+
+        let chapter = player.currentChapter
+        let chapterIndex: Int = {
+            guard let chapter, let chapters = book.chapters else { return 0 }
+            return chapters.firstIndex(where: { $0.id == chapter.id }) ?? 0
+        }()
+
+        // Format the title as "Chapter 3 · 12:34" for at-a-glance scanning.
+        let title: String = {
+            let timeStr = Self.shortFormatTime(timestamp)
+            if let chapterTitle = chapter?.title, !chapterTitle.isEmpty {
+                return "\(chapterTitle) · \(timeStr)"
+            }
+            return "Bookmark at \(timeStr)"
+        }()
+
+        let bookmark = BookBookmark(
+            bookId: book.id,
+            pageIndex: chapterIndex,
+            color: "#42a5f5",
+            format: "audiobook",
+            title: title,
+            progression: progression,
+            timestampSeconds: timestamp
+        )
+        bookmark.profileId = serverConfig.selectedProfileId ?? ""
+
+        modelContext.insert(bookmark)
+        do {
+            try modelContext.save()
+            HapticFeedback.success()
+            withAnimation(.snappy) { justBookmarked = true }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1200))
+                withAnimation(.easeOut(duration: 0.25)) { justBookmarked = false }
+            }
+        } catch {
+            HapticFeedback.error()
+        }
+    }
+
+    /// Scan the audiobook file for silence gaps and use them as chapter
+    /// boundaries. Only runs when the book has no embedded chapters.
+    /// Saves results to `book.chaptersData` and refreshes the active player
+    /// so chapter-aware UI (ring scrubber ticks, "End of chapter" sleep
+    /// timer, etc.) lights up immediately.
+    private func detectChapters() {
+        guard let fileURL = book.fileURL else {
+            detectionToastType = .error
+            detectionToast = "Audiobook file not available"
+            return
+        }
+        let bookId = book.id
+        Task {
+            do {
+                let chapters = try await chapterDetectionService.detect(fileURL: fileURL)
+                if chapters.count < 2 {
+                    await MainActor.run {
+                        detectionToastType = .error
+                        detectionToast = "No clear chapter breaks found"
+                    }
+                    return
+                }
+                let encoded = try JSONEncoder().encode(chapters)
+                await MainActor.run {
+                    book.chaptersData = encoded
+                    do {
+                        try modelContext.save()
+                        if player.currentBook?.id == bookId {
+                            player.updateChapters(chapters)
+                        }
+                        HapticFeedback.success()
+                        detectionToastType = .success
+                        detectionToast = "\(chapters.count) chapters detected"
+                    } catch {
+                        detectionToastType = .error
+                        detectionToast = "Couldn't save chapters"
+                    }
+                }
+            } catch is CancellationError {
+                // User cancelled — no toast.
+            } catch {
+                await MainActor.run {
+                    detectionToastType = .error
+                    detectionToast = "Detection failed"
+                }
+            }
+        }
+    }
+
+    /// "M:SS" or "H:MM:SS" depending on length.
+    private static func shortFormatTime(_ seconds: Double) -> String {
+        let total = Int(seconds)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
 }
 
 // MARK: - Chapters List
@@ -712,4 +1053,51 @@ struct AirPlayButton: UIViewRepresentable {
     }
     .environment(AudiobookPlayer())
     .modelContainer(for: DownloadedBook.self, inMemory: true)
+}
+
+// MARK: - Speed Slider Sheet (P2.1)
+
+/// Fine-grained playback speed slider — accessed via long-press on the
+/// transport row's speed button, or via the "Fine control…" Menu item.
+/// 0.05 increments from 0.5x to 3.0x.
+private struct SpeedSliderSheet: View {
+    @Binding var rate: Double
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text(String(format: "%.2fx", rate))
+                    .font(.system(size: 56, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .padding(.top, 16)
+
+                Slider(value: $rate, in: 0.5...3.0, step: 0.05) {
+                    Text("Speed")
+                }
+                .accessibilityLabel("Playback speed")
+                .padding(.horizontal)
+
+                HStack(spacing: 8) {
+                    ForEach([0.85, 1.0, 1.15, 1.3], id: \.self) { preset in
+                        Button(String(format: "%.2gx", preset)) {
+                            rate = preset
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Playback Speed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
 }

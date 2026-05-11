@@ -24,7 +24,7 @@ struct HeroContinueReadingCard: View {
 
                 // Info
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(item.isDownloaded ? "CONTINUE READING" : "NEEDS DOWNLOAD")
+                    Text(eyebrowLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .kerning(0.5)
@@ -109,5 +109,12 @@ struct HeroContinueReadingCard: View {
         case .downloaded(let book): return book.authorsDisplay
         case .remote(let book): return book.authorsDisplay
         }
+    }
+
+    /// Eyebrow above the title. Verb-correct for audiobooks so the label doesn't
+    /// say "CONTINUE READING" above a "Continue Listening" CTA.
+    private var eyebrowLabel: String {
+        if !item.isDownloaded { return "NEEDS DOWNLOAD" }
+        return item.isAudiobook ? "CONTINUE LISTENING" : "CONTINUE READING"
     }
 }

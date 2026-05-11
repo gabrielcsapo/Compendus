@@ -69,14 +69,18 @@ struct UnifiedReaderView: View {
     @State private var editingHighlight: BookHighlight?
     @State private var tappedHighlight: BookHighlight?
 
-    // PDF-specific
-    #if !targetEnvironment(macCatalyst)
-    @State private var brightness: Double = Double(UIScreen.main.brightness)
-    @State private var originalBrightness: Double = Double(UIScreen.main.brightness)
-    #else
-    @State private var brightness: Double = 1.0
-    @State private var originalBrightness: Double = 1.0
-    #endif
+    // Brightness/warmth are now in ReaderSettings (applied as overlays);
+    // no longer touch UIScreen.main.brightness.
+
+    // P1.3 — edge-tap zones (EPUB only). Settable so users can opt out.
+    @AppStorage("compendus.reader.tapZonesEnabled") private var tapZonesEnabled = true
+    // P1.3 — one-shot coach mark on first launch after the edge taps ship.
+    @AppStorage("compendus.reader.coachMarkSeen") private var coachMarkSeen = false
+    @State private var showCoachMark = false
+
+    // P2.4 — "Back to where you were" pill after a non-linear jump.
+    @State private var jumpBackLocation: ReaderLocation? = nil
+    @State private var jumpBackLabel: String = ""
 
     // Read-along / TTS pill
     @State private var matchingAudiobook: DownloadedBook?
@@ -165,9 +169,6 @@ struct UnifiedReaderView: View {
                 readerModeActive = false
                 readAlongService.deactivate()
                 if let nativeEPUB = engine as? NativeEPUBEngine { nativeEPUB.cleanup() }
-                #if !targetEnvironment(macCatalyst)
-                if engine?.isPDF == true { UIScreen.main.brightness = CGFloat(originalBrightness) }
-                #endif
             }
         #if targetEnvironment(macCatalyst)
             .focusable()
@@ -216,6 +217,7 @@ struct UnifiedReaderView: View {
                         items: tocItems,
                         currentLocation: engine?.currentLocation,
                         onSelect: { item in
+                            armJumpBack(label: "Return to your spot")
                             Task { await engine?.go(to: item.location) }
                             showingTOC = false
                         }
@@ -566,6 +568,22 @@ struct UnifiedReaderView: View {
                     .opacity(showingOverlay || readerModeActive ? 0 : 1)
                     .allowsHitTesting(!showingOverlay && !readAlongService.isActive && !readerModeActive)
 
+                // Edge-tap zones (P1.3) — for EPUB only. Comic + PDF engines
+                // have their own gesture handling. Left/right thirds advance
+                // pages; center third toggles the overlay (existing behavior).
+                if tapZonesEnabled
+                    && !engine.isComic
+                    && !engine.isPDF
+                    && !showingOverlay
+                    && !readAlongService.isActive
+                    && !readerModeActive {
+                    EPUBEdgeTapZones(
+                        onPrevious: { Task { await engine.goBackward() } },
+                        onNext: { Task { await engine.goForward() } },
+                        onCenterTap: { toggleOverlay() }
+                    )
+                }
+
                 // Corner-tap bookmark (Kindle convention) — invisible top-right
                 // hot zone toggles a bookmark on the current page. Active state
                 // shows a small dog-ear glyph in the accent color.
@@ -709,6 +727,34 @@ struct UnifiedReaderView: View {
                     )
                 }
 
+                // Layer 4a: Cross-book audiobook mini-player (top)
+                // When the user is reading visually (this view) but an
+                // audiobook is playing in the background for a DIFFERENT book,
+                // surface a small pill at the top so they can scrub/pause
+                // without backing out to the Home tab.
+                // Hidden when the reader overlay is showing — the toolbar's
+                // own buttons take precedence and we don't want the mini
+                // player to overlap the title/page indicator. Reappears the
+                // moment the overlay auto-hides.
+                if audiobookPlayer.hasActiveSession
+                    && !audiobookPlayer.isFullPlayerPresented
+                    && audiobookPlayer.currentBook?.id != book.id
+                    && !showingOverlay {
+                    VStack {
+                        MiniPlayerView()
+                            .padding(.horizontal, 12)
+                            .padding(.top, 8)
+                            .onTapGesture {
+                                audiobookPlayer.isFullPlayerPresented = true
+                            }
+                        Spacer()
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85),
+                               value: showingOverlay)
+                    .zIndex(2)
+                }
+
                 // Layer 4: Read-along / TTS pill (bottom)
                 if (showReadAlongPill && !readAlongPillDismissed) || readAlongService.isActive {
                     VStack {
@@ -754,6 +800,68 @@ struct UnifiedReaderView: View {
                         }
                     }
                     .transition(.opacity)
+                }
+
+                // Layer 6: Brightness + warmth overlays (rendered last so they
+                // sit on top of everything else). Both are in-app overlays —
+                // they don't touch system brightness. Hit-testing disabled so
+                // they don't intercept reader gestures.
+                if readerSettings.brightness < 1.0 {
+                    Color.black
+                        .opacity(1.0 - readerSettings.brightness)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+                if readerSettings.warmth > 0 {
+                    Color(red: 1.0, green: 0.55, blue: 0.1)
+                        .opacity(readerSettings.warmth * 0.28)
+                        .blendMode(.multiply)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+
+                // Layer 7: First-launch coach mark (P1.3). One-shot dimmed
+                // overlay teaching the left/center/right tap zones. Persisted
+                // in @AppStorage so it only shows once across the app's life.
+                if showCoachMark && !engine.isComic && !engine.isPDF {
+                    ReaderTapZonesCoachMark {
+                        coachMarkSeen = true
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showCoachMark = false
+                        }
+                    }
+                    .transition(.opacity)
+                    .zIndex(100)
+                }
+
+                // Layer 8: "Back to where you were" pill (P2.4). Auto-hides
+                // after 5 seconds; tap to restore.
+                if let label = jumpBackLocation.map({ _ in jumpBackLabel }), !label.isEmpty {
+                    VStack {
+                        Spacer()
+                        JumpBackPill(label: label) {
+                            if let loc = jumpBackLocation {
+                                Task { await engine.go(to: loc) }
+                            }
+                            jumpBackLocation = nil
+                        }
+                        .padding(.bottom, showingOverlay ? 160 : 32)
+                        .padding(.horizontal, 16)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(50)
+                }
+            }
+            .onChange(of: engine.isReady) { _, isReady in
+                // Show the coach mark the first time any EPUB reader becomes
+                // ready. Delayed by 600ms so the user sees the actual page first.
+                if isReady && !coachMarkSeen && !engine.isComic && !engine.isPDF {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(600))
+                        withAnimation(.easeIn(duration: 0.25)) {
+                            showCoachMark = true
+                        }
+                    }
                 }
             }
             .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.85), value: showingOverlay)
@@ -1089,31 +1197,43 @@ struct UnifiedReaderView: View {
     @ViewBuilder
     private func readerBottomBar(engine: any ReaderEngine) -> some View {
         VStack(spacing: 8) {
-            // PDF-specific: brightness control (iOS only)
-            if engine.isPDF {
-                #if !targetEnvironment(macCatalyst)
-                HStack(spacing: 12) {
-                    Image(systemName: "sun.min")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-
-                    Slider(value: $brightness, in: 0...1)
-                        .onChange(of: brightness) { _, newValue in
-                            UIScreen.main.brightness = CGFloat(newValue)
-                        }
-
-                    Image(systemName: "sun.max")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-                #endif
-            }
+            // Brightness lives in the Aa settings sheet now (works for all
+            // formats, not just PDF, and no longer touches system brightness).
 
             // Page info label
             pageInfoLabel(engine: engine)
 
-            // Interactive page scrubber
-            pageScrubber(engine: engine)
+            // Interactive page scrubber — for comics on long books, flanked
+            // by ±1 page nudge buttons since the scrubber thumb is fiddly to
+            // hit precisely (e.g. 400+ page comics).
+            if engine.isComic && engine.totalPositions > 50 {
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await engine.goBackward() }
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(.regularMaterial))
+                    }
+                    .accessibilityLabel("Previous page")
+
+                    pageScrubber(engine: engine)
+                        .frame(maxWidth: .infinity)
+
+                    Button {
+                        Task { await engine.goForward() }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(.regularMaterial))
+                    }
+                    .accessibilityLabel("Next page")
+                }
+            } else {
+                pageScrubber(engine: engine)
+            }
 
             // Footer row: page range + optional thumbnail toggle
             HStack {
@@ -1205,7 +1325,10 @@ struct UnifiedReaderView: View {
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
 
-            if let chapterTitle, !chapterTitle.isEmpty {
+            // Chapter title row — meaningful for ebooks/PDFs, but for comics
+            // `currentLocation.title` just echoes "Page N" which we already show
+            // in the top bar and the row above. Suppress to avoid triplication.
+            if !engine.isComic, let chapterTitle, !chapterTitle.isEmpty {
                 Text(chapterTitle)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1213,7 +1336,40 @@ struct UnifiedReaderView: View {
                     .truncationMode(.middle)
                     .padding(.horizontal, 8)
             }
+
+            // Estimated reading time left (P2.5) — EPUB only. Uses a rough
+            // 250 WPM × ~300 words/page heuristic = ~1.2 min/page. Cheap,
+            // mostly accurate, and matches what users expect from Kindle.
+            if let label = readingTimeLeftLabel(engine: engine) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
+    }
+
+    /// "About 23 min left in book" — only shown for paginated EPUB content
+    /// where we have a stable page count. Comics/PDFs are skipped (visual
+    /// reading speed varies too much) and audiobooks have their own readout.
+    private func readingTimeLeftLabel(engine: any ReaderEngine) -> String? {
+        guard !engine.isComic, !engine.isPDF else { return nil }
+        guard let nativeEngine = engine as? NativeEPUBEngine else { return nil }
+        let totalPages = nativeEngine.totalPositions
+        let currentPage = nativeEngine.globalPageIndex + 1
+        let pagesLeft = totalPages - currentPage
+        guard pagesLeft > 1, totalPages > 1 else { return nil }
+        // ~1.2 minutes per page; cap precision so 47.999 → "48 min"
+        let minutes = Int(round(Double(pagesLeft) * 1.2))
+        if minutes < 1 { return nil }
+        if minutes < 60 {
+            return "About \(minutes) min left in book"
+        }
+        let hours = minutes / 60
+        let mins = minutes % 60
+        if mins == 0 {
+            return "About \(hours)h left in book"
+        }
+        return "About \(hours)h \(mins)m left in book"
     }
 
     // MARK: - Page Scrubber
@@ -1546,6 +1702,24 @@ struct UnifiedReaderView: View {
                 pendingLinkURL = url
                 pendingLinkIsExternal = isExternal
                 showingLinkConfirmation = true
+            }
+        }
+    }
+
+    // MARK: - Jump Back Pill (P2.4)
+
+    /// Capture the current location so the "Back to where you were" pill
+    /// can offer to restore it after a TOC / search / bookmark / highlight
+    /// jump. The pill auto-dismisses after 5 seconds.
+    private func armJumpBack(label: String) {
+        guard let location = engine?.currentLocation else { return }
+        jumpBackLocation = location
+        jumpBackLabel = label
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            withAnimation(.easeOut(duration: 0.25)) {
+                jumpBackLocation = nil
+                jumpBackLabel = ""
             }
         }
     }
@@ -2134,5 +2308,140 @@ struct EngineViewWrapper: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
         // Updates handled via engine protocol methods
+    }
+}
+
+// MARK: - Jump Back Pill (P2.4)
+
+/// Small floating pill that appears after a non-linear jump (TOC, search,
+/// bookmark, highlight). Tap to restore the previous position. Auto-hides
+/// after 5 seconds via the parent.
+private struct JumpBackPill: View {
+    let label: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.uturn.backward.circle.fill")
+                    .font(.callout)
+                Text(label)
+                    .font(.subheadline.weight(.medium))
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.separator, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Edge-Tap Zones (P1.3)
+
+/// Three invisible tap zones laid over the reading surface for EPUB:
+/// left-third → previous page, right-third → next page, center → toggle
+/// overlay. Kindle / Apple Books convention. Comic and PDF readers have
+/// their own gesture systems so this view is only mounted for EPUB.
+private struct EPUBEdgeTapZones: View {
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onCenterTap: () -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: geo.size.width / 3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onPrevious() }
+                Color.clear
+                    .frame(width: geo.size.width / 3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onCenterTap() }
+                Color.clear
+                    .frame(width: geo.size.width / 3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onNext() }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Tap-Zones Coach Mark (P1.3)
+
+/// One-shot teaching overlay shown the first time a user opens an EPUB
+/// reader after the edge-tap feature ships. Persistence is handled by the
+/// parent via `@AppStorage("compendus.reader.coachMarkSeen")`.
+private struct ReaderTapZonesCoachMark: View {
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+
+            HStack(spacing: 0) {
+                coachHint(
+                    icon: "chevron.left",
+                    title: "Tap left",
+                    subtitle: "Previous page"
+                )
+                Rectangle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 1)
+                coachHint(
+                    icon: "hand.tap",
+                    title: "Tap center",
+                    subtitle: "Show controls"
+                )
+                Rectangle()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 1)
+                coachHint(
+                    icon: "chevron.right",
+                    title: "Tap right",
+                    subtitle: "Next page"
+                )
+            }
+            .padding(.vertical, 80)
+
+            VStack {
+                Spacer()
+                Button {
+                    onDismiss()
+                } label: {
+                    Text("Got it")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(Color.white))
+                }
+                .padding(.bottom, 60)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func coachHint(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.white)
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }

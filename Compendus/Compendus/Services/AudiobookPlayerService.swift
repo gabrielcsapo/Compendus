@@ -163,13 +163,27 @@ class AudiobookPlayer: NSObject {
         updateNowPlayingTime()
     }
 
+    /// User-configurable forward skip (seconds). Persisted via @AppStorage in
+    /// SettingsView; reads UserDefaults directly here so service code stays
+    /// SwiftUI-free.
+    private var forwardSkipSeconds: Double {
+        let stored = UserDefaults.standard.double(forKey: "compendus.audiobook.skipForward")
+        return stored > 0 ? stored : 30
+    }
+
+    /// User-configurable backward skip (seconds).
+    private var backwardSkipSeconds: Double {
+        let stored = UserDefaults.standard.double(forKey: "compendus.audiobook.skipBackward")
+        return stored > 0 ? stored : 15
+    }
+
     func skipForward() {
-        let newTime = min(currentTime + 30, duration)
+        let newTime = min(currentTime + forwardSkipSeconds, duration)
         seek(to: newTime)
     }
 
     func skipBackward() {
-        let newTime = max(currentTime - 15, 0)
+        let newTime = max(currentTime - backwardSkipSeconds, 0)
         seek(to: newTime)
     }
 
@@ -179,6 +193,14 @@ class AudiobookPlayer: NSObject {
             player?.rate = rate
         }
         updateNowPlayingTime()
+    }
+
+    /// Swap the active chapter list without disturbing playback.
+    /// Used after silence-based detection populates chapters on a book that
+    /// originally had none.
+    func updateChapters(_ chapters: [Chapter]) {
+        self.chapters = chapters
+        updateCurrentChapter()
     }
 
     // MARK: - Progress Saving

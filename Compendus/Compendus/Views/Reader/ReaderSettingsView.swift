@@ -27,6 +27,7 @@ struct ReaderSettingsView: View {
         NavigationStack {
             Form {
                 themeSection
+                displaySection
 
                 if format == .epub || format == .comic {
                     layoutSection
@@ -98,6 +99,48 @@ struct ReaderSettingsView: View {
                 Spacer()
             }
             .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Display Section (brightness + warmth)
+    //
+    // Both are in-app overlays applied at the reader root — they do NOT touch
+    // system brightness. Matches Apple Books / Kindle's "warm light".
+
+    @ViewBuilder
+    private var displaySection: some View {
+        @Bindable var settings = readerSettings
+
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: "sun.min")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Slider(value: $settings.brightness, in: 0.3...1.0)
+                Image(systemName: "sun.max")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+            }
+            .accessibilityLabel("Brightness")
+
+            HStack(spacing: 12) {
+                Image(systemName: "moon")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Slider(value: $settings.warmth, in: 0.0...1.0)
+                Image(systemName: "flame")
+                    .font(.caption)
+                    .foregroundStyle(.orange.opacity(0.8))
+                    .frame(width: 18)
+            }
+            .accessibilityLabel("Warmth")
+        } header: {
+            Text("Display")
+        } footer: {
+            Text("Dim the page or add a warm amber tint for night reading.")
         }
     }
 

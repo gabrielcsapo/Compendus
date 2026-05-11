@@ -272,6 +272,23 @@ public class ReaderSettings {
         }
     }
 
+    /// In-app brightness dimmer (0...1). 1.0 = no dim, 0.0 = fully dim.
+    /// Applied as a black overlay on the reader — does NOT touch system brightness.
+    public var brightness: Double {
+        didSet {
+            UserDefaults.standard.set(brightness, forKey: "readerBrightness")
+        }
+    }
+
+    /// Warm-light amber tint overlay (0...1). 0 = no tint, 1 = strong amber.
+    /// Drives an orange overlay at low opacity over the reader — matches the
+    /// "warm light" / "night reading" feature on Kindle and Apple Books.
+    public var warmth: Double {
+        didSet {
+            UserDefaults.standard.set(warmth, forKey: "readerWarmth")
+        }
+    }
+
     public init() {
         self.theme = ReaderTheme(rawValue: UserDefaults.standard.string(forKey: "readerTheme") ?? "light") ?? .light
         self.fontFamily = ReaderFont(rawValue: UserDefaults.standard.string(forKey: "readerFontFamily") ?? "serif") ?? .serif
@@ -289,6 +306,8 @@ public class ReaderSettings {
 
         self.lineHeight = UserDefaults.standard.object(forKey: "readerLineHeight") as? Double ?? 1.4
         self.layout = ReaderLayout(rawValue: UserDefaults.standard.string(forKey: "readerLayout") ?? "auto") ?? .auto
+        self.brightness = UserDefaults.standard.object(forKey: "readerBrightness") as? Double ?? 1.0
+        self.warmth = UserDefaults.standard.object(forKey: "readerWarmth") as? Double ?? 0.0
     }
 
     /// Resolve the effective layout for a given viewport width.

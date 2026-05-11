@@ -15,14 +15,17 @@ import EPUBReader
 final class BookBookmark {
     @Attribute(.unique) var id: String
     var bookId: String
-    var pageIndex: Int              // Global page index (EPUB: globalPageIndex, PDF/comic: zero-based page)
+    var pageIndex: Int              // Global page index (EPUB: globalPageIndex, PDF/comic: zero-based page); for audiobooks = chapter index
     var color: String               // Hex color (e.g. "#ff6b6b")
     var note: String?               // Optional user note
-    var format: String              // "epub", "pdf", "comic"
+    var format: String              // "epub", "pdf", "comic", "audiobook"
     var title: String?              // Chapter or page label for display
     var progression: Double         // 0.0–1.0 total progression at bookmark point
     var createdAt: Date
     var profileId: String = ""        // Profile that created this bookmark (empty = legacy/unassigned)
+    /// For audiobook moments — playback position in seconds at the time the
+    /// bookmark was created. nil for visual formats.
+    var timestampSeconds: Double?
 
     init(
         id: String = UUID().uuidString,
@@ -33,7 +36,8 @@ final class BookBookmark {
         format: String,
         title: String? = nil,
         progression: Double = 0.0,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        timestampSeconds: Double? = nil
     ) {
         self.id = id
         self.bookId = bookId
@@ -44,6 +48,7 @@ final class BookBookmark {
         self.title = title
         self.progression = progression
         self.createdAt = createdAt
+        self.timestampSeconds = timestampSeconds
     }
 
     var uiColor: UIColor {

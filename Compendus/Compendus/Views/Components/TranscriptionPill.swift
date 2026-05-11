@@ -21,6 +21,7 @@ struct TranscriptionPill: View {
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
 
     @State private var showingOptionsSheet = false
+    @State private var showingFullConfirmation = false
 
     // MARK: - Computed
 
@@ -44,8 +45,6 @@ struct TranscriptionPill: View {
         guard transcriptionService.activeBookId == book.id else { return nil }
         return transcriptionService.partialTranscript
     }
-
-    private static let speedOptions: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
 
     var body: some View {
         Group {
@@ -208,7 +207,7 @@ struct TranscriptionPill: View {
 
                         Button {
                             showingOptionsSheet = false
-                            onStartFullTranscription()
+                            showingFullConfirmation = true
                         } label: {
                             Label {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -223,6 +222,9 @@ struct TranscriptionPill: View {
                         }
                     } header: {
                         Text("Transcription")
+                    } footer: {
+                        Text("Full Book transcription runs on-device and can take 20–60 minutes for a long audiobook, plus a few hundred MB of temporary storage. Live Transcribe is faster but only covers what you listen to.")
+                            .font(.caption2)
                     }
                 }
 
@@ -250,25 +252,9 @@ struct TranscriptionPill: View {
                     }
                 }
 
-                // Playback settings
-                Section {
-                    HStack {
-                        Label("Speed", systemImage: "gauge.with.dots.needle.67percent")
-                        Spacer()
-                        Picker("Speed", selection: Binding(
-                            get: { player.playbackRate },
-                            set: { player.setPlaybackRate($0) }
-                        )) {
-                            ForEach(Self.speedOptions, id: \.self) { speed in
-                                Text(speed == 1.0 ? "1x" : "\(String(format: "%.2g", speed))x")
-                                    .tag(Float(speed))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                } header: {
-                    Text("Playback")
-                }
+                // Note: playback speed lives on the transport row of the
+                // player itself — it's not a transcription concern. Keeping
+                // this sheet focused on its actual purpose.
             }
             .navigationTitle("Transcription Options")
             .navigationBarTitleDisplayMode(.inline)
@@ -281,5 +267,23 @@ struct TranscriptionPill: View {
             }
         }
         .presentationDetents([.medium])
+        .confirmationDialog(
+            "Transcribe entire audiobook?",
+            isPresented: $showingFullConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Start Transcription") {
+                onStartFullTranscription()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let hours = (book.duration ?? 0) / 3600
+            let estMinutes = max(15, Int(Double(book.duration ?? 0) / 60.0 * 0.10))
+            if hours > 0 {
+                Text("\(hours)h audiobook · estimated ~\(estMinutes) minutes to transcribe, ~\(max(50, hours * 30)) MB of temporary storage. Runs on-device.")
+            } else {
+                Text("Estimated ~\(estMinutes) minutes to transcribe. Runs on-device.")
+            }
+        }
     }
 }

@@ -52,115 +52,167 @@ struct BookDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    heroCoverSection
-
-                    titleBlock
-                        .padding(.top, 16)
-
-                    metadataRow
-                        .padding(.top, 12)
-
-                    progressSection
-                        .padding(.top, 12)
-
-                    VStack(spacing: 12) {
-                        actionButton
-                        epubReadingOption
-                    }
-                    .padding(.top, 20)
-                    .padding(.horizontal, 20)
-
-                    if let description = displayBook.description, !description.isEmpty {
-                        descriptionSection(description)
-                            .padding(.top, 24)
-                            .padding(.horizontal, 20)
-                    }
-
-                    detailsCardSection
-                        .padding(.top, 24)
-                        .padding(.horizontal, 20)
-
-                    if displayBook.isAudiobook, let chapters = displayBook.chapters, !chapters.isEmpty {
-                        chaptersSection(chapters)
-                            .padding(.top, 24)
-                            .padding(.horizontal, 20)
-                    }
-
-                    relatedBooksContent
-                        .padding(.top, 24)
-                        .padding(.horizontal, 20)
-                }
-                .padding(.bottom, 40)
-            }
-            // Pin the scroll position to the top when content height changes.
-            // Without this, async-loading sections (related books, progress
-            // section appearing after sync) cause SwiftUI to shift the
-            // ScrollView's offset, cropping the hero cover.
-            .defaultScrollAnchor(.top)
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showingEditSheet = true
-                    } label: {
-                        Image(systemName: "pencil")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .sheet(isPresented: $showingEditSheet) {
-                EditBookView(book: displayBook) { updatedBook in
-                    editedBook = updatedBook
-                }
-            }
-            .task {
+        // NOTE: Intentionally NOT wrapped in NavigationStack.
+        //
+        // Root cause of the long-standing auto-scroll bug:
+        //   Wrapping ScrollView in NavigationStack with
+        //   `.toolbarBackground(.hidden, for: .navigationBar)` triggers an iOS
+        //   18+ regression where the ScrollView's top safe-area inset is
+        //   recomputed AFTER first layout. When the inset settles (~1 second
+        //   in, around the same time async content lands), SwiftUI snaps the
+        //   scroll offset to honour the new inset, shifting the hero ~150pt
+        //   down. `.scrollPosition`, `ScrollViewReader.scrollTo`, and
+        //   `.defaultScrollAnchor` all lose this race because the inset change
+        //   re-anchors *after* their callbacks fire. The only reliable fix is
+        //   to not introduce a navigation bar / toolbar at all — this view is
+        //   always presented as a sheet, so we render the Edit / Done buttons
+        //   manually as an inline header above the ScrollView.
+        ZStack(alignment: .top) {
+            ScrollView { mainContent }
+            inlineHeader
+        }
+        .sheet(isPresented: $showingEditSheet) { editSheet }
+        .task {
+            checkIfDownloaded()
+            await loadRelatedBooks()
+        }
+        .onChange(of: downloadCompletion) { _, completed in
+            if completed == true {
                 checkIfDownloaded()
-                await loadRelatedBooks()
+                isDownloading = false
             }
-            .onChange(of: downloadManager.activeDownloads[book.id]?.state.isCompleted) { _, completed in
-                if completed == true {
-                    checkIfDownloaded()
-                    isDownloading = false
-                }
+        }
+        .alert("Download Failed", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(downloadError ?? "An error occurred while downloading the book.")
+        }
+        .fullScreenCover(item: $bookToRead) { book in
+            readerCover(for: book)
+        }
+        .onChange(of: bookToRead) { _, newValue in
+            if newValue == nil { readAsEpub = false }
+        }
+    }
+
+    @ViewBuilder
+    private var inlineHeader: some View {
+        HStack {
+            Button { showingEditSheet = true } label: {
+                Image(systemName: "pencil")
+                    .font(.body)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
             }
-            .alert("Download Failed", isPresented: $showingError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text(downloadError ?? "An error occurred while downloading the book.")
-            }
-            .fullScreenCover(item: $bookToRead) { book in
-                ReaderContainerView(book: book, preferEpub: readAsEpub)
-                    .environment(readerSettings)
-                    .environment(highlightColorManager)
-                    .environment(readAlongService)
-                    .environment(audiobookPlayer)
-                    .environment(transcriptionService)
-                    .environment(apiService)
-                    .environment(storageManager)
-                    .environment(pocketTTSModelManager)
-                    .environment(ttsAudioCache)
-                    .environment(backgroundProcessingManager)
-                    .environment(comicExtractor)
-                    .modelContext(modelContext)
-            }
-            .onChange(of: bookToRead) { _, newValue in
-                if newValue == nil {
-                    readAsEpub = false
-                }
-            }
+            Spacer()
+            Button("Done") { dismiss() }
+                .fontWeight(.semibold)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+    }
+
+    @ViewBuilder
+    private var editSheet: some View {
+        EditBookView(book: displayBook) { updatedBook in
+            editedBook = updatedBook
+        }
+    }
+
+    @ViewBuilder
+    private func readerCover(for book: DownloadedBook) -> some View {
+        ReaderContainerView(book: book, preferEpub: readAsEpub)
+            .environment(readerSettings)
+            .environment(highlightColorManager)
+            .environment(readAlongService)
+            .environment(audiobookPlayer)
+            .environment(transcriptionService)
+            .environment(apiService)
+            .environment(storageManager)
+            .environment(pocketTTSModelManager)
+            .environment(ttsAudioCache)
+            .environment(backgroundProcessingManager)
+            .environment(comicExtractor)
+            .modelContext(modelContext)
+    }
+
+    /// Extracted from `onChange` so the type-checker doesn't choke on the
+    /// chained optional keypath inside the body's modifier chain.
+    private var downloadCompletion: Bool? {
+        downloadManager.activeDownloads[book.id]?.state.isCompleted
+    }
+
+    /// Extracted so the body's type-check stays fast. SwiftUI's compiler
+    /// chokes on long VStacks inside ScrollView with conditional sections.
+    @ViewBuilder
+    private var mainContent: some View {
+        VStack(spacing: 0) {
+            heroCoverSection
+
+            titleBlock
+                .padding(.top, 16)
+
+            metadataRow
+                .padding(.top, 12)
+
+            progressSection
+                .padding(.top, 12)
+
+            actionButtonGroup
+                .padding(.top, 20)
+                .padding(.horizontal, 20)
+
+            descriptionBlock
+                .padding(.horizontal, 20)
+
+            detailsCardSection
+                .padding(.top, 24)
+                .padding(.horizontal, 20)
+
+            audiobookChaptersBlock
+                .padding(.horizontal, 20)
+
+            relatedBooksContent
+                .padding(.top, 24)
+                .padding(.horizontal, 20)
+        }
+        .padding(.bottom, 40)
+    }
+
+    @ViewBuilder
+    private var actionButtonGroup: some View {
+        VStack(spacing: 12) {
+            actionButton
+            epubReadingOption
+        }
+    }
+
+    @ViewBuilder
+    private var descriptionBlock: some View {
+        if let description = displayBook.description, !description.isEmpty {
+            descriptionSection(description)
+                .padding(.top, 24)
+        }
+    }
+
+    @ViewBuilder
+    private var audiobookChaptersBlock: some View {
+        if displayBook.isAudiobook, let chapters = displayBook.chapters, !chapters.isEmpty {
+            chaptersSection(chapters)
+                .padding(.top, 24)
         }
     }
 
     // MARK: - Hero Cover
+
+    /// Foreground cover is 200pt × 300pt (2:3 aspect ratio), plus 20pt
+    /// vertical padding above and below = 340pt total. Pinning the
+    /// background to this height stops the async-loaded blurred cover from
+    /// resizing the parent and triggering an auto-scroll.
+    private static let heroHeight: CGFloat = 340
 
     @ViewBuilder
     private var heroCoverSection: some View {
@@ -172,10 +224,16 @@ struct BookDetailView: View {
                 .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+        .frame(height: Self.heroHeight)
         .background {
+            // NOTE: Do NOT add `.ignoresSafeArea(edges: .top)` here. Inside a
+            // ScrollView, that modifier inflates the ScrollView's content size
+            // into the safe area and causes SwiftUI to re-anchor the scroll
+            // offset after first layout (auto-scroll bug). The background is
+            // pinned to the fixed hero height so it can't grow async either.
             heroCoverBackground
-                .ignoresSafeArea(edges: .top)
+                .frame(height: Self.heroHeight)
+                .clipped()
         }
     }
 
@@ -183,6 +241,8 @@ struct BookDetailView: View {
     private var heroCoverBackground: some View {
         if book.coverUrl != nil {
             CachedCoverImage(bookId: book.id, hasCover: true, format: book.format)
+                .aspectRatio(contentMode: .fill)
+                .frame(height: Self.heroHeight)
                 .blur(radius: 40)
                 .overlay(Color(.systemBackground).opacity(0.6))
                 .mask(
