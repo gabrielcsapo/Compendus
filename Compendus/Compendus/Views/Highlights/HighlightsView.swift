@@ -11,14 +11,16 @@ import SwiftData
 import EPUBReader
 
 struct HighlightsView: View {
-    @Query(sort: \BookHighlight.createdAt, order: .reverse) private var allHighlightsQuery: [BookHighlight]
+    @Query(filter: #Predicate<ReadingMark> { $0.kindRaw == "highlight" },
+           sort: \ReadingMark.createdAt, order: .reverse)
+    private var allHighlightsQuery: [ReadingMark]
     @Query private var allBooksQuery: [DownloadedBook]
 
     @Environment(ServerConfig.self) private var serverConfig
 
     @State private var searchText = ""
 
-    private var allHighlights: [BookHighlight] {
+    private var allHighlights: [ReadingMark] {
         let pid = serverConfig.selectedProfileId ?? ""
         return allHighlightsQuery.filter { $0.profileId == pid || $0.profileId.isEmpty }
     }
@@ -29,13 +31,13 @@ struct HighlightsView: View {
     }
 
     /// Cached grouped highlights to avoid recomputing on every render
-    private var groupedHighlights: [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {
+    private var groupedHighlights: [(book: DownloadedBook?, bookId: String, highlights: [ReadingMark])] {
         computeGroupedHighlights()
     }
 
-    private func computeGroupedHighlights() -> [(book: DownloadedBook?, bookId: String, highlights: [BookHighlight])] {
+    private func computeGroupedHighlights() -> [(book: DownloadedBook?, bookId: String, highlights: [ReadingMark])] {
         let filtered = searchText.isEmpty ? allHighlights : allHighlights.filter { highlight in
-            highlight.text.localizedCaseInsensitiveContains(searchText) ||
+            (highlight.text?.localizedCaseInsensitiveContains(searchText) ?? false) ||
             (highlight.note?.localizedCaseInsensitiveContains(searchText) ?? false) ||
             (highlight.chapterTitle?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
@@ -71,7 +73,7 @@ struct HighlightsView: View {
                     List {
                         ForEach(groupedHighlights, id: \.bookId) { group in
                             NavigationLink(value: group.bookId) {
-                                BookHighlightRow(book: group.book, highlights: group.highlights)
+                                ReadingMarkRow(book: group.book, highlights: group.highlights)
                             }
                         }
                     }
@@ -82,7 +84,7 @@ struct HighlightsView: View {
             .searchable(text: $searchText, prompt: "Search highlights")
             .navigationDestination(for: String.self) { bookId in
                 let highlights = groupedHighlights.first { $0.bookId == bookId }
-                BookHighlightsDetailView(
+                ReadingMarksDetailView(
                     book: highlights?.book,
                     bookId: bookId,
                     highlights: highlights?.highlights ?? []
@@ -94,9 +96,9 @@ struct HighlightsView: View {
 
 // MARK: - Book Highlight Row (top-level list item)
 
-private struct BookHighlightRow: View {
+private struct ReadingMarkRow: View {
     let book: DownloadedBook?
-    let highlights: [BookHighlight]
+    let highlights: [ReadingMark]
 
     private var mostRecentDate: Date? {
         highlights.first?.createdAt
@@ -166,10 +168,10 @@ private struct BookHighlightRow: View {
 
 // MARK: - Book Highlights Detail View
 
-private struct BookHighlightsDetailView: View {
+private struct ReadingMarksDetailView: View {
     let book: DownloadedBook?
     let bookId: String
-    let highlights: [BookHighlight]
+    let highlights: [ReadingMark]
 
     @Environment(\.modelContext) private var modelContext
     @Environment(ReaderSettings.self) private var readerSettings
@@ -185,7 +187,7 @@ private struct BookHighlightsDetailView: View {
     @Environment(ComicExtractor.self) private var comicExtractor
     @State private var bookToOpen: DownloadedBook?
     @State private var highlightPosition: String?
-    @State private var editingHighlight: BookHighlight?
+    @State private var editingHighlight: ReadingMark?
     @State private var saveError: String?
 
     var body: some View {
@@ -272,7 +274,7 @@ private struct BookHighlightsDetailView: View {
 // MARK: - Highlight Row
 
 private struct HighlightRow: View {
-    let highlight: BookHighlight
+    let highlight: ReadingMark
 
     var body: some View {
         HStack(spacing: 12) {
@@ -283,7 +285,7 @@ private struct HighlightRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 // Highlighted text
-                Text("\"\(highlight.text)\"")
+                Text("\"\(highlight.text ?? "")\"")
                     .font(.subheadline)
                     .italic()
                     .lineLimit(3)
@@ -322,5 +324,5 @@ private struct HighlightRow: View {
 
 #Preview {
     HighlightsView()
-        .modelContainer(for: [DownloadedBook.self, BookHighlight.self], inMemory: true)
+        .modelContainer(for: [DownloadedBook.self, ReadingMark.self], inMemory: true)
 }

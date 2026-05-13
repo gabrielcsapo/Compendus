@@ -10,10 +10,10 @@ import SwiftUI
 import EPUBReader
 
 struct ReaderHighlightsListView: View {
-    let highlights: [BookHighlight]
-    let onSelect: (BookHighlight) -> Void
-    let onDelete: (BookHighlight) -> Void
-    var onEditNote: ((BookHighlight) -> Void)?
+    let highlights: [ReadingMark]
+    let onSelect: (ReadingMark) -> Void
+    let onDelete: (ReadingMark) -> Void
+    var onEditNote: ((ReadingMark) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ThemeManager.self) private var themeManager
@@ -40,7 +40,7 @@ struct ReaderHighlightsListView: View {
                                         .frame(width: 4)
 
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text("\"\(highlight.text)\"")
+                                        Text("\"\(highlight.text ?? "")\"")
                                             .font(.subheadline)
                                             .italic()
                                             .lineLimit(3)

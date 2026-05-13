@@ -117,7 +117,7 @@ struct HighlightNoteEditor: View {
 /// Simple sheet for editing the note on an existing highlight.
 /// Used by HighlightsView (app-wide) and UnifiedReaderView.
 struct EditNoteSheet: View {
-    let highlight: BookHighlight
+    let highlight: ReadingMark
     let onSave: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -125,7 +125,7 @@ struct EditNoteSheet: View {
 
     var body: some View {
         HighlightNoteEditor(
-            highlightText: highlight.text,
+            highlightText: highlight.text ?? "",
             note: $noteText,
             onSave: {
                 highlight.note = noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : noteText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -150,7 +150,7 @@ struct HighlightEditSheet: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager
 
     var bookId: String? = nil
-    let highlight: BookHighlight
+    let highlight: ReadingMark
     let onChangeColor: (String) -> Void
     let onSaveNote: (String?) -> Void
     let onCopy: () -> Void
@@ -164,7 +164,7 @@ struct HighlightEditSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 // Quoted text preview
-                Text("\"\(highlight.text)\"")
+                Text("\"\(highlight.text ?? "")\"")
                     .font(.subheadline)
                     .italic()
                     .foregroundStyle(.secondary)

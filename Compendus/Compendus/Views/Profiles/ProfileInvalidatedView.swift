@@ -271,16 +271,10 @@ struct ProfileInvalidatedView: View {
             for book in books { book.profileId = newProfileId }
         }
 
-        // Migrate BookHighlight records
-        let highlightDescriptor = FetchDescriptor<BookHighlight>(predicate: #Predicate { $0.profileId == oldProfileId })
-        if let highlights = try? modelContext.fetch(highlightDescriptor) {
-            for highlight in highlights { highlight.profileId = newProfileId }
-        }
-
-        // Migrate BookBookmark records
-        let bookmarkDescriptor = FetchDescriptor<BookBookmark>(predicate: #Predicate { $0.profileId == oldProfileId })
-        if let bookmarks = try? modelContext.fetch(bookmarkDescriptor) {
-            for bookmark in bookmarks { bookmark.profileId = newProfileId }
+        // Migrate ReadingMark records (highlights + bookmarks + audiobook moments)
+        let markDescriptor = FetchDescriptor<ReadingMark>(predicate: #Predicate { $0.profileId == oldProfileId })
+        if let marks = try? modelContext.fetch(markDescriptor) {
+            for mark in marks { mark.profileId = newProfileId }
         }
 
         // Migrate ReadingSession records

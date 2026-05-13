@@ -2,7 +2,9 @@
 //  PageJumpView.swift
 //  Compendus
 //
-//  Compact slider allowing the user to jump to a specific page.
+//  Sheet for jumping to a specific page by number. Complements the inline
+//  scrubber: the scrubber is for browsing by visual thumbnail; this sheet
+//  is for "take me to page 137" precision.
 //
 
 import SwiftUI
@@ -42,13 +44,12 @@ struct PageJumpView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // Drag indicator
             Capsule()
                 .fill(Color(.systemFill))
                 .frame(width: 36, height: 5)
                 .padding(.top, 8)
 
-            if let title = displayedChapterTitle {
+            if let title = displayedChapterTitle, !title.isEmpty {
                 Text(title)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

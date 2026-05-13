@@ -55,7 +55,7 @@ public class NativeEPUBEngine: ReaderEngine {
     private var currentSpineIndex: Int = 0
     private var currentPageIndex: Int = 0
     private var spinePageCounts: [Int] = []
-    private var pendingHighlights: [BookHighlight] = []
+    private var pendingHighlights: [HighlightRenderInfo] = []
 
     // Store a snapshot of settings values (not a reference) so we can detect changes
     private struct SettingsSnapshot {
@@ -2655,7 +2655,7 @@ public class NativeEPUBEngine: ReaderEngine {
         }.value
     }
 
-    public func applyHighlights(_ highlights: [BookHighlight]) {
+    public func applyHighlights(_ highlights: [HighlightRenderInfo]) {
         pendingHighlights = highlights
         applyHighlightsToCurrentPage()
     }

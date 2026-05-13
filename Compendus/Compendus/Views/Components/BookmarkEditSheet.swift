@@ -9,13 +9,19 @@ import SwiftUI
 import EPUBReader
 
 struct BookmarkEditSheet: View {
-    @Bindable var bookmark: BookBookmark
+    @Bindable var bookmark: ReadingMark
     let bookId: String
     let onSave: () -> Void
     let onDelete: () -> Void
 
     @Environment(HighlightColorManager.self) private var highlightColorManager
     @State private var noteText: String = ""
+
+    private var bookmarkTitle: String {
+        if let chapter = bookmark.chapterTitle, !chapter.isEmpty { return chapter }
+        if let page = bookmark.pageIndex { return "Page \(page + 1)" }
+        return "Bookmark"
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,7 +32,7 @@ struct BookmarkEditSheet: View {
                         .foregroundStyle(Color(uiColor: bookmark.uiColor))
                         .font(.title2)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(bookmark.title ?? "Page \(bookmark.pageIndex + 1)")
+                        Text(bookmarkTitle)
                             .font(.headline)
                         Text("\(Int(bookmark.progression * 100))% through book")
                             .font(.caption)

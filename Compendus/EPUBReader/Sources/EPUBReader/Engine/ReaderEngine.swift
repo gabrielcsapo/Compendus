@@ -131,7 +131,7 @@ public protocol ReaderEngine: AnyObject, Observable {
     var onHighlightTapped: ((String) -> Void)? { get set }
 
     /// Apply highlight decorations to the current view
-    func applyHighlights(_ highlights: [BookHighlight])
+    func applyHighlights(_ highlights: [HighlightRenderInfo])
 
     /// Clear the current text selection
     func clearSelection()

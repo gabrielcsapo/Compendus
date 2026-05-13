@@ -17,8 +17,7 @@ struct CompendusApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             DownloadedBook.self,
-            BookHighlight.self,
-            BookBookmark.self,
+            ReadingMark.self,
             PendingDownload.self,
             PendingBookEdit.self,
             ReadingSession.self,
@@ -28,7 +27,20 @@ struct CompendusApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            // Pre-release destructive migration: BookHighlight / BookBookmark
+            // were consolidated into ReadingMark in May 2026. Old stores from
+            // that schema can't be migrated automatically — wipe and rebuild.
+            // Safe to do solo pre-release; remove this fallback once shipped.
+            print("ModelContainer init failed (\(error)); attempting destructive reset.")
+            let storeURL = URL.applicationSupportDirectory.appending(path: "default.store")
+            try? FileManager.default.removeItem(at: storeURL)
+            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
+            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
+            do {
+                return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            } catch {
+                fatalError("Could not create ModelContainer after reset: \(error)")
+            }
         }
     }()
 

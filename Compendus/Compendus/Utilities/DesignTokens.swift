@@ -101,3 +101,28 @@ enum IconSize {
     /// 48pt — hero icons
     static let hero: CGFloat = 48
 }
+
+// MARK: - Library / Home Layout
+
+/// Adaptive sizing for library, home, and explore surfaces. Sizes are
+/// keyed off `horizontalSizeClass` (compact = iPhone-shape, regular = iPad-shape)
+/// so the same components feel right on both form factors without per-call site math.
+enum LibraryLayout {
+    /// Book-cover aspect ratio used everywhere covers render (width / height).
+    static let coverAspect: CGFloat = 2.0 / 3.0
+
+    /// Width of a horizontal-carousel cover (Continue Reading "Also Reading", Explore rows).
+    static func carouselCoverWidth(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        sizeClass == .regular ? 150 : 100
+    }
+
+    /// Height of a horizontal-carousel cover, derived from the aspect ratio.
+    static func carouselCoverHeight(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        carouselCoverWidth(sizeClass) / coverAspect
+    }
+
+    /// Number of columns for the main library / downloads grid.
+    static func gridColumnCount(_ sizeClass: UserInterfaceSizeClass?) -> Int {
+        sizeClass == .regular ? 4 : 2
+    }
+}

@@ -40,17 +40,20 @@ struct UnifiedReaderView: View {
     // UI state
     @State private var showingSettings = false
     @State private var showingTOC = false
-    @State private var showingHighlights = false
+    @State private var showingNotes = false
+    @State private var notesTab: NotesTab = .highlights
     @State private var showingOverlay = false
     @State private var overlayHideTask: Task<Void, Never>?
     @State private var showingThumbnails = false
-    @State private var showingPageJump = false
     @State private var showingSearch = false
     @State private var searchQuery: String = ""
     @State private var showingShareSheet = false
     @State private var shareText: String = ""
     @State private var scrubberValue: Double = 0
     @State private var isScrubbing = false
+    @State private var scrubberThumbnail: UIImage? = nil
+    @State private var lastFetchedThumbnailPage: Int = -1
+    @State private var scrubberThumbnailTask: Task<Void, Never>? = nil
     @State private var showingHighlightSetup = false
     @State private var showingBookColorEditor = false
 
@@ -59,15 +62,15 @@ struct UnifiedReaderView: View {
     @State private var carouselDragOffset: CGFloat = 0
 
     // Highlighting
-    @State private var highlights: [BookHighlight] = []
+    @State private var highlights: [ReadingMark] = []
     @State private var showingFloatingToolbar = false
     @State private var selectionFrame: CGRect?
     @State private var pendingSelection: ReaderSelection?
     @State private var showingNoteInput = false
     @State private var noteInputText = ""
     @State private var noteInputColor = "#ffff00"
-    @State private var editingHighlight: BookHighlight?
-    @State private var tappedHighlight: BookHighlight?
+    @State private var editingHighlight: ReadingMark?
+    @State private var tappedHighlight: ReadingMark?
 
     // Brightness/warmth are now in ReaderSettings (applied as overlays);
     // no longer touch UIScreen.main.brightness.
@@ -86,6 +89,10 @@ struct UnifiedReaderView: View {
     @State private var matchingAudiobook: DownloadedBook?
     @State private var showReadAlongPill = false
     @State private var readAlongPillDismissed = false
+    /// Persists across sessions — once a user has seen the Read Aloud hint
+    /// for any book, don't surface the bottom toast again. Read Aloud is
+    /// still accessible from the ⋯ menu.
+    @AppStorage("compendus.reader.hasSeenReadAloudHint") private var hasSeenReadAloudHint = false
 
     // Reader mode (infinite scroll lyrics view without audio)
     @State private var readerModeActive = false
@@ -104,9 +111,11 @@ struct UnifiedReaderView: View {
     @State private var pendingLinkIsExternal = false
 
     // Bookmarks
-    @State private var bookmarks: [BookBookmark] = []
-    @State private var showingBookmarks = false
+    @State private var bookmarks: [ReadingMark] = []
+    // (showingBookmarks subsumed by showingNotes + notesTab)
     @State private var showingBookmarkEdit = false
+
+    @State private var showingPageJump = false
 
     // Reading session tracking
     @State private var currentSession: ReadingSession?
@@ -123,16 +132,59 @@ struct UnifiedReaderView: View {
     // Break out complex optional chains to help the type-checker across module boundaries
     private var currentProgression: Double? { engine?.currentLocation?.totalProgression }
 
+    /// Short hint shown under the cover during initial load. Sets expectation
+    /// for what's happening — CBZ extraction can take a moment.
+    private var loadingHintForBook: String {
+        if book.isComic { return "Opening comic…" }
+        switch book.format.lowercased() {
+        case "pdf": return "Opening PDF…"
+        case "epub": return "Preparing pages…"
+        default: return "Opening…"
+        }
+    }
+
     @ViewBuilder private var stateContent: some View {
         switch readerState {
         case .loading:
-            VStack(spacing: 16) {
+            // Cover-driven loading state — shows the book the user is opening
+            // instead of a bare "Loading..." label, which feels uncertain
+            // especially for large CBZs (e.g. 400+ pages).
+            VStack(spacing: 20) {
+                Spacer()
+                LocalCoverImage(
+                    bookId: book.id,
+                    coverData: book.coverData,
+                    format: book.format
+                )
+                .frame(width: 140, height: 210)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+
+                VStack(spacing: 6) {
+                    Text(book.title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    if !book.authorsDisplay.isEmpty {
+                        Text(book.authorsDisplay)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 32)
+
                 ProgressView()
                     .progressViewStyle(.linear)
-                    .frame(maxWidth: 200)
-                Text("Loading...")
-                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 180)
+                    .padding(.top, 4)
+
+                Text(loadingHintForBook)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             if let engine = engine {
                 readerContent(engine: engine)
@@ -230,91 +282,41 @@ struct UnifiedReaderView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showingHighlights) {
-                ReaderHighlightsListView(
+            .sheet(isPresented: $showingNotes) {
+                NotesSheet(
+                    tab: $notesTab,
                     highlights: highlights,
-                    onSelect: { highlight in
+                    bookmarks: bookmarks,
+                    onSelectHighlight: { highlight in
                         navigateToHighlight(highlight)
-                        showingHighlights = false
+                        showingNotes = false
                     },
-                    onDelete: { highlight in deleteHighlight(highlight) },
-                    onEditNote: { highlight in
-                        showingHighlights = false
+                    onDeleteHighlight: { highlight in deleteHighlight(highlight) },
+                    onEditHighlightNote: { highlight in
+                        showingNotes = false
                         editingHighlight = highlight
-                    }
+                    },
+                    onSelectBookmark: { bookmark in
+                        Task {
+                            await engine?.go(to: ReaderLocation(
+                                href: nil, pageIndex: bookmark.pageIndex ?? 0,
+                                progression: bookmark.progression,
+                                totalProgression: bookmark.progression,
+                                title: bookmark.chapterTitle
+                            ))
+                        }
+                        showingNotes = false
+                    },
+                    onDeleteBookmark: { bookmark in deleteBookmark(bookmark) },
+                    hideHighlights: engine?.isComic ?? false
                 )
                 .readerThemed(readerSettings)
             }
     }
 
-    // ── Sheet group 2: bookmarks, bookmark edit, note input ──
+    // ── Sheet group 2: bookmark edit, note input ──
     private var sheetsGroup2: some View {
         sheetsGroup1
-        .sheet(isPresented: $showingBookmarks) {
-            NavigationStack {
-                List {
-                    if bookmarks.isEmpty {
-                        ContentUnavailableView("No Bookmarks", systemImage: "bookmark", description: Text("Bookmark pages from the menu to save them here."))
-                    } else {
-                        ForEach(bookmarks) { bookmark in
-                            Button {
-                                Task {
-                                    await engine?.go(to: ReaderLocation(
-                                        href: nil, pageIndex: bookmark.pageIndex,
-                                        progression: bookmark.progression,
-                                        totalProgression: bookmark.progression,
-                                        title: bookmark.title
-                                    ))
-                                }
-                                showingBookmarks = false
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Circle()
-                                        .fill(Color(uiColor: bookmark.uiColor))
-                                        .frame(width: 12, height: 12)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(bookmark.title ?? "Page \(bookmark.pageIndex + 1)")
-                                            .font(.subheadline)
-                                        if let note = bookmark.note, !note.isEmpty {
-                                            Text(note)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(2)
-                                        }
-                                    }
-                                    Spacer()
-                                    Text("\(Int(bookmark.progression * 100))%")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            .foregroundStyle(.primary)
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                let bookmark = bookmarks[index]
-                                modelContext.delete(bookmark)
-                            }
-                            bookmarks.remove(atOffsets: indexSet)
-                            do {
-                                try modelContext.save()
-                            } catch {
-                                HapticFeedback.error()
-                                saveError = "Couldn't delete bookmark. Please try again."
-                            }
-                        }
-                    }
-                }
-                .navigationTitle("Bookmarks")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { showingBookmarks = false }
-                    }
-                }
-            }
-            .readerThemed(readerSettings)
-        }
         // Bookmark edit (color + note)
         .sheet(isPresented: $showingBookmarkEdit) {
             if let bookmark = currentPageBookmark {
@@ -385,8 +387,8 @@ struct UnifiedReaderView: View {
                     highlight: highlight,
                     onChangeColor: { color in
                         highlight.color = color
-                        if let pdfEngine = engine as? PDFEngine {
-                            pdfEngine.updateAnnotationColor(for: highlight, color: color)
+                        if let pdfEngine = engine as? PDFEngine, let info = highlight.toHighlightRenderInfo() {
+                            pdfEngine.updateAnnotationColor(for: info, color: color)
                         }
                         do {
                             try modelContext.save()
@@ -442,35 +444,6 @@ struct UnifiedReaderView: View {
     // ── Sheet group 4: navigation + footnote ──
     private var sheetsGroup4: some View {
         sheetsGroup3
-            .sheet(isPresented: $showingPageJump) {
-                if let engine = engine {
-                    if engine.isPDF || engine.isComic {
-                        PageJumpView(
-                            totalPages: engine.totalPositions,
-                            currentPage: (engine.currentLocation?.pageIndex ?? 0) + 1,
-                            onJump: { progression in
-                                Task { await engine.go(toProgression: progression) }
-                            }
-                        )
-                        .presentationDetents([.height(240)])
-                        .presentationDragIndicator(.hidden)
-                        .readerThemed(readerSettings)
-                    } else if let nativeEngine = engine as? NativeEPUBEngine {
-                        PageJumpView(
-                            totalPages: nativeEngine.totalPositions,
-                            currentPage: nativeEngine.globalPageIndex + 1,
-                            chapterTitle: engine.currentLocation?.title,
-                            chapterTitleForPage: { page in nativeEngine.chapterTitle(forGlobalPage: page) },
-                            onJump: { progression in
-                                Task { await nativeEngine.go(toProgression: progression) }
-                            }
-                        )
-                        .presentationDetents([.height(240)])
-                        .presentationDragIndicator(.hidden)
-                        .readerThemed(readerSettings)
-                    }
-                }
-            }
             .sheet(isPresented: $showingSearch) {
                 if let engine = engine {
                     ReaderSearchView(engine: engine, initialQuery: searchQuery) { location in
@@ -502,6 +475,59 @@ struct UnifiedReaderView: View {
                 .presentationDetents([.medium])
                 .readerThemed(readerSettings)
             }
+            .sheet(isPresented: $showingPageJump) {
+                pageJumpSheet
+                    .presentationDetents([.height(220)])
+                    .presentationDragIndicator(.hidden)
+                    .readerThemed(readerSettings)
+            }
+    }
+
+    @ViewBuilder
+    private var pageJumpSheet: some View {
+        if let engine = engine {
+            let nativeEngine = engine as? NativeEPUBEngine
+            let total = max(1, engine.totalPositions)
+            let current: Int = {
+                if engine.isPDF {
+                    return (engine.currentLocation?.pageIndex ?? 0) + 1
+                } else if let comicEngine = engine as? ComicEngine {
+                    return comicEngine.currentPage + 1
+                } else if let nativeEngine {
+                    return nativeEngine.globalPageIndex + 1
+                }
+                return 1
+            }()
+            PageJumpView(
+                totalPages: total,
+                currentPage: current,
+                chapterTitle: engine.currentLocation?.title,
+                chapterTitleForPage: { page in
+                    nativeEngine?.chapterTitle(forGlobalPage: page)
+                },
+                onJump: { progression in
+                    jumpToProgression(progression, engine: engine)
+                }
+            )
+        }
+    }
+
+    private func jumpToProgression(_ progression: Double, engine: any ReaderEngine) {
+        let total = max(1, engine.totalPositions)
+        let pageIndex = Int(round(progression * Double(total - 1)))
+        if let nativeEngine = engine as? NativeEPUBEngine {
+            Task { await nativeEngine.go(toProgression: progression) }
+        } else {
+            Task {
+                await engine.go(to: ReaderLocation(
+                    href: nil,
+                    pageIndex: pageIndex,
+                    progression: 0,
+                    totalProgression: progression,
+                    title: nil
+                ))
+            }
+        }
     }
 
     var body: some View {
@@ -563,9 +589,15 @@ struct UnifiedReaderView: View {
             ZStack {
                 // Layer 0: Primary reading content
                 // Engine view always in tree for UIKit stability; hidden in reader mode.
+                // The opacity flip to hidden is intentionally NOT animated — if it
+                // crossfades, the engine view and the carousel snapshot are both
+                // partially visible mid-transition, producing a ghosted-text artifact.
+                // Instant hide eliminates the double-render; the carousel handles
+                // its own fade-in cleanly.
                 EngineViewWrapper(engine: engine)
                     .ignoresSafeArea()
                     .opacity(showingOverlay || readerModeActive ? 0 : 1)
+                    .animation(.none, value: showingOverlay)
                     .allowsHitTesting(!showingOverlay && !readAlongService.isActive && !readerModeActive)
 
                 // Edge-tap zones (P1.3) — for EPUB only. Comic + PDF engines
@@ -584,31 +616,25 @@ struct UnifiedReaderView: View {
                     )
                 }
 
-                // Corner-tap bookmark (Kindle convention) — invisible top-right
-                // hot zone toggles a bookmark on the current page. Active state
-                // shows a small dog-ear glyph in the accent color.
-                if !showingOverlay && !readerModeActive {
+                // (Removed) Invisible corner-tap bookmark hot zone — the
+                // top-bar bookmark button already covers this when chrome is
+                // up, and the invisible variant was undiscoverable.
+                // Show a small dog-ear indicator only when this page is
+                // bookmarked so the user has visual confirmation.
+                if !showingOverlay && !readerModeActive && currentPageBookmark != nil {
                     VStack {
                         HStack {
                             Spacer()
-                            Button {
-                                bookmarkCurrentPage()
-                            } label: {
-                                Image(systemName: currentPageBookmark != nil
-                                    ? "bookmark.fill" : "bookmark")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(currentPageBookmark != nil
-                                        ? Color.accentColor : Color.primary.opacity(0.0))
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .accessibilityLabel(currentPageBookmark != nil
-                                ? "Remove bookmark from this page"
-                                : "Bookmark this page")
+                            Image(systemName: "bookmark.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.top, 4)
+                                .padding(.trailing, 12)
                         }
                         Spacer()
                     }
                     .ignoresSafeArea(edges: [])
+                    .allowsHitTesting(false)
                 }
 
                 // Reader mode replaces the engine view when active
@@ -669,11 +695,16 @@ struct UnifiedReaderView: View {
                 }
                 #endif
 
-                // Layer 2: Overlay bars — slide in from edges on tap
+                // Layer 2: Overlay bars — slide in from edges on tap.
+                // simultaneousGesture resets the auto-hide timer on every tap
+                // inside the chrome so users aren't racing the clock to hit
+                // small icons. Button taps still win because they consume the
+                // gesture before this one fires.
                 VStack(spacing: 0) {
                     if showingOverlay {
                         readerTopBar(engine: engine)
                             .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+                            .simultaneousGesture(TapGesture().onEnded { scheduleOverlayHide() })
                     }
 
                     Spacer()
@@ -682,6 +713,7 @@ struct UnifiedReaderView: View {
                     if showingOverlay && !readerModeActive {
                         readerBottomBar(engine: engine)
                             .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                            .simultaneousGesture(TapGesture().onEnded { scheduleOverlayHide() })
                     }
                 }
 
@@ -727,49 +759,86 @@ struct UnifiedReaderView: View {
                     )
                 }
 
-                // Layer 4a: Cross-book audiobook mini-player (top)
+                // Layer 4a: Cross-book audiobook FAB (bottom-right)
                 // When the user is reading visually (this view) but an
                 // audiobook is playing in the background for a DIFFERENT book,
-                // surface a small pill at the top so they can scrub/pause
-                // without backing out to the Home tab.
-                // Hidden when the reader overlay is showing — the toolbar's
-                // own buttons take precedence and we don't want the mini
-                // player to overlap the title/page indicator. Reappears the
-                // moment the overlay auto-hides.
+                // surface a compact circular FAB at bottom-right. Tap toggles
+                // play/pause; long-press opens the full player.
+                // Hidden when the reader overlay is showing — the chrome's own
+                // scrubber would collide. Reappears the moment chrome hides.
                 if audiobookPlayer.hasActiveSession
                     && !audiobookPlayer.isFullPlayerPresented
                     && audiobookPlayer.currentBook?.id != book.id
                     && !showingOverlay {
                     VStack {
-                        MiniPlayerView()
-                            .padding(.horizontal, 12)
-                            .padding(.top, 8)
-                            .onTapGesture {
-                                audiobookPlayer.isFullPlayerPresented = true
-                            }
                         Spacer()
+                        HStack {
+                            Spacer()
+                            AudioFABView()
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 16)
+                        }
                     }
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85),
+                               value: showingOverlay)
+                    .zIndex(2)
+                }
+
+                // Layer 4b: Guided-view FAB for comics (bottom-left).
+                // Persistent and prominent — most comic readers will want it.
+                if let comicEngine = engine as? ComicEngine,
+                   engine.totalPositions > 1,
+                   !showingOverlay {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            GuidedViewFAB(isOn: Binding(
+                                get: { comicEngine.guidedViewEnabled },
+                                set: { comicEngine.guidedViewEnabled = $0 }
+                            ))
+                            .padding(.leading, 16)
+                            .padding(.bottom, 16)
+                            Spacer()
+                        }
+                    }
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
                     .animation(.spring(response: 0.35, dampingFraction: 0.85),
                                value: showingOverlay)
                     .zIndex(2)
                 }
 
                 // Layer 4: Read-along / TTS pill (bottom)
-                if (showReadAlongPill && !readAlongPillDismissed) || readAlongService.isActive {
+                // Show the Read Aloud pill only the FIRST time it's available
+                // for a user (gated by hasSeenReadAloudHint AppStorage). After
+                // that, Read Aloud lives in the ⋯ menu. The pill also returns
+                // whenever read-along is actively playing so users see the
+                // playback affordances.
+                if ((showReadAlongPill && !readAlongPillDismissed && !hasSeenReadAloudHint)
+                    || readAlongService.isActive) {
                     VStack {
                         Spacer()
                         ReadAlongPill(
                             availableSources: readAlongPillSources,
                             bookId: book.id,
                             audiobookHasTranscript: matchingAudiobook?.hasTranscript ?? true,
-                            onStartAudiobook: { activateReadAlong() },
-                            onStartTTS: { activateTTSReadAloud() },
+                            onStartAudiobook: {
+                                hasSeenReadAloudHint = true
+                                activateReadAlong()
+                            },
+                            onStartTTS: {
+                                hasSeenReadAloudHint = true
+                                activateTTSReadAloud()
+                            },
                             onDismiss: {
+                                hasSeenReadAloudHint = true
                                 withAnimation { readAlongPillDismissed = true }
                             },
                             onChangeVoice: { _ in restartTTSWithNewVoice() },
-                            onDownloadForLater: { queueTTSPreGeneration() }
+                            onDownloadForLater: {
+                                hasSeenReadAloudHint = true
+                                queueTTSPreGeneration()
+                            }
                         )
                         .padding(.horizontal, 16)
                         .padding(.bottom, showingOverlay ? 140 : 16)
@@ -1076,13 +1145,17 @@ struct UnifiedReaderView: View {
                     }
                 }
 
-                Button {
-                    showingSettings = true
-                } label: {
-                    Image(systemName: "textformat.size")
-                        .foregroundStyle(themeTextColor)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+                // Font/typography controls don't apply to comics (raster images);
+                // hide the Aa button there to avoid suggesting otherwise.
+                if !engine.isComic {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "textformat.size")
+                            .foregroundStyle(themeTextColor)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
                 }
 
                 // Bookmark button: solid when bookmarked, outline when not
@@ -1103,18 +1176,11 @@ struct UnifiedReaderView: View {
 
             // Far right: overflow menu
             Menu {
-                if !engine.isComic {
-                    Button {
-                        showingHighlights = true
-                    } label: {
-                        Label("Highlights", systemImage: "highlighter")
-                    }
-                }
-
                 Button {
-                    showingBookmarks = true
+                    notesTab = engine.isComic ? .bookmarks : .highlights
+                    showingNotes = true
                 } label: {
-                    Label("Bookmarks", systemImage: "bookmark.circle")
+                    Label("Notes", systemImage: "note.text")
                 }
 
                 if !engine.isPDF && !engine.isComic && (matchingAudiobook != nil || pocketTTSModelManager.isModelAvailable || readAlongService.isActive) {
@@ -1158,11 +1224,6 @@ struct UnifiedReaderView: View {
                     }
                 }
 
-                Button {
-                    showingPageJump = true
-                } label: {
-                    Label("Go to Page", systemImage: "arrow.right.doc.on.clipboard")
-                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.body.weight(.semibold))
@@ -1173,7 +1234,7 @@ struct UnifiedReaderView: View {
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 10)
-        .padding(.top, topSafeAreaInset + 8)
+        .padding(.top, topSafeAreaInset + 12)
         .background(.ultraThinMaterial)
         .environment(\.colorScheme, readerSettings.theme.colorScheme)
     }
@@ -1235,7 +1296,7 @@ struct UnifiedReaderView: View {
                 pageScrubber(engine: engine)
             }
 
-            // Footer row: page range + optional thumbnail toggle
+            // Footer row: page range + optional thumbnail toggle + zoom chip
             HStack {
                 Text("1")
                     .font(.caption2.monospacedDigit())
@@ -1256,7 +1317,32 @@ struct UnifiedReaderView: View {
                     .buttonStyle(.plain)
                 }
 
+                // Zoom chip — only when the user has zoomed in on a comic.
+                if let comicEngine = engine as? ComicEngine,
+                   comicEngine.zoomScale > 1.01 {
+                    Button {
+                        comicEngine.resetZoom()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "minus.magnifyingglass")
+                                .font(.caption2)
+                            Text("\(Int(comicEngine.zoomScale * 100))%")
+                                .font(.caption2.monospacedDigit().weight(.medium))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color(.tertiarySystemFill)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reset zoom")
+                }
+
                 Spacer()
+
+                // Guided-view toggle moved to a prominent bottom-left FAB
+                // mounted in readerContent — comics are a primary use case
+                // and the small chrome icon was easy to miss.
 
                 Text("\(engine.totalPositions)")
                     .font(.caption2.monospacedDigit())
@@ -1291,56 +1377,83 @@ struct UnifiedReaderView: View {
 
     @ViewBuilder
     private func pageInfoLabel(engine: any ReaderEngine) -> some View {
-        let progression = engine.currentLocation?.totalProgression ?? 0
-        let percentage = Int(progression * 100)
-        let chapterTitle = engine.currentLocation?.title
+        // When actively scrubbing, preview the destination page/chapter so the
+        // user can see where they're about to land.
+        let nativeEngine = engine as? NativeEPUBEngine
+        let scrubPage: Int? = isScrubbing ? Int(scrubberValue) : nil
+        let chapterTitle: String? = {
+            if let scrubPage, let nativeEngine {
+                return nativeEngine.chapterTitle(forGlobalPage: scrubPage) ?? engine.currentLocation?.title
+            }
+            return engine.currentLocation?.title
+        }()
+        let displayProgression: Double = {
+            if let scrubPage {
+                let total = max(1, engine.totalPositions)
+                return Double(scrubPage) / Double(total)
+            }
+            return engine.currentLocation?.totalProgression ?? 0
+        }()
+        let percentage = Int(displayProgression * 100)
 
         VStack(spacing: 2) {
-            Group {
-                if engine.isPDF {
-                    let page = (engine.currentLocation?.pageIndex ?? 0) + 1
-                    Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-                } else if let comicEngine = engine as? ComicEngine {
-                    let page = comicEngine.currentPage + 1
-                    if comicEngine.pagesPerSpread == 2 {
-                        let rightPage = min(page + 1, engine.totalPositions)
-                        Text("Pages \(page)-\(rightPage) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-                    } else {
-                        Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
-                    }
-                } else if let nativeEngine = engine as? NativeEPUBEngine,
-                          engine.currentLocation?.pageIndex != nil {
-                    let globalPage = nativeEngine.globalPageIndex + 1
-                    let totalPages = nativeEngine.totalPositions
-                    if nativeEngine.isSpreadMode {
-                        let rightPage = min(globalPage + 1, totalPages)
-                        Text("Pages \(globalPage)-\(rightPage) of \(totalPages) \u{00B7} \(percentage)%")
-                    } else {
-                        Text("Page \(globalPage) of \(totalPages) \u{00B7} \(percentage)%")
-                    }
-                } else {
-                    Text("\(percentage)%")
+            Button {
+                if engine.totalPositions > 1 {
+                    showingPageJump = true
+                    HapticFeedback.lightImpact()
                 }
+            } label: {
+                Group {
+                    if engine.isPDF {
+                        let page = (scrubPage ?? engine.currentLocation?.pageIndex ?? 0) + 1
+                        Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
+                    } else if let comicEngine = engine as? ComicEngine {
+                        let page = (scrubPage ?? comicEngine.currentPage) + 1
+                        if comicEngine.pagesPerSpread == 2 {
+                            let rightPage = min(page + 1, engine.totalPositions)
+                            Text("Pages \(page)-\(rightPage) of \(engine.totalPositions) \u{00B7} \(percentage)%")
+                        } else {
+                            Text("Page \(page) of \(engine.totalPositions) \u{00B7} \(percentage)%")
+                        }
+                    } else if let nativeEngine,
+                              engine.currentLocation?.pageIndex != nil {
+                        let totalPages = nativeEngine.totalPositions
+                        let globalPage = (scrubPage ?? nativeEngine.globalPageIndex) + 1
+                        if nativeEngine.isSpreadMode {
+                            let rightPage = min(globalPage + 1, totalPages)
+                            Text("Pages \(globalPage)-\(rightPage) of \(totalPages) \u{00B7} \(percentage)%")
+                        } else {
+                            Text("Page \(globalPage) of \(totalPages) \u{00B7} \(percentage)%")
+                        }
+                    } else {
+                        Text("\(percentage)%")
+                    }
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .disabled(engine.totalPositions <= 1)
+            .accessibilityHint("Opens page picker")
 
             // Chapter title row — meaningful for ebooks/PDFs, but for comics
             // `currentLocation.title` just echoes "Page N" which we already show
             // in the top bar and the row above. Suppress to avoid triplication.
+            // During scrubbing this previews the destination chapter.
             if !engine.isComic, let chapterTitle, !chapterTitle.isEmpty {
                 Text(chapterTitle)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(isScrubbing ? .secondary : .tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .padding(.horizontal, 8)
+                    .animation(.none, value: scrubPage)
             }
 
             // Estimated reading time left (P2.5) — EPUB only. Uses a rough
             // 250 WPM × ~300 words/page heuristic = ~1.2 min/page. Cheap,
             // mostly accurate, and matches what users expect from Kindle.
-            if let label = readingTimeLeftLabel(engine: engine) {
+            if !isScrubbing, let label = readingTimeLeftLabel(engine: engine) {
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1379,33 +1492,51 @@ struct UnifiedReaderView: View {
         if engine.isPDF, let pdfEngine = engine as? PDFEngine, engine.totalPositions > 1 {
             Slider(
                 value: Binding(
-                    get: { Double(pdfEngine.currentPage) },
+                    get: { isScrubbing ? scrubberValue : Double(pdfEngine.currentPage) },
                     set: { newValue in
-                        Task { await pdfEngine.go(to: ReaderLocation(
-                            href: nil, pageIndex: Int(newValue),
-                            progression: 0, totalProgression: 0, title: nil
-                        ))}
+                        scrubberValue = newValue
+                        fetchScrubberThumbnail(engine: engine, page: Int(newValue))
                     }
                 ),
                 in: 0...Double(max(0, engine.totalPositions - 1)),
-                step: 1
+                step: 1,
+                onEditingChanged: { editing in
+                    handleScrubberEditingChanged(editing: editing) {
+                        Task { await pdfEngine.go(to: ReaderLocation(
+                            href: nil, pageIndex: Int(scrubberValue),
+                            progression: 0, totalProgression: 0, title: nil
+                        ))}
+                    }
+                }
             )
             .tint(.accentColor)
+            .overlay(alignment: .top) {
+                scrubberPreviewOverlay()
+            }
         } else if let comicEngine = engine as? ComicEngine, engine.totalPositions > 1 {
             Slider(
                 value: Binding(
-                    get: { Double(comicEngine.currentPage) },
+                    get: { isScrubbing ? scrubberValue : Double(comicEngine.currentPage) },
                     set: { newValue in
-                        Task { await comicEngine.go(to: ReaderLocation(
-                            href: nil, pageIndex: Int(newValue),
-                            progression: 0, totalProgression: 0, title: nil
-                        ))}
+                        scrubberValue = newValue
+                        fetchScrubberThumbnail(engine: engine, page: Int(newValue))
                     }
                 ),
                 in: 0...Double(max(0, engine.totalPositions - 1)),
-                step: 1
+                step: 1,
+                onEditingChanged: { editing in
+                    handleScrubberEditingChanged(editing: editing) {
+                        Task { await comicEngine.go(to: ReaderLocation(
+                            href: nil, pageIndex: Int(scrubberValue),
+                            progression: 0, totalProgression: 0, title: nil
+                        ))}
+                    }
+                }
             )
             .tint(.accentColor)
+            .overlay(alignment: .top) {
+                scrubberPreviewOverlay()
+            }
         } else if let nativeEngine = engine as? NativeEPUBEngine,
                   nativeEngine.totalPositions > 1 {
             Slider(
@@ -1417,12 +1548,17 @@ struct UnifiedReaderView: View {
                 step: 1,
                 onEditingChanged: { editing in
                     isScrubbing = editing
-                    if !editing {
+                    if editing {
+                        // Suspend auto-hide while the user is dragging.
+                        overlayHideTask?.cancel()
+                        overlayHideTask = nil
+                    } else {
                         // Navigate only when the user lifts their finger
                         let page = Int(scrubberValue)
                         let totalPages = max(1, nativeEngine.totalPositions)
                         let progression = Double(page) / Double(totalPages)
                         Task { await nativeEngine.go(toProgression: progression) }
+                        scheduleOverlayHide()
                     }
                 }
             )
@@ -1430,6 +1566,69 @@ struct UnifiedReaderView: View {
         } else {
             ProgressView(value: engine.currentLocation?.totalProgression ?? 0)
                 .tint(.accentColor)
+        }
+    }
+
+    // MARK: - Scrubber preview (comic/PDF)
+
+    @ViewBuilder
+    private func scrubberPreviewOverlay() -> some View {
+        if isScrubbing, let thumb = scrubberThumbnail {
+            Image(uiImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 90, height: 130)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(.white.opacity(0.6), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                .offset(y: -150)
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Debounced thumbnail fetch — only kicks off when the integer page changes.
+    private func fetchScrubberThumbnail(engine: any ReaderEngine, page: Int) {
+        guard page != lastFetchedThumbnailPage else { return }
+        lastFetchedThumbnailPage = page
+        scrubberThumbnailTask?.cancel()
+        scrubberThumbnailTask = Task {
+            let size = CGSize(width: 90, height: 130)
+            let image: UIImage?
+            if let comic = engine as? ComicEngine {
+                image = await comic.thumbnail(forPage: page, size: size)
+            } else if let pdf = engine as? PDFEngine {
+                image = await pdf.thumbnail(forPage: page, size: size)
+            } else {
+                image = nil
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if isScrubbing {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        scrubberThumbnail = image
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleScrubberEditingChanged(editing: Bool, onCommit: @escaping () -> Void) {
+        isScrubbing = editing
+        if editing {
+            // Suspend auto-hide while dragging.
+            overlayHideTask?.cancel()
+            overlayHideTask = nil
+            lastFetchedThumbnailPage = -1
+        } else {
+            scrubberThumbnailTask?.cancel()
+            scrubberThumbnailTask = nil
+            scrubberThumbnail = nil
+            onCommit()
+            scheduleOverlayHide()
         }
     }
 
@@ -1523,7 +1722,7 @@ struct UnifiedReaderView: View {
 
         engine = nativeEngine
         fetchHighlights()
-        nativeEngine.applyHighlights(highlights)
+        nativeEngine.applyHighlights(highlights.renderableHighlights())
         nativeEngine.applySettings(readerSettings)
 
         readerState = .ready
@@ -1578,7 +1777,7 @@ struct UnifiedReaderView: View {
 
         engine = pdfEngine
         fetchHighlights()
-        pdfEngine.applyHighlights(highlights)
+        pdfEngine.applyHighlights(highlights.renderableHighlights())
         pdfEngine.applySettings(readerSettings)
 
         // Load TOC
@@ -1850,15 +2049,21 @@ struct UnifiedReaderView: View {
         return bookmarks.contains { $0.pageIndex == pageIndex }
     }
 
-    private var currentPageBookmark: BookBookmark? {
+    private var currentPageBookmark: ReadingMark? {
         guard let pageIndex = currentPageIndex else { return nil }
         return bookmarks.first { $0.pageIndex == pageIndex }
     }
 
+    private func bookmarkRowTitle(for bookmark: ReadingMark) -> String {
+        if let title = bookmark.chapterTitle, !title.isEmpty { return title }
+        if let page = bookmark.pageIndex { return "Page \(page + 1)" }
+        return "Bookmark"
+    }
+
     private func fetchBookmarks() {
         let bookId = book.id
-        let descriptor = FetchDescriptor<BookBookmark>(
-            predicate: #Predicate { $0.bookId == bookId },
+        let descriptor = FetchDescriptor<ReadingMark>(
+            predicate: #Predicate { $0.bookId == bookId && $0.kindRaw != "highlight" },
             sortBy: [SortDescriptor(\.pageIndex)]
         )
         bookmarks = (try? modelContext.fetch(descriptor)) ?? []
@@ -1878,12 +2083,13 @@ struct UnifiedReaderView: View {
         else { format = "epub" }
 
         let defaultColor = highlightColorManager.colors.first?.hex ?? "#ff6b6b"
-        let bookmark = BookBookmark(
+        let bookmark = ReadingMark(
             bookId: book.id,
+            kind: .bookmark,
+            format: format,
             pageIndex: pageIndex,
             color: defaultColor,
-            format: format,
-            title: engine.currentLocation?.title,
+            chapterTitle: engine.currentLocation?.title,
             progression: engine.currentLocation?.totalProgression ?? 0
         )
         modelContext.insert(bookmark)
@@ -1899,7 +2105,7 @@ struct UnifiedReaderView: View {
         showingBookmarkEdit = true
     }
 
-    private func deleteBookmark(_ bookmark: BookBookmark) {
+    private func deleteBookmark(_ bookmark: ReadingMark) {
         modelContext.delete(bookmark)
         bookmarks.removeAll { $0.id == bookmark.id }
         do {
@@ -2208,9 +2414,9 @@ struct UnifiedReaderView: View {
 
     private func fetchHighlights() {
         let bookId = book.id
-        let descriptor = FetchDescriptor<BookHighlight>(
-            predicate: #Predicate<BookHighlight> { highlight in
-                highlight.bookId == bookId
+        let descriptor = FetchDescriptor<ReadingMark>(
+            predicate: #Predicate<ReadingMark> { highlight in
+                highlight.bookId == bookId && highlight.kindRaw == "highlight"
             },
             sortBy: [SortDescriptor(\.createdAt)]
         )
@@ -2222,35 +2428,39 @@ struct UnifiedReaderView: View {
         if let pdfEngine = engine as? PDFEngine {
             guard let result = pdfEngine.saveHighlightFromSelection(color: color, note: note) else { return }
 
-            let highlight = BookHighlight(
+            let highlight = ReadingMark(
                 bookId: book.id,
+                kind: .highlight,
+                format: "pdf",
                 locatorJSON: result.locatorJSON,
                 text: result.text,
                 note: note,
                 color: color,
-                progression: result.progression,
-                chapterTitle: result.chapterTitle
+                chapterTitle: result.chapterTitle,
+                progression: result.progression
             )
 
             modelContext.insert(highlight)
             try? modelContext.save()
             pendingSelection = nil
             fetchHighlights()
-            engine?.applyHighlights(highlights)
+            engine?.applyHighlights(highlights.renderableHighlights())
             return
         }
 
         // EPUB save path
         guard let selection = pendingSelection else { return }
 
-        let highlight = BookHighlight(
+        let highlight = ReadingMark(
             bookId: book.id,
+            kind: .highlight,
+            format: "epub",
             locatorJSON: selection.locationJSON,
             text: selection.text,
             note: note,
             color: color,
-            progression: engine?.currentLocation?.totalProgression ?? 0,
-            chapterTitle: engine?.currentLocation?.title
+            chapterTitle: engine?.currentLocation?.title,
+            progression: engine?.currentLocation?.totalProgression ?? 0
         )
 
         modelContext.insert(highlight)
@@ -2260,27 +2470,28 @@ struct UnifiedReaderView: View {
         pendingSelection = nil
 
         fetchHighlights()
-        engine?.applyHighlights(highlights)
+        engine?.applyHighlights(highlights.renderableHighlights())
     }
 
-    private func deleteHighlight(_ highlight: BookHighlight) {
-        if let pdfEngine = engine as? PDFEngine {
-            pdfEngine.deleteHighlightAnnotations(for: highlight)
+    private func deleteHighlight(_ highlight: ReadingMark) {
+        if let pdfEngine = engine as? PDFEngine, let info = highlight.toHighlightRenderInfo() {
+            pdfEngine.deleteHighlightAnnotations(for: info)
         }
         modelContext.delete(highlight)
         try? modelContext.save()
         fetchHighlights()
-        engine?.applyHighlights(highlights)
+        engine?.applyHighlights(highlights.renderableHighlights())
     }
 
-    private func navigateToHighlight(_ highlight: BookHighlight) {
-        if let pdfEngine = engine as? PDFEngine {
-            pdfEngine.navigateToHighlight(highlight)
+    private func navigateToHighlight(_ highlight: ReadingMark) {
+        if let pdfEngine = engine as? PDFEngine, let info = highlight.toHighlightRenderInfo() {
+            pdfEngine.navigateToHighlight(info)
             return
         }
 
         // EPUB: parse the locator to get href and navigate
-        guard let data = highlight.locatorJSON.data(using: .utf8),
+        guard let locatorJSON = highlight.locatorJSON,
+              let data = locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let href = json["href"] as? String else { return }
 

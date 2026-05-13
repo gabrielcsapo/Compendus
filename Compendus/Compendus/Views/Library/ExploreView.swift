@@ -176,8 +176,10 @@ private struct ExploreSectionView: View {
 private struct ExploreBookCard: View {
     let book: Book
 
-    private let cardWidth: CGFloat = 110
-    private let aspectRatio: CGFloat = 2.0 / 3.0
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var cardWidth: CGFloat { LibraryLayout.carouselCoverWidth(horizontalSizeClass) }
+    private let aspectRatio: CGFloat = LibraryLayout.coverAspect
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -225,6 +227,11 @@ private struct ExploreBookCard: View {
 // MARK: - Skeleton
 
 private struct ExploreSectionSkeleton: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var coverWidth: CGFloat { LibraryLayout.carouselCoverWidth(horizontalSizeClass) }
+    private var coverHeight: CGFloat { LibraryLayout.carouselCoverHeight(horizontalSizeClass) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ShimmerRectangle(cornerRadius: 4)
@@ -236,11 +243,11 @@ private struct ExploreSectionSkeleton: View {
                     ForEach(0..<6, id: \.self) { _ in
                         VStack(alignment: .leading, spacing: 6) {
                             ShimmerRectangle(cornerRadius: 8)
-                                .frame(width: 110, height: 165)
+                                .frame(width: coverWidth, height: coverHeight)
                             ShimmerRectangle(cornerRadius: 3)
-                                .frame(width: 90, height: 12)
+                                .frame(width: coverWidth * 0.82, height: 12)
                             ShimmerRectangle(cornerRadius: 3)
-                                .frame(width: 70, height: 10)
+                                .frame(width: coverWidth * 0.64, height: 10)
                         }
                     }
                 }

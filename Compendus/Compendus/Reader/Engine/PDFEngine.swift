@@ -60,6 +60,19 @@ class PDFEngine: ReaderEngine {
         return page.thumbnail(of: renderSize, for: .mediaBox)
     }
 
+    /// Absolute-index thumbnail for the scrubber preview. Cached via ThumbnailCache.
+    func thumbnail(forPage page: Int, size: CGSize) async -> UIImage? {
+        guard page >= 0, page < totalPositions else { return nil }
+        let cacheKey = bookURL.absoluteString
+        if let cached = ThumbnailCache.shared.image(bookId: cacheKey, page: page) {
+            return cached
+        }
+        guard let pdfPage = pdfDocument?.page(at: page) else { return nil }
+        let image = pdfPage.thumbnail(of: size, for: .mediaBox)
+        ThumbnailCache.shared.store(image, bookId: cacheKey, page: page)
+        return image
+    }
+
     // MARK: - ReaderEngine Protocol
 
     func makeViewController() -> UIViewController {
@@ -104,7 +117,7 @@ class PDFEngine: ReaderEngine {
         return parseOutline(outline, level: 0)
     }
 
-    func applyHighlights(_ highlights: [BookHighlight]) {
+    func applyHighlights(_ highlights: [HighlightRenderInfo]) {
         guard let document = pdfDocument else { return }
 
         // Clear existing custom annotations
@@ -268,7 +281,7 @@ class PDFEngine: ReaderEngine {
         )
     }
 
-    private func applyHighlightAnnotation(_ highlight: BookHighlight, to document: PDFDocument) {
+    private func applyHighlightAnnotation(_ highlight: HighlightRenderInfo, to document: PDFDocument) {
         guard let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let annotations = json["annotations"] as? [[String: Any]] else { return }
@@ -290,7 +303,7 @@ class PDFEngine: ReaderEngine {
         }
     }
 
-    func deleteHighlightAnnotations(for highlight: BookHighlight) {
+    func deleteHighlightAnnotations(for highlight: HighlightRenderInfo) {
         guard let document = pdfDocument,
               let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -310,7 +323,7 @@ class PDFEngine: ReaderEngine {
         }
     }
 
-    func updateAnnotationColor(for highlight: BookHighlight, color: String) {
+    func updateAnnotationColor(for highlight: HighlightRenderInfo, color: String) {
         guard let document = pdfDocument,
               let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -343,7 +356,7 @@ class PDFEngine: ReaderEngine {
         }
     }
 
-    func navigateToHighlight(_ highlight: BookHighlight) {
+    func navigateToHighlight(_ highlight: HighlightRenderInfo) {
         guard let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let annotations = json["annotations"] as? [[String: Any]],

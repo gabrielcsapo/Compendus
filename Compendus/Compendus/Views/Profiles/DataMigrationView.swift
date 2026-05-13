@@ -154,8 +154,8 @@ struct DataMigrationView: View {
 
     private func loadCounts() async {
         let bookDescriptor = FetchDescriptor<DownloadedBook>(predicate: #Predicate { $0.profileId == "" })
-        let highlightDescriptor = FetchDescriptor<BookHighlight>(predicate: #Predicate { $0.profileId == "" })
-        let bookmarkDescriptor = FetchDescriptor<BookBookmark>(predicate: #Predicate { $0.profileId == "" })
+        let highlightDescriptor = FetchDescriptor<ReadingMark>(predicate: #Predicate { $0.profileId == "" && $0.kindRaw == "highlight" })
+        let bookmarkDescriptor = FetchDescriptor<ReadingMark>(predicate: #Predicate { $0.profileId == "" && $0.kindRaw != "highlight" })
         let sessionDescriptor = FetchDescriptor<ReadingSession>(predicate: #Predicate { $0.profileId == "" })
         let pendingDownloadDescriptor = FetchDescriptor<PendingDownload>(predicate: #Predicate { $0.profileId == "" })
         let pendingEditDescriptor = FetchDescriptor<PendingBookEdit>(predicate: #Predicate { $0.profileId == "" })
@@ -183,19 +183,11 @@ struct DataMigrationView: View {
             }
         }
 
-        // Migrate BookHighlight records
-        let highlightDescriptor = FetchDescriptor<BookHighlight>(predicate: #Predicate { $0.profileId == "" })
-        if let highlights = try? modelContext.fetch(highlightDescriptor) {
-            for highlight in highlights {
-                highlight.profileId = profileId
-            }
-        }
-
-        // Migrate BookBookmark records
-        let bookmarkDescriptor = FetchDescriptor<BookBookmark>(predicate: #Predicate { $0.profileId == "" })
-        if let bookmarks = try? modelContext.fetch(bookmarkDescriptor) {
-            for bookmark in bookmarks {
-                bookmark.profileId = profileId
+        // Migrate ReadingMark records (covers highlights, bookmarks, audiobook moments)
+        let markDescriptor = FetchDescriptor<ReadingMark>(predicate: #Predicate { $0.profileId == "" })
+        if let marks = try? modelContext.fetch(markDescriptor) {
+            for mark in marks {
+                mark.profileId = profileId
             }
         }
 
@@ -235,8 +227,7 @@ struct DataMigrationView: View {
         .environment(ServerConfig())
         .modelContainer(for: [
             DownloadedBook.self,
-            BookHighlight.self,
-            BookBookmark.self,
+            ReadingMark.self,
             ReadingSession.self,
             PendingDownload.self,
             PendingBookEdit.self,

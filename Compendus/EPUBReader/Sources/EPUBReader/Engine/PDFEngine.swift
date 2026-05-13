@@ -103,7 +103,7 @@ public class PDFEngine: ReaderEngine {
         return parseOutline(outline, level: 0)
     }
 
-    public func applyHighlights(_ highlights: [BookHighlight]) {
+    public func applyHighlights(_ highlights: [HighlightRenderInfo]) {
         guard let document = pdfDocument else { return }
 
         // Clear existing custom annotations
@@ -267,7 +267,7 @@ public class PDFEngine: ReaderEngine {
         )
     }
 
-    private func applyHighlightAnnotation(_ highlight: BookHighlight, to document: PDFDocument) {
+    private func applyHighlightAnnotation(_ highlight: HighlightRenderInfo, to document: PDFDocument) {
         guard let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let annotations = json["annotations"] as? [[String: Any]] else { return }
@@ -289,7 +289,7 @@ public class PDFEngine: ReaderEngine {
         }
     }
 
-    public func deleteHighlightAnnotations(for highlight: BookHighlight) {
+    public func deleteHighlightAnnotations(for highlight: HighlightRenderInfo) {
         guard let document = pdfDocument,
               let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -309,7 +309,7 @@ public class PDFEngine: ReaderEngine {
         }
     }
 
-    public func updateAnnotationColor(for highlight: BookHighlight, color: String) {
+    public func updateAnnotationColor(for highlight: HighlightRenderInfo, color: String) {
         guard let document = pdfDocument,
               let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -342,7 +342,7 @@ public class PDFEngine: ReaderEngine {
         }
     }
 
-    public func navigateToHighlight(_ highlight: BookHighlight) {
+    public func navigateToHighlight(_ highlight: HighlightRenderInfo) {
         guard let data = highlight.locatorJSON.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let annotations = json["annotations"] as? [[String: Any]],

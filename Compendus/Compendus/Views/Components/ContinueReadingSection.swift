@@ -193,8 +193,10 @@ struct ContinueReadingSection: View {
 struct ContinueReadingCard: View {
     let item: ContinueReadingItem
 
-    /// Standard book cover aspect ratio (2:3)
-    private let bookAspectRatio: CGFloat = 2/3
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var coverWidth: CGFloat { LibraryLayout.carouselCoverWidth(horizontalSizeClass) }
+    private var coverHeight: CGFloat { LibraryLayout.carouselCoverHeight(horizontalSizeClass) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -202,7 +204,7 @@ struct ContinueReadingCard: View {
             ZStack(alignment: .bottom) {
                 // Cover image
                 coverImage
-                    .frame(width: 100, height: 150)
+                    .frame(width: coverWidth, height: coverHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
 
@@ -226,7 +228,7 @@ struct ContinueReadingCard: View {
                     .padding(4)
                 }
             }
-            .frame(width: 100, height: 150)
+            .frame(width: coverWidth, height: coverHeight)
             .overlay(alignment: .topTrailing) {
                 // Download badge for remote (not downloaded) books
                 if !item.isDownloaded {
@@ -252,7 +254,7 @@ struct ContinueReadingCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 100, height: 44, alignment: .topLeading)
+            .frame(width: coverWidth, height: 44, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(progressLabel)\(item.isDownloaded ? "" : ", available for download")")

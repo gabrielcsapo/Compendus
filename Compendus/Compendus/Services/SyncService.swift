@@ -273,8 +273,8 @@ class SyncService {
 
         for record in response.data {
             let recordId = record.id
-            let descriptor = FetchDescriptor<BookHighlight>(
-                predicate: #Predicate { $0.id == recordId }
+            let descriptor = FetchDescriptor<ReadingMark>(
+                predicate: #Predicate { $0.id == recordId && $0.kindRaw == "highlight" }
             )
             let existing = try? modelContext.fetch(descriptor).first
 
@@ -301,18 +301,20 @@ class SyncService {
                 }
             } else {
                 // Insert new highlight from server
-                let highlight = BookHighlight(
+                let highlight = ReadingMark(
                     id: record.id,
                     bookId: record.bookId,
+                    kind: .highlight,
+                    format: "epub",
                     locatorJSON: record.startPosition,
                     text: record.text,
                     note: record.note,
                     color: record.color ?? "#ffff00",
-                    progression: 0.0,
                     chapterTitle: nil,
+                    progression: 0.0,
+                    profileId: profileId,
                     createdAt: record.createdAt
                 )
-                highlight.profileId = profileId
                 modelContext.insert(highlight)
             }
         }
@@ -339,8 +341,8 @@ class SyncService {
 
         for record in response.data {
             let recordId = record.id
-            let descriptor = FetchDescriptor<BookBookmark>(
-                predicate: #Predicate { $0.id == recordId }
+            let descriptor = FetchDescriptor<ReadingMark>(
+                predicate: #Predicate { $0.id == recordId && $0.kindRaw != "highlight" }
             )
             let existing = try? modelContext.fetch(descriptor).first
 
@@ -354,6 +356,8 @@ class SyncService {
 
             // Parse position JSON to extract iOS fields
             let posData = Self.decodeBookmarkPosition(record.position)
+            let format = posData?.format ?? "epub"
+            let kind: MarkKind = (format == "audiobook") ? .audiobookMoment : .bookmark
 
             if let existing {
                 // Conflict resolution: server wins if newer
@@ -365,25 +369,27 @@ class SyncService {
                     existing.pageIndex = posData?.pageIndex ?? 0
                     existing.color = record.color ?? "#ff6b6b"
                     existing.note = record.note
-                    existing.format = posData?.format ?? "epub"
-                    existing.title = record.title
+                    existing.format = format
+                    existing.chapterTitle = record.title
                     existing.progression = posData?.progression ?? 0.0
                     existing.profileId = profileId
+                    existing.kind = kind
                 }
             } else {
                 // Insert new bookmark from server
-                let bookmark = BookBookmark(
+                let bookmark = ReadingMark(
                     id: record.id,
                     bookId: record.bookId,
+                    kind: kind,
+                    format: format,
                     pageIndex: posData?.pageIndex ?? 0,
-                    color: record.color ?? "#ff6b6b",
                     note: record.note,
-                    format: posData?.format ?? "epub",
-                    title: record.title,
+                    color: record.color ?? "#ff6b6b",
+                    chapterTitle: record.title,
                     progression: posData?.progression ?? 0.0,
+                    profileId: profileId,
                     createdAt: record.createdAt
                 )
-                bookmark.profileId = profileId
                 modelContext.insert(bookmark)
             }
         }
@@ -519,8 +525,8 @@ class SyncService {
     // MARK: - Push: Highlights
 
     private func pushHighlights(since: Date?, profileId: String, modelContext: ModelContext) async throws {
-        let descriptor = FetchDescriptor<BookHighlight>(
-            predicate: #Predicate { $0.profileId == profileId }
+        let descriptor = FetchDescriptor<ReadingMark>(
+            predicate: #Predicate { $0.profileId == profileId && $0.kindRaw == "highlight" }
         )
         guard let highlights = try? modelContext.fetch(descriptor) else {
             print("[Sync:Push:Highlights] Skipped — fetch failed")
@@ -545,9 +551,9 @@ class SyncService {
             ServerHighlight(
                 id: h.id,
                 bookId: h.bookId,
-                startPosition: h.locatorJSON,
+                startPosition: h.locatorJSON ?? "",
                 endPosition: "",
-                text: h.text,
+                text: h.text ?? "",
                 note: h.note,
                 color: h.color,
                 createdAt: h.createdAt,
@@ -565,8 +571,8 @@ class SyncService {
     // MARK: - Push: Bookmarks
 
     private func pushBookmarks(since: Date?, profileId: String, modelContext: ModelContext) async throws {
-        let descriptor = FetchDescriptor<BookBookmark>(
-            predicate: #Predicate { $0.profileId == profileId }
+        let descriptor = FetchDescriptor<ReadingMark>(
+            predicate: #Predicate { $0.profileId == profileId && $0.kindRaw != "highlight" }
         )
         guard let bookmarks = try? modelContext.fetch(descriptor) else {
             print("[Sync:Push:Bookmarks] Skipped — fetch failed")
@@ -592,8 +598,8 @@ class SyncService {
             ServerBookmark(
                 id: b.id,
                 bookId: b.bookId,
-                position: Self.encodeBookmarkPosition(pageIndex: b.pageIndex, format: b.format, progression: b.progression),
-                title: b.title,
+                position: Self.encodeBookmarkPosition(pageIndex: b.pageIndex ?? 0, format: b.format, progression: b.progression),
+                title: b.chapterTitle,
                 note: b.note,
                 color: b.color,
                 createdAt: b.createdAt,

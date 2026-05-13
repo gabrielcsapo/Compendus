@@ -49,7 +49,9 @@ struct AudiobookPlayerView: View {
     @State private var showLyrics = false
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
-    @State private var transcriptionPillDismissed = false
+    @State private var showsChrome = false
+    @State private var chromeHideTask: Task<Void, Never>? = nil
+    @State private var showingTranscribeChooser = false
     /// When live transcribing, we pause playback until the transcript has
     /// buffered at least 30 s ahead of this position, then auto-resume.
     @State private var liveBufferResumeTime: Double?
@@ -70,12 +72,21 @@ struct AudiobookPlayerView: View {
     @State private var nextInSeries: DownloadedBook?
     @State private var nextInSeriesDismissed = false
 
-    private var showTranscriptionPill: Bool {
-        !transcriptionPillDismissed && (
-            transcriptionService.isAvailable ||
-            effectiveTranscript != nil ||
-            transcriptionService.activeBookId == book.id
-        )
+    /// Whether transcribe controls (button + state) are relevant for this book.
+    private var transcribeAvailable: Bool {
+        transcriptionService.isAvailable ||
+        effectiveTranscript != nil ||
+        transcriptionService.activeBookId == book.id
+    }
+
+    /// Whether the "End of chapter" preset can be offered for the sleep timer.
+    private var canSetEndOfChapterTimer: Bool {
+        guard let chapter = player.currentChapter,
+              let chapters = book.chapters,
+              let idx = chapters.firstIndex(where: { $0.id == chapter.id }) else {
+            return false
+        }
+        return idx + 1 < chapters.count
     }
 
     /// Uses the full transcript if available, otherwise the partial transcript
@@ -232,7 +243,8 @@ struct AudiobookPlayerView: View {
                             }
                             .padding(.horizontal, 28)
 
-                            // Title, author, narrator
+                            // Title, author, narrator — tap to reveal/hide the
+                            // chrome row (transcribe / AirPlay / sleep / stop).
                             VStack(spacing: 4) {
                                 Text(book.title)
                                     .font(.title3)
@@ -250,6 +262,11 @@ struct AudiobookPlayerView: View {
                                     .lineLimit(2)
                             }
                             .padding(.horizontal, 20)
+                            .contentShape(Rectangle())
+                            .onTapGesture { toggleChrome() }
+                            .accessibilityAction(named: showsChrome ? "Hide more actions" : "Show more actions") {
+                                toggleChrome()
+                            }
 
                             // Current chapter — primary navigation affordance
                             if let chapter = player.currentChapter {
@@ -287,21 +304,6 @@ struct AudiobookPlayerView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-
-                // Transcription pill
-                if showTranscriptionPill {
-                    TranscriptionPill(
-                        book: book,
-                        showLyrics: showLyrics,
-                        onToggleLyrics: { showLyrics.toggle() },
-                        onStartLiveTranscription: { startLiveTranscription() },
-                        onStartFullTranscription: { startFullTranscription() },
-                        onDismiss: { withAnimation { transcriptionPillDismissed = true } }
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 // Player controls
@@ -361,6 +363,28 @@ struct AudiobookPlayerView: View {
                 )
             )
             .presentationDetents([.height(280)])
+        }
+        .confirmationDialog(
+            "Transcribe",
+            isPresented: $showingTranscribeChooser,
+            titleVisibility: .visible
+        ) {
+            Button("Live Transcribe") { startLiveTranscription() }
+            Button("Full Book") { startFullTranscription() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Live captures from the current position. Full Book runs on-device and can take 20–60 minutes for long books.")
+        }
+        .sheet(isPresented: $showSleepTimerMenu) {
+            SleepTimerSheet(
+                fireDate: sleepTimerFireDate,
+                canEndOfChapter: canSetEndOfChapterTimer,
+                onSetMinutes: { setSleepTimer(minutes: $0) },
+                onSetEndOfChapter: { setSleepTimerEndOfChapter() },
+                onCancel: { cancelSleepTimer() }
+            )
+            .presentationDetents([.height(360)])
+            .presentationDragIndicator(.hidden)
         }
         .onChange(of: transcriptionService.partialTranscript?.segments.count) { _, _ in
             checkTranscriptBuffer()
@@ -619,8 +643,11 @@ struct AudiobookPlayerView: View {
             }
             .padding(.bottom, 16)
 
-            // Secondary row: stop | AirPlay | sleep timer
-            HStack {
+            // Secondary row — revealed by tapping the cover/scrubber area.
+            // Keeps the main view immersive when not needed; transport row
+            // above stays always-visible so skip / play remain one tap away.
+            if showsChrome {
+                HStack {
                 // Stop
                 Button {
                     showStopConfirmation = true
@@ -644,6 +671,15 @@ struct AudiobookPlayerView: View {
                 }
 
                 Spacer()
+
+                // Transcribe — tap = start Live Transcribe immediately,
+                // long-press = chooser sheet (Live vs Full Book). Replaces
+                // the always-visible TranscriptionPill so the player stays
+                // calm when transcribe isn't being used.
+                if transcribeAvailable {
+                    transcribeButton
+                    Spacer()
+                }
 
                 // AirPlay — explicit size so MPVolumeView renders correctly
                 ZStack {
@@ -669,28 +705,68 @@ struct AudiobookPlayerView: View {
                     .frame(height: 36)
                 }
                 .accessibilityLabel(sleepTimerFireDate != nil ? "Sleep timer active" : "Set sleep timer")
-                .confirmationDialog("Sleep Timer", isPresented: $showSleepTimerMenu, titleVisibility: .visible) {
-                    if sleepTimerFireDate != nil {
-                        Button("Cancel Timer", role: .destructive) { cancelSleepTimer() }
-                    }
-                    Button("15 minutes") { setSleepTimer(minutes: 15) }
-                    Button("30 minutes") { setSleepTimer(minutes: 30) }
-                    Button("45 minutes") { setSleepTimer(minutes: 45) }
-                    Button("1 hour") { setSleepTimer(minutes: 60) }
-                    if let chapter = player.currentChapter,
-                       let chapters = book.chapters,
-                       let idx = chapters.firstIndex(where: { $0.id == chapter.id }),
-                       idx + 1 < chapters.count {
-                        Button("End of chapter") { setSleepTimerEndOfChapter() }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                }
-            }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 8)
+                } // HStack
+                .padding(.horizontal, 4)
+                .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } // if showsChrome
         }
         .padding(.horizontal, 20)
         .padding(.bottom)
+    }
+
+    // MARK: - Transcribe button (chrome)
+
+    @ViewBuilder
+    private var transcribeButton: some View {
+        let isActive = transcriptionService.activeBookId == book.id
+        Button {
+            if effectiveTranscript != nil {
+                // Existing transcript: toggle the karaoke overlay.
+                showLyrics.toggle()
+            } else {
+                startLiveTranscription()
+            }
+        } label: {
+            Image(systemName: isActive ? "text.bubble.fill" : "text.bubble")
+                .font(.title3)
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .frame(width: 44, height: 44)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .accessibilityLabel("Transcribe")
+        .accessibilityHint("Long-press to choose live or full book transcription.")
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.35).onEnded { _ in
+                HapticFeedback.lightImpact()
+                showingTranscribeChooser = true
+            }
+        )
+    }
+
+    // MARK: - Chrome toggle
+
+    private func toggleChrome() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            showsChrome.toggle()
+        }
+        if showsChrome {
+            scheduleChromeHide()
+        } else {
+            chromeHideTask?.cancel()
+            chromeHideTask = nil
+        }
+    }
+
+    private func scheduleChromeHide() {
+        chromeHideTask?.cancel()
+        chromeHideTask = Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                showsChrome = false
+            }
+        }
     }
 
     // MARK: - Sleep Timer
@@ -850,16 +926,17 @@ struct AudiobookPlayerView: View {
             return "Bookmark at \(timeStr)"
         }()
 
-        let bookmark = BookBookmark(
+        let bookmark = ReadingMark(
             bookId: book.id,
-            pageIndex: chapterIndex,
-            color: "#42a5f5",
+            kind: .audiobookMoment,
             format: "audiobook",
-            title: title,
+            pageIndex: chapterIndex,
+            timestampSeconds: timestamp,
+            color: "#42a5f5",
+            chapterTitle: title,
             progression: progression,
-            timestampSeconds: timestamp
+            profileId: serverConfig.selectedProfileId ?? ""
         )
-        bookmark.profileId = serverConfig.selectedProfileId ?? ""
 
         modelContext.insert(bookmark)
         do {
@@ -950,35 +1027,52 @@ struct ChaptersListView: View {
 
     var body: some View {
         NavigationStack {
-            List(chapters) { chapter in
-                Button {
-                    onSelect(chapter)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(chapter.title)
-                                .foregroundStyle(isCurrentChapter(chapter) ? themeManager.accentColor : Color.primary)
+            ScrollViewReader { proxy in
+                List(chapters) { chapter in
+                    Button {
+                        onSelect(chapter)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(chapter.title)
+                                    .foregroundStyle(isCurrentChapter(chapter) ? themeManager.accentColor : Color.primary)
+                                    .fontWeight(isCurrentChapter(chapter) ? .semibold : .regular)
 
-                            HStack(spacing: 8) {
-                                Text(chapter.startTimeDisplay)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 8) {
+                                    Text(chapter.startTimeDisplay)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
 
-                                // Chapter progress indicator
-                                if let progress = chapterProgress(chapter) {
-                                    ProgressView(value: progress)
-                                        .frame(width: 50)
-                                        .tint(themeManager.accentColor)
+                                    // Chapter progress indicator
+                                    if let progress = chapterProgress(chapter) {
+                                        ProgressView(value: progress)
+                                            .frame(width: 50)
+                                            .tint(themeManager.accentColor)
+                                    }
                                 }
                             }
+
+                            Spacer()
+
+                            if isCurrentChapter(chapter) {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .foregroundStyle(themeManager.accentColor)
+                                    .symbolEffect(.variableColor.iterative, isActive: true)
+                            }
                         }
-
-                        Spacer()
-
-                        if isCurrentChapter(chapter) {
-                            Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(themeManager.accentColor)
-                                .symbolEffect(.variableColor.iterative, isActive: true)
+                    }
+                    .id(chapter.id)
+                }
+                .onAppear {
+                    // Scroll to the current chapter so users don't land on
+                    // Chapter 1 when they're 46 chapters in.
+                    if let current = chapters.first(where: { isCurrentChapter($0) }) {
+                        // Defer slightly so the List has time to lay out before
+                        // we scroll — otherwise the anchor doesn't take effect.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                proxy.scrollTo(current.id, anchor: .center)
+                            }
                         }
                     }
                 }
