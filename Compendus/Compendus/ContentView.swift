@@ -283,11 +283,23 @@ struct ContentView: View {
                     .tabItem { Label("Profile", systemImage: "person") }
                     .tag(3)
                     .toolbar(.hidden, for: .tabBar)
+
+                WanderView()
+                    .tabItem {
+                        Label("Wander", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    }
+                    .tag(4)
+                    .toolbar(.hidden, for: .tabBar)
             }
 
-            // Integrated bottom bar: mini player + tab icons
-            CustomBottomBar(selectedTab: $nav.selectedTab)
+            // Integrated bottom bar: mini player + tab icons.
+            // Hidden on Wander (tag 4) for a full-screen, immersive experience.
+            if nav.selectedTab != 4 {
+                CustomBottomBar(selectedTab: $nav.selectedTab)
+                    .transition(.move(edge: .bottom))
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: nav.selectedTab)
     }
 
     // MARK: - Deep Link
@@ -335,6 +347,11 @@ struct CustomBottomBar: View {
         TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
         TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
         TabItem(icon: "person", activeIcon: "person.fill", label: "Profile"),
+        TabItem(
+            icon: "point.topleft.down.curvedto.point.bottomright.up",
+            activeIcon: "point.topleft.down.curvedto.point.bottomright.up",
+            label: "Wander"
+        ),
     ]
 
     var body: some View {

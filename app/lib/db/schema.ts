@@ -1,4 +1,12 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  blob,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // Profiles table - Netflix-style user profiles
@@ -440,6 +448,234 @@ export const bookSubjects = sqliteTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Living Library: a knowledge graph extracted from book content.
+//
+// Entities and relationships are library-global (shared across profiles, like
+// `books`). The defining invariant: nothing enters the graph without a passage
+// to back it — every mention and every relationship cites a `passages` row, so
+// every connection is explainable and traceable to real source text.
+// ---------------------------------------------------------------------------
+
+/** Closed set of entity types the extractor classifies into. Extend as needed. */
+export const ENTITY_TYPES = [
+  "person",
+  "place",
+  "organization",
+  "event",
+  "work",
+  "object",
+  "invention",
+  "concept",
+  "theme",
+  "era",
+] as const;
+export type EntityType = (typeof ENTITY_TYPES)[number];
+
+// Passages: the provenance anchor. A contiguous chunk of book text stored with
+// the same location keys the reader uses, so "jump to source" reuses existing
+// reader navigation (epub: spineIndex + charOffset; pdf: page).
+export const passages = sqliteTable(
+  "passages",
+  {
+    id: text("id").primaryKey(),
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    // Position — mirrors reader lastPosition ({spineIndex, charOffset} | {page})
+    spineIndex: integer("spine_index"), // epub spine item index (null for pdf)
+    page: integer("page"), // pdf page (null for epub)
+    charStart: integer("char_start"), // offset within the spine item / chapter
+    charEnd: integer("char_end"),
+    ordinal: integer("ordinal").notNull(), // sequential order within the book
+    chapterTitle: text("chapter_title"),
+    text: text("text").notNull(),
+    tokenCount: integer("token_count"),
+    embedding: blob("embedding"), // Float32 vector (buffer); null until embedded
+    embeddingModel: text("embedding_model"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_passages_book").on(table.bookId),
+    index("idx_passages_book_ordinal").on(table.bookId, table.ordinal),
+  ],
+);
+
+// Entities: canonical, library-global nodes (people, places, ideas, inventions…).
+export const entities = sqliteTable(
+  "entities",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: ENTITY_TYPES }).notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    normalizedName: text("normalized_name").notNull(), // lowercased/stripped, for matching
+    aliases: text("aliases"), // JSON array of alternate surface forms
+    summary: text("summary"), // short generated description (optional)
+    embedding: blob("embedding"), // entity-level vector for resolution / neighbors
+    // Cross-library signal — how widely an entity appears (powers ranking + wander)
+    mentionCount: integer("mention_count").notNull().default(0),
+    bookCount: integer("book_count").notNull().default(0),
+    salience: real("salience"), // computed centrality, optional
+    // Temporal anchoring (events / people / eras); normalized for sorting, negative = BCE
+    startYear: integer("start_year"),
+    endYear: integer("end_year"),
+    dateText: text("date_text"), // raw, e.g. "49 BC", "c. 1450"
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_entities_type").on(table.type),
+    index("idx_entities_normalized").on(table.normalizedName),
+    index("idx_entities_type_normalized").on(table.type, table.normalizedName),
+  ],
+);
+
+// Entity mentions: every occurrence of an entity, anchored to a passage.
+export const entityMentions = sqliteTable(
+  "entity_mentions",
+  {
+    id: text("id").primaryKey(),
+    entityId: text("entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    passageId: text("passage_id")
+      .notNull()
+      .references(() => passages.id, { onDelete: "cascade" }),
+    // Denormalized for fast per-book queries (e.g. "this entity across N books")
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    surfaceText: text("surface_text").notNull(), // exact text as it appeared
+    charStart: integer("char_start"), // offset within the passage
+    charEnd: integer("char_end"),
+    role: text("role"), // optional role (e.g. within an event)
+    confidence: real("confidence"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_mentions_entity").on(table.entityId),
+    index("idx_mentions_passage").on(table.passageId),
+    index("idx_mentions_book").on(table.bookId),
+    index("idx_mentions_entity_book").on(table.entityId, table.bookId),
+  ],
+);
+
+// Entity relationships: edges between entities, each backed by a passage.
+// `type` is free-text (the Tier-1 set is documented in the extractor); `tier`
+// records which extraction pass produced it, so we can filter by reliability.
+// `description` is the short human-readable reason that powers the wander UI's
+// "why this connection" label.
+export const entityRelationships = sqliteTable(
+  "entity_relationships",
+  {
+    id: text("id").primaryKey(),
+    sourceEntityId: text("source_entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    targetEntityId: text("target_entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // located_in, authored, invented, influenced, critiqued, …
+    description: text("description"), // short reason ("Caesar conquered Gaul")
+    evidencePassageId: text("evidence_passage_id").references(() => passages.id, {
+      onDelete: "set null",
+    }),
+    bookId: text("book_id").references(() => books.id, { onDelete: "cascade" }),
+    confidence: real("confidence"),
+    tier: integer("tier").notNull().default(1),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_rel_source").on(table.sourceEntityId),
+    index("idx_rel_target").on(table.targetEntityId),
+    index("idx_rel_type").on(table.type),
+  ],
+);
+
+// Per-book analysis status: tracks what's processed and enables re-runs when the
+// pipeline improves (compare pipelineVersion).
+export const bookAnalysis = sqliteTable(
+  "book_analysis",
+  {
+    bookId: text("book_id")
+      .primaryKey()
+      .references(() => books.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"), // pending | running | completed | error
+    pipelineVersion: text("pipeline_version"),
+    model: text("model"),
+    passageCount: integer("passage_count").notNull().default(0),
+    entityCount: integer("entity_count").notNull().default(0),
+    relationshipCount: integer("relationship_count").notNull().default(0),
+    error: text("error"),
+    analyzedAt: integer("analyzed_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index("idx_book_analysis_status").on(table.status)],
+);
+
+// Images/figures extracted from a book, for later vision/OCR over figures, maps,
+// and diagrams. Binaries live under data/figures/<bookId>/; storedPath is relative.
+export const bookImages = sqliteTable(
+  "book_images",
+  {
+    id: text("id").primaryKey(),
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    // Nearest passage the figure sits in (provenance); set on best-effort basis.
+    passageId: text("passage_id").references(() => passages.id, { onDelete: "set null" }),
+    spineIndex: integer("spine_index"),
+    ordinal: integer("ordinal").notNull(),
+    charStart: integer("char_start"),
+    storedPath: text("stored_path").notNull(), // relative: data/figures/<bookId>/<hash>.<ext>
+    mimeType: text("mime_type").notNull(),
+    alt: text("alt"),
+    caption: text("caption"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_book_images_book").on(table.bookId),
+    index("idx_book_images_passage").on(table.passageId),
+  ],
+);
+
+// Wander sessions table — activity tracking for the Living Library "wander"
+// experience, mirroring reading_sessions. ideasVisited counts distinct ideas
+// surfaced during the session.
+export const wanderSessions = sqliteTable(
+  "wander_sessions",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp" }),
+    ideasVisited: integer("ideas_visited").notNull().default(1),
+  },
+  (table) => [
+    index("idx_wander_sessions_profile").on(table.profileId),
+    index("idx_wander_sessions_started").on(table.startedAt),
+  ],
+);
+
 // Type exports
 export type Profile = typeof profiles.$inferSelect;
 export type NewProfile = typeof profiles.$inferInsert;
@@ -461,3 +697,17 @@ export type ReadingSession = typeof readingSessions.$inferSelect;
 export type WantedBook = typeof wantedBooks.$inferSelect;
 export type NewWantedBook = typeof wantedBooks.$inferInsert;
 export type BookSubject = typeof bookSubjects.$inferSelect;
+export type Passage = typeof passages.$inferSelect;
+export type NewPassage = typeof passages.$inferInsert;
+export type Entity = typeof entities.$inferSelect;
+export type NewEntity = typeof entities.$inferInsert;
+export type EntityMention = typeof entityMentions.$inferSelect;
+export type NewEntityMention = typeof entityMentions.$inferInsert;
+export type EntityRelationship = typeof entityRelationships.$inferSelect;
+export type NewEntityRelationship = typeof entityRelationships.$inferInsert;
+export type BookAnalysis = typeof bookAnalysis.$inferSelect;
+export type NewBookAnalysis = typeof bookAnalysis.$inferInsert;
+export type BookImage = typeof bookImages.$inferSelect;
+export type NewBookImage = typeof bookImages.$inferInsert;
+export type WanderSession = typeof wanderSessions.$inferSelect;
+export type NewWanderSession = typeof wanderSessions.$inferInsert;

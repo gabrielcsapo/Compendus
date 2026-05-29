@@ -1,0 +1,113 @@
+import { randomUUID } from "crypto";
+import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { db, books, bookAnalysis, wanderSessions } from "../../app/lib/db";
+import { enqueueJob, getJob } from "../../app/lib/queue";
+import { listEntities, getEntityDetail, wander } from "../../app/lib/knowledge/graph";
+import { consolidateGraph } from "../../app/lib/knowledge/resolution";
+import { requireAdmin } from "../middleware/profile";
+
+const app = new Hono();
+
+// Analysis mutates the shared library graph — admin only (like transcription).
+app.use("/api/books/:id/analyze", requireAdmin);
+app.use("/api/graph/consolidate", requireAdmin);
+
+/**
+ * POST /api/graph/consolidate
+ * One-shot graph-wide cleanup: retroactively applies the noise-filter and
+ * person-merge fixes to already-extracted entities (which per-book re-analysis
+ * cannot touch). Idempotent. Returns the counts changed.
+ */
+app.post("/api/graph/consolidate", (c) => {
+  const result = consolidateGraph();
+  return c.json({ success: true, result });
+});
+
+/**
+ * POST /api/books/:id/analyze
+ * Enqueue Living Library analysis (extract entities + relationships) as a job.
+ * Returns immediately with a jobId; progress streams over /api/jobs/:id/progress.
+ */
+app.post("/api/books/:id/analyze", async (c) => {
+  const bookId = c.req.param("id");
+  const book = await db.query.books.findFirst({ where: eq(books.id, bookId) });
+  if (!book) return c.json({ success: false, error: "Book not found" }, 404);
+
+  const jobId = `extract-${bookId}`;
+  const existing = getJob(jobId);
+  if (existing && (existing.status === "pending" || existing.status === "running")) {
+    return c.json({ success: true, jobId, pending: true });
+  }
+
+  enqueueJob(jobId, "extract", { bookId });
+  return c.json({ success: true, jobId, pending: true });
+});
+
+/**
+ * GET /api/books/:id/analysis
+ * Current analysis status + counts for a book.
+ */
+app.get("/api/books/:id/analysis", async (c) => {
+  const bookId = c.req.param("id");
+  const row = db.select().from(bookAnalysis).where(eq(bookAnalysis.bookId, bookId)).get();
+  return c.json({ success: true, analysis: row ?? null });
+});
+
+// --- knowledge graph (read) ----------------------------------------------------
+
+/** GET /api/graph/entities?type=&q=&limit=&offset= — entity browser, ranked by reach. */
+app.get("/api/graph/entities", (c) => {
+  const type = c.req.query("type") || undefined;
+  const q = c.req.query("q") || undefined;
+  const limit = parseInt(c.req.query("limit") || "50", 10);
+  const offset = parseInt(c.req.query("offset") || "0", 10);
+  return c.json({ success: true, entities: listEntities({ type, q, limit, offset }) });
+});
+
+/** GET /api/graph/entities/:id — entity detail: cross-book mentions + relationships. */
+app.get("/api/graph/entities/:id", (c) => {
+  const detail = getEntityDetail(c.req.param("id"));
+  if (!detail) return c.json({ success: false, error: "Entity not found" }, 404);
+  return c.json({ success: true, entity: detail });
+});
+
+/** GET /api/graph/entities/:id/wander — grounded next steps, each with a reason. */
+app.get("/api/graph/entities/:id/wander", (c) => {
+  const limit = parseInt(c.req.query("limit") || "8", 10);
+  return c.json({ success: true, steps: wander(c.req.param("id"), limit) });
+});
+
+/**
+ * POST /api/wander/sessions — log a completed wander session for activity tracking,
+ * mirroring reading sessions. Body: { startedAt (epoch ms), ideasVisited }.
+ * Called on exit from the wander surface (web via sendBeacon, iOS via onDisappear).
+ */
+app.post("/api/wander/sessions", async (c) => {
+  const profileId = c.get("profileId");
+  if (!profileId) return c.json({ success: false, error: "Profile required" }, 401);
+
+  const body = await c.req.json().catch(() => null);
+  const now = Date.now();
+  const startedMs = Number(body?.startedAt);
+  // Reject nonsense timestamps (future, or >24h ago); fall back to a 0-length session.
+  const startedAt =
+    Number.isFinite(startedMs) && startedMs <= now && now - startedMs <= 86_400_000
+      ? new Date(startedMs)
+      : new Date(now);
+  const ideasVisited = Math.max(1, Math.min(10_000, Math.floor(Number(body?.ideasVisited) || 1)));
+
+  db.insert(wanderSessions)
+    .values({
+      id: randomUUID(),
+      profileId,
+      startedAt,
+      endedAt: new Date(now),
+      ideasVisited,
+    })
+    .run();
+
+  return c.json({ success: true });
+});
+
+export { app as knowledgeRoutes };

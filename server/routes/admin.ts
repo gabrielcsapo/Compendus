@@ -5,9 +5,93 @@ import { streamFileResponse } from "../lib/file-serving";
 import { db, rawDb, bookSubjects, backgroundJobs } from "../../app/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { findBestMetadata } from "../../app/lib/metadata";
+import { enqueueJob, getJob } from "../../app/lib/queue";
 import { randomUUID } from "crypto";
 
 const app = new Hono();
+
+// Formats the knowledge pipeline can analyze: EPUB directly, plus the formats
+// ensureEpub converts to EPUB on demand. Audiobooks and comics are excluded — they
+// can't become text, so we never queue or count them.
+const ANALYZABLE_FORMATS = ["epub", "pdf", "mobi", "azw3"];
+const ANALYZABLE_SQL = `(${ANALYZABLE_FORMATS.map((f) => `'${f}'`).join(", ")})`;
+
+// GET /api/admin/backfill-graph — how much of the analyzable library has a Living
+// Library graph, and how much is still pending. Drives the backfill decision.
+app.get("/api/admin/backfill-graph", (c) => {
+  const total = (
+    rawDb.prepare(`SELECT COUNT(*) AS n FROM books WHERE format IN ${ANALYZABLE_SQL}`).get() as {
+      n: number;
+    }
+  ).n;
+  const byStatus = rawDb
+    .prepare("SELECT status, COUNT(*) AS n FROM book_analysis GROUP BY status")
+    .all() as Array<{ status: string; n: number }>;
+  const counts = Object.fromEntries(byStatus.map((r) => [r.status, r.n]));
+  const completed = counts.completed ?? 0;
+  const queued = (
+    rawDb
+      .prepare(
+        "SELECT COUNT(*) AS n FROM background_jobs WHERE type = 'extract' AND status = 'pending'",
+      )
+      .get() as { n: number }
+  ).n;
+  return c.json({
+    success: true,
+    total,
+    completed,
+    remaining: Math.max(0, total - completed),
+    byStatus: counts,
+    queuedExtractJobs: queued,
+  });
+});
+
+// POST /api/admin/backfill-graph — enqueue Living Library extraction for every
+// book that hasn't been analyzed yet. The job processor drains these strictly
+// one at a time, which is exactly the pacing the shared host needs (the reason
+// we use the GLiNER encoder rather than a local LLM). Idempotent: books already
+// completed, or with an extract job already pending/running, are skipped.
+// `?force=true` re-queues the entire library (e.g. after a pipeline change).
+app.post("/api/admin/backfill-graph", (c) => {
+  const force = c.req.query("force") === "true";
+  const rows = (
+    force
+      ? rawDb
+          .prepare(`SELECT id FROM books WHERE format IN ${ANALYZABLE_SQL} ORDER BY created_at ASC`)
+          .all()
+      : rawDb
+          .prepare(
+            `SELECT b.id FROM books b
+             LEFT JOIN book_analysis a ON a.book_id = b.id
+             WHERE b.format IN ${ANALYZABLE_SQL}
+               AND (a.status IS NULL OR a.status NOT IN ('completed', 'running', 'pending'))
+             ORDER BY b.created_at ASC`,
+          )
+          .all()
+  ) as Array<{ id: string }>;
+
+  let enqueued = 0;
+  let skipped = 0;
+  for (const { id } of rows) {
+    const jobId = `extract-${id}`;
+    const existing = getJob(jobId);
+    if (existing && (existing.status === "pending" || existing.status === "running")) {
+      skipped++;
+      continue;
+    }
+    enqueueJob(jobId, "extract", { bookId: id });
+    enqueued++;
+  }
+
+  return c.json({
+    success: true,
+    enqueued,
+    skipped,
+    message: `Queued ${enqueued} book${enqueued === 1 ? "" : "s"} for Living Library analysis${
+      skipped ? ` (${skipped} already in flight)` : ""
+    }. They process one at a time; watch /api/admin/backfill-graph for progress.`,
+  });
+});
 
 // POST /api/admin/enrich-subjects - Batch enrich books with subjects from external metadata
 app.post("/api/admin/enrich-subjects", async (c) => {

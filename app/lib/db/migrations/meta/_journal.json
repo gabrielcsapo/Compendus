@@ -78,6 +78,27 @@
       "when": 1778006327746,
       "tag": "0010_sweet_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1779988269431,
+      "tag": "0011_complete_roulette",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1779998631046,
+      "tag": "0012_curly_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1780022221391,
+      "tag": "0013_normal_hitman",
+      "breakpoints": true
     }
   ]
 }

@@ -137,6 +137,22 @@ function ProfileDropdown({ profile }: { profile: ProfileInfo }) {
           {/* Actions */}
           <div className="py-1">
             <Link
+              to="/highlights"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+                />
+              </svg>
+              Highlights
+            </Link>
+
+            <Link
               to="/profile"
               onClick={() => setOpen(false)}
               className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors"
@@ -323,10 +339,7 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
                 Library
               </NavLink>
             </li>
-            <li>
-              <NavLink to="/highlights">Highlights</NavLink>
-            </li>
-            <li className="ml-auto">
+            <li className="flex-1 min-w-[12rem]">
               <SearchInput />
             </li>
             {profileLoaded && profile && (
@@ -334,6 +347,29 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
                 <ProfileDropdown profile={profile} />
               </li>
             )}
+            <li>
+              <Link
+                to="/wander"
+                aria-label="Wander the Living Library"
+                title="Wander"
+                className="flex items-center justify-center w-9 h-9 rounded-lg text-foreground-muted hover:text-primary hover:bg-surface-elevated transition-colors"
+              >
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 19c3 0 3-5 6-5s3 5 6 5" opacity="0.5" />
+                  <path d="M5 14c3 0 3-9 7-9 2.5 0 3 4 0 4" />
+                  <circle cx="5" cy="19" r="1.4" fill="currentColor" stroke="none" />
+                  <circle cx="17" cy="19" r="1.4" fill="currentColor" stroke="none" />
+                </svg>
+              </Link>
+            </li>
             <li>
               <DarkModeToggle />
             </li>

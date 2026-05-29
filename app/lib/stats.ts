@@ -1,4 +1,4 @@
-import { db, readingSessions, userBookState, books, profiles } from "./db";
+import { db, readingSessions, wanderSessions, userBookState, books, profiles } from "./db";
 import { eq, and, sql, inArray } from "drizzle-orm";
 
 /**
@@ -49,6 +49,13 @@ export type StatsResponse = {
   todayHourly: { hour: number; minutes: number }[];
   thisMonthDaily: { date: string; minutes: number }[];
   thisYearMonthly: { month: number; minutes: number }[];
+  /** Living Library "wander" activity, tracked alongside reading. */
+  wander: {
+    totalMinutes: number;
+    sessions: number;
+    ideasVisited: number;
+    last7Days: { date: string; minutes: number }[];
+  };
 };
 
 function toMs(value: Date | number): number {
@@ -347,6 +354,42 @@ export function computeReadingStats(profileId: string): StatsResponse {
     };
   });
 
+  // --- Wander (Living Library) activity ---
+  const allWanderSessions = db
+    .select()
+    .from(wanderSessions)
+    .where(and(eq(wanderSessions.profileId, profileId), sql`${wanderSessions.endedAt} IS NOT NULL`))
+    .all();
+
+  const wanderTotalMinutes = Math.round(
+    allWanderSessions.reduce(
+      (sum, s) => sum + Math.max(0, toMs(s.endedAt!) - toMs(s.startedAt)) / 60000,
+      0,
+    ),
+  );
+  const wanderIdeasVisited = allWanderSessions.reduce((sum, s) => sum + (s.ideasVisited ?? 0), 0);
+
+  const wanderDailyMap = new Map<string, number>();
+  for (const s of allWanderSessions) {
+    const day = toDateKey(s.startedAt);
+    const mins = Math.max(0, toMs(s.endedAt!) - toMs(s.startedAt)) / 60000;
+    wanderDailyMap.set(day, (wanderDailyMap.get(day) ?? 0) + mins);
+  }
+  const wanderLast7Days: { date: string; minutes: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    wanderLast7Days.push({ date: key, minutes: Math.round(wanderDailyMap.get(key) ?? 0) });
+  }
+
+  const wander = {
+    totalMinutes: wanderTotalMinutes,
+    sessions: allWanderSessions.length,
+    ideasVisited: wanderIdeasVisited,
+    last7Days: wanderLast7Days,
+  };
+
   return {
     totalMinutes,
     booksRead,
@@ -364,5 +407,6 @@ export function computeReadingStats(profileId: string): StatsResponse {
     todayHourly,
     thisMonthDaily,
     thisYearMonthly,
+    wander,
   };
 }

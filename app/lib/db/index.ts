@@ -17,6 +17,11 @@ const sqlite = new Database(DB_PATH);
 // Enable WAL mode for better concurrent performance
 sqlite.pragma("journal_mode = WAL");
 
+// Enforce foreign keys so onDelete:cascade actually fires (off by default in
+// SQLite). Without this, deleting a row leaves orphaned children — e.g. deleting
+// passages left dangling entity_mentions, corrupting the knowledge graph on re-run.
+sqlite.pragma("foreign_keys = ON");
+
 // Create Drizzle instance
 export const db = drizzle(sqlite, { schema });
 

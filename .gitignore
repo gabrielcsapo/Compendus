@@ -42,3 +42,6 @@ xcuserdata/
 # Test output (manually inspect generated EPUBs)
 tests/output/
 tests/temp/
+
+# Large GLiNER model — downloaded at runtime into data/, not committed
+models/onnx-community/gliner_small-v2/onnx/

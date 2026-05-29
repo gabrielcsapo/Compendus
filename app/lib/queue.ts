@@ -10,9 +10,7 @@
  * Both patterns persist to SQLite and notify SSE subscribers in real time.
  */
 import { eq, asc } from "drizzle-orm";
-import { readFile } from "fs/promises";
-import { mkdirSync, statSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { mkdirSync, statSync } from "fs";
 import { db, backgroundJobs, books } from "./db";
 import { transcribeAudio, isWhisperAvailable } from "./processing/transcribe";
 
@@ -40,11 +38,17 @@ interface TranscribePayload {
 
 interface ConvertPayload {
   bookId: string;
-  bookPath: string;
-  format: string;
-  title: string;
-  authors: string;
-  language: string | null;
+  // Legacy fields kept for backward compatibility with already-queued jobs; the
+  // processor now reads everything it needs from the book row via convertBookToEpub.
+  bookPath?: string;
+  format?: string;
+  title?: string;
+  authors?: string;
+  language?: string | null;
+}
+
+interface ExtractPayload {
+  bookId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +265,40 @@ export function cancelJob(id: string): { success: boolean; message: string } {
   return { success: true, message: "Job cleared" };
 }
 
+/**
+ * Cancel/clear every job at once: aborts the running job, drops all pending jobs,
+ * and clears finished (completed/error) rows. Use to stop a runaway batch (e.g. a
+ * large graph backfill) and empty the queue.
+ */
+export function cancelAllJobs(): { success: boolean; message: string; cancelled: number } {
+  const rows = db.select().from(backgroundJobs).all();
+
+  // Signal the in-flight job to stop at its next checkpoint.
+  currentAbortController?.abort();
+
+  // Remove every row regardless of status.
+  db.delete(backgroundJobs).run();
+
+  // Settle any open UIs/SSE subscribers watching active jobs.
+  for (const r of rows) {
+    if (r.status === "pending" || r.status === "running") {
+      notifySubscribers(r.id, {
+        id: r.id,
+        status: "error",
+        progress: 0,
+        message: "Cancelled",
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  return {
+    success: true,
+    message: `Cancelled ${rows.length} job${rows.length === 1 ? "" : "s"}`,
+    cancelled: rows.length,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Job processor — runs one job at a time
 // ---------------------------------------------------------------------------
@@ -303,53 +341,33 @@ async function processTranscribeJob(jobId: string, payload: TranscribePayload): 
 }
 
 async function processConvertJob(jobId: string, payload: ConvertPayload): Promise<void> {
-  const { bookId, bookPath, format } = payload;
+  const { bookId } = payload;
+  const book = db.select().from(books).where(eq(books.id, bookId)).get();
+  if (!book) throw new Error("Book not found");
 
-  updateJobProgress(jobId, {
-    status: "running",
-    progress: 1,
-    message: `Reading ${format.toUpperCase()} file...`,
+  // Shared with the knowledge pipeline's on-demand conversion (single source of
+  // truth for "turn this book into an EPUB and record it on the book row").
+  const { convertBookToEpub } = await import("./processing/ensure-epub");
+  const epubPath = await convertBookToEpub(book, {
+    onProgress: (percent, message) =>
+      updateJobProgress(jobId, { status: "running", progress: percent, message }),
   });
 
-  const fileBuffer = await readFile(bookPath);
-
-  const authors = payload.authors ? JSON.parse(payload.authors) : [];
-  const metadata = {
-    title: payload.title,
-    authors: Array.isArray(authors) ? authors : [],
-    language: payload.language ?? undefined,
-  };
-
-  const onProgress = (percent: number, message: string) => {
-    updateJobProgress(jobId, { status: "running", progress: percent, message });
-  };
-
-  let epubBuffer: Buffer;
-  if (format === "pdf") {
-    const { convertPdfToEpub } = await import("./processing/pdf-to-epub");
-    epubBuffer = await convertPdfToEpub(fileBuffer, metadata, { onProgress });
-  } else {
-    const { convertMobiToEpub } = await import("./processing/mobi-to-epub");
-    epubBuffer = await convertMobiToEpub(fileBuffer, metadata, { onProgress });
-  }
-
-  // Store the converted EPUB
-  const epubPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
-  writeFileSync(epubPath, epubBuffer);
   const epubSize = statSync(epubPath).size;
-
-  // Update DB
-  await db
-    .update(books)
-    .set({
-      convertedEpubPath: `data/books/${bookId}.epub`,
-      convertedEpubSize: epubSize,
-    })
-    .where(eq(books.id, bookId));
-
   console.log(
-    `[Queue] ${format.toUpperCase()} → EPUB conversion complete for ${bookId} (${(epubSize / 1024).toFixed(1)} KB)`,
+    `[Queue] ${book.format.toUpperCase()} → EPUB conversion complete for ${bookId} (${(epubSize / 1024).toFixed(1)} KB)`,
   );
+}
+
+async function processExtractJob(jobId: string, payload: ExtractPayload): Promise<void> {
+  // Dynamic import keeps the LLM/embeddings deps out of the queue's static graph.
+  const { analyzeBook } = await import("./knowledge/pipeline");
+  await analyzeBook(payload.bookId, {
+    signal: currentAbortController?.signal,
+    onProgress: (progress, message) =>
+      updateJobProgress(jobId, { status: "running", progress, message }),
+    onLog: (line) => appendJobLog(jobId, line),
+  });
 }
 
 async function processNextJob(): Promise<void> {
@@ -397,6 +415,8 @@ async function processNextJob(): Promise<void> {
       await processTranscribeJob(jobId, payload as TranscribePayload);
     } else if (row.type === "convert") {
       await processConvertJob(jobId, payload as ConvertPayload);
+    } else if (row.type === "extract") {
+      await processExtractJob(jobId, payload as ExtractPayload);
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }
@@ -404,10 +424,15 @@ async function processNextJob(): Promise<void> {
     // Check if cancelled during processing
     if (currentAbortController.signal.aborted) return;
 
+    const completionLabel: Record<string, string> = {
+      transcribe: "Transcription",
+      convert: "Conversion",
+      extract: "Analysis",
+    };
     updateJobProgress(jobId, {
       status: "completed",
       progress: 100,
-      message: `${row.type === "transcribe" ? "Transcription" : "Conversion"} complete`,
+      message: `${completionLabel[row.type] ?? "Job"} complete`,
       result: { bookId: payload.bookId },
     });
 
@@ -451,7 +476,7 @@ export function startJobProcessor(): void {
 
   // Only reset enqueued job types (not inline jobs like audio merge)
   for (const row of stale) {
-    if (row.type === "transcribe" || row.type === "convert") {
+    if (row.type === "transcribe" || row.type === "convert" || row.type === "extract") {
       db.update(backgroundJobs)
         .set({ status: "pending", updatedAt: new Date() })
         .where(eq(backgroundJobs.id, row.id))

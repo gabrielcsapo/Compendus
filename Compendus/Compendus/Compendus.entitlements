@@ -16,5 +16,12 @@
 	<array>
 		<string>group.com.gabrielcsapo.Compendus.shared</string>
 	</array>
+	<!--
+	CarPlay audio entitlement. Apple-managed: requested via
+	https://developer.apple.com/contact/carplay/ and approved 2026-05-28.
+	Requires a provisioning profile that includes the CarPlay capability.
+	-->
+	<key>com.apple.developer.carplay-audio</key>
+	<true/>
 </dict>
 </plist>

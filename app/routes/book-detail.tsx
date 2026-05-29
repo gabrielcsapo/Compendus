@@ -16,15 +16,22 @@ import { AuthorLinks } from "../components/AuthorLink";
 import type { BookFormat } from "../lib/types";
 import { ConvertToEpubButton, ReconvertEpubButton } from "../components/ConvertToEpubButton";
 import { TranscribeButton } from "../components/TranscribeButton";
+import { AnalyzeButton } from "../components/AnalyzeButton";
 import { ToggleReadButton } from "../components/ToggleReadButton";
 import { BookReview } from "../components/BookReview";
+import { getCurrentProfile } from "../actions/profiles";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
-  const [book, tags] = await Promise.all([getBook(id), getTagsForBook(id)]);
+  const [book, tags, currentProfile] = await Promise.all([
+    getBook(id),
+    getTagsForBook(id),
+    getCurrentProfile(),
+  ]);
   if (!book) {
     throw new Response("Book not found", { status: 404 });
   }
+  const isAdmin = currentProfile?.isAdmin ?? false;
 
   // Parse authors with defensive handling for corrupted data
   const rawAuthors = book.authors ? JSON.parse(book.authors) : [];
@@ -150,6 +157,9 @@ export default async function BookDetail({ params }: { params?: Record<string, s
           {["m4b", "mp3", "m4a"].includes(book.format) && (
             <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
           )}
+
+          {/* Living Library analysis — admin only, EPUB (the source extractor is EPUB-based) */}
+          {isAdmin && book.format === "epub" && <AnalyzeButton bookId={book.id} />}
 
           {/* Linked formats — streamed via Suspense */}
           <Suspense>

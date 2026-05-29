@@ -26,17 +26,21 @@
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.43.0",
     "@hono/node-server": "^2.0.2",
+    "@huggingface/transformers": "^4.2.0",
     "@tanstack/react-virtual": "^3.13.24",
+    "@xenova/transformers": "2.17.2",
     "adm-zip": "^0.5.17",
     "better-sqlite3": "^12.10.0",
     "busboy": "^1.6.0",
     "canvas": "^3.2.3",
     "codemirror": "^6.0.2",
     "drizzle-orm": "^0.45.2",
+    "gliner": "^0.0.19",
     "hono": "^4.12.18",
     "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
     "music-metadata": "^11.12.3",
+    "node-html-parser": "^7.1.0",
     "node-id3": "^0.2.9",
     "node-unrar-js": "^2.0.2",
     "pdf-lib": "^1.17.1",
@@ -94,10 +98,14 @@
       "core-js",
       "es5-ext",
       "esbuild",
-      "puppeteer"
+      "onnxruntime-node",
+      "puppeteer",
+      "sharp"
     ],
     "overrides": {
-      "pdfjs-dist": "^5.4.530"
+      "pdfjs-dist": "^5.4.530",
+      "onnxruntime-node": "1.24.3",
+      "sharp": "^0.34.5"
     }
   }
 }

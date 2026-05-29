@@ -9,12 +9,16 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - NODE_OPTIONS=--max-old-space-size=4096
+      - NODE_OPTIONS=--max-old-space-size=3072
       - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
     deploy:
       resources:
+        limits:
+          # Covers Node (3 GB heap) + the in-process GLiNER/embedding ONNX models
+          # + headroom for PDF/image spikes.
+          memory: 8G
         reservations:
-          memory: 1G
+          memory: 2G
     restart: unless-stopped
     # ---------- GPU access ----------
     # NVIDIA: uncomment below (requires nvidia-container-toolkit on host)

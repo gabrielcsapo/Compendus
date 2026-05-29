@@ -7,6 +7,7 @@ import { ReadingStreakCard } from "../components/dashboard/ReadingStreakCard";
 import { WeeklyReadingChart } from "../components/dashboard/WeeklyReadingChart";
 import { MonthlyHeatmap } from "../components/dashboard/MonthlyHeatmap";
 import { TopBooksCard } from "../components/dashboard/TopBooksCard";
+import { WanderActivityCard } from "../components/dashboard/WanderActivityCard";
 import { StatsDetailModal } from "../components/dashboard/StatsDetailModal";
 import type { StatsResponse } from "../actions/stats";
 
@@ -144,6 +145,18 @@ export default function DashboardPage({
           books={stats.topBooks.slice(0, 5)}
           onViewAll={() => setShowStatsModal(true)}
         />
+      )}
+
+      {/* Wander (Living Library) activity — only once there's something to show */}
+      {stats && stats.wander && stats.wander.sessions > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <WanderActivityCard
+            totalMinutes={stats.wander.totalMinutes}
+            sessions={stats.wander.sessions}
+            ideasVisited={stats.wander.ideasVisited}
+            last7Days={stats.wander.last7Days}
+          />
+        </div>
       )}
 
       {/* Row 3: Continue Reading */}

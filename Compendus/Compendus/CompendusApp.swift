@@ -14,35 +14,9 @@ import EPUBReader
 struct CompendusApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            DownloadedBook.self,
-            ReadingMark.self,
-            PendingDownload.self,
-            PendingBookEdit.self,
-            ReadingSession.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            // Pre-release destructive migration: BookHighlight / BookBookmark
-            // were consolidated into ReadingMark in May 2026. Old stores from
-            // that schema can't be migrated automatically — wipe and rebuild.
-            // Safe to do solo pre-release; remove this fallback once shipped.
-            print("ModelContainer init failed (\(error)); attempting destructive reset.")
-            let storeURL = URL.applicationSupportDirectory.appending(path: "default.store")
-            try? FileManager.default.removeItem(at: storeURL)
-            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
-            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
-            do {
-                return try ModelContainer(for: schema, configurations: [modelConfiguration])
-            } catch {
-                fatalError("Could not create ModelContainer after reset: \(error)")
-            }
-        }
-    }()
+    // Shared with the AppDelegate / CarPlay scene via AppServices so the phone
+    // UI and CarPlay drive one container and one player. See AppServices.
+    var sharedModelContainer: ModelContainer { AppServices.modelContainer }
 
     @State private var serverConfig = ServerConfig()
     @State private var storageManager = StorageManager()
@@ -52,7 +26,7 @@ struct CompendusApp: App {
     @State private var imageCache = ImageCache()
     @State private var readerSettings = ReaderSettings()
     @State private var appNavigation = AppNavigation()
-    @State private var audiobookPlayer = AudiobookPlayer()
+    @State private var audiobookPlayer = AppServices.audiobookPlayer
     @State private var onDeviceTranscriptionService = OnDeviceTranscriptionService()
     @State private var themeManager = ThemeManager()
     @State private var appSettings = AppSettings()
@@ -122,6 +96,8 @@ struct CompendusApp: App {
                     downloadManager.appSettings = appSettings
                     downloadManager.pocketTTSModelManager = pocketTTSModelManager
                     audiobookPlayer.modelContainer = sharedModelContainer
+                    appDelegate.audiobookPlayer = audiobookPlayer
+                    appDelegate.modelContainer = sharedModelContainer
                     bookEditSyncService.modelContainer = sharedModelContainer
                     syncService.modelContainer = sharedModelContainer
                     onDeviceTranscriptionService.appSettings = appSettings

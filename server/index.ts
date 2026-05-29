@@ -23,6 +23,7 @@ import { libraryRoutes } from "./routes/library";
 import { adminRoutes } from "./routes/admin";
 import { statsRoutes } from "./routes/stats";
 import { exploreRoutes } from "./routes/explore";
+import { knowledgeRoutes } from "./routes/knowledge";
 import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
@@ -103,6 +104,7 @@ app.use("/api/reader*", requireProfile);
 app.use("/api/jobs*", requireProfile);
 app.use("/api/stats*", requireProfile);
 app.use("/api/explore*", requireProfile);
+app.use("/api/graph*", requireProfile);
 
 // Admin-only routes
 app.use("/api/upload*", requireAdmin);
@@ -123,6 +125,7 @@ app.route("/", libraryRoutes);
 app.route("/", adminRoutes);
 app.route("/", statsRoutes);
 app.route("/", exploreRoutes);
+app.route("/", knowledgeRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);

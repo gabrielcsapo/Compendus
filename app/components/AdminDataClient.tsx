@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-flight-router/client";
 import { useToast } from "./ToastContext";
 import {
@@ -8,6 +8,7 @@ import {
   deleteMissingFileRecord,
   deleteBook,
   cancelBackgroundJob,
+  cancelAllBackgroundJobs,
 } from "../actions/books";
 
 interface FileInfo {
@@ -147,6 +148,163 @@ function OrphanedFilePreview({ file }: { file: FileInfo }) {
   );
 }
 
+interface GraphCoverage {
+  total: number;
+  completed: number;
+  remaining: number;
+  queuedExtractJobs: number;
+  byStatus: Record<string, number>;
+}
+
+/**
+ * Living Library coverage + backfill control. Surfaces how much of the library
+ * has a knowledge graph and lets an admin queue extraction for the rest. The job
+ * processor drains these one at a time, so it's safe to fire the whole library.
+ */
+function LivingLibrarySection() {
+  const { showToast } = useToast();
+  const [stats, setStats] = useState<GraphCoverage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [starting, setStarting] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/backfill-graph");
+      const data = await res.json();
+      if (data.success) setStats(data as GraphCoverage);
+    } catch {
+      // leave stats null; the section shows a fallback
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const startBackfill = async (force: boolean) => {
+    const scope = force
+      ? "Re-analyze the ENTIRE library? This re-queues every book, including ones already analyzed."
+      : `Queue Living Library analysis for ${stats?.remaining ?? "all"} un-analyzed book(s)?`;
+    if (
+      !confirm(
+        `${scope}\n\nBooks process one at a time in the background and this can take a long while.`,
+      )
+    ) {
+      return;
+    }
+    setStarting(true);
+    try {
+      const res = await fetch(`/api/admin/backfill-graph${force ? "?force=true" : ""}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, "success");
+        await load();
+      } else {
+        showToast(data.error || "Failed to start backfill", "error");
+      }
+    } catch {
+      showToast("Failed to start backfill", "error");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const pct = stats && stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+  const erroredCount = stats?.byStatus.error ?? 0;
+
+  return (
+    <section className="mb-8">
+      <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
+        <span className="w-3 h-3 bg-amber-500 rounded-full"></span>
+        Graph Data
+      </h2>
+      <p className="text-sm text-foreground-muted mb-4">
+        Extract entities, relationships, and passages so books appear in Wander and the knowledge
+        graph. Books are processed one at a time in the background.
+      </p>
+      {loading ? (
+        <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
+          Loading graph coverage…
+        </div>
+      ) : stats ? (
+        <div className="bg-surface-elevated rounded-lg p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <div>
+              <div className="text-2xl font-bold text-foreground">{stats.completed}</div>
+              <div className="text-sm text-foreground-muted">Analyzed</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-foreground">{stats.remaining}</div>
+              <div className="text-sm text-foreground-muted">Remaining</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-foreground">{stats.queuedExtractJobs}</div>
+              <div className="text-sm text-foreground-muted">Queued</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-foreground">{stats.total}</div>
+              <div className="text-sm text-foreground-muted">Total Books</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-2 bg-surface rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 rounded-full transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className="text-xs text-foreground-muted whitespace-nowrap">{pct}% analyzed</span>
+          </div>
+
+          {erroredCount > 0 && (
+            <p className="text-xs text-error mb-3">
+              {erroredCount} book{erroredCount === 1 ? "" : "s"} failed last time — re-running the
+              backfill retries them.
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => startBackfill(false)}
+              disabled={starting || stats.remaining === 0}
+              className="px-3 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {starting
+                ? "Queuing…"
+                : stats.remaining === 0
+                  ? "All books analyzed"
+                  : `Analyze ${stats.remaining} remaining`}
+            </button>
+            <button
+              onClick={() => startBackfill(true)}
+              disabled={starting}
+              className="px-3 py-2 text-sm rounded-lg border border-border text-foreground-muted hover:text-foreground hover:bg-surface disabled:opacity-50"
+            >
+              Re-analyze all
+            </button>
+            <button
+              onClick={load}
+              disabled={starting}
+              className="px-3 py-2 text-sm text-foreground-muted hover:text-foreground disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
+          Couldn't load graph coverage.
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AdminDataClient({
   orphanedFiles: initialOrphanedFiles,
   matchedFiles: initialMatchedFiles,
@@ -168,8 +326,21 @@ export function AdminDataClient({
   const [uploading, setUploading] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  const [cancellingAll, setCancellingAll] = useState(false);
+  const [jobsPage, setJobsPage] = useState(1);
+  const [jobsPageSize, setJobsPageSize] = useState(25);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadBookIdRef = useRef<string | null>(null);
+
+  const jobsTotalPages = Math.max(1, Math.ceil(jobs.length / jobsPageSize));
+  const jobsClampedPage = Math.min(jobsPage, jobsTotalPages);
+  const paginatedJobs = jobs.slice(
+    (jobsClampedPage - 1) * jobsPageSize,
+    jobsClampedPage * jobsPageSize,
+  );
+  const activeJobCount = jobs.filter(
+    (j) => j.status === "pending" || j.status === "running",
+  ).length;
 
   // Matched files: search, filter, pagination
   const [matchedSearch, setMatchedSearch] = useState("");
@@ -205,6 +376,26 @@ export function AdminDataClient({
     (clampedPage - 1) * matchedPageSize,
     clampedPage * matchedPageSize,
   );
+
+  const handleCancelAllJobs = async () => {
+    if (
+      !confirm(
+        `Cancel all ${jobs.length} jobs? This aborts the running job, drops everything pending, and clears finished jobs. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setCancellingAll(true);
+    const result = await cancelAllBackgroundJobs();
+    setCancellingAll(false);
+    if (result.success) {
+      setJobs([]);
+      setJobsPage(1);
+      showToast(result.message, "success");
+    } else {
+      showToast(result.message, "error");
+    }
+  };
 
   const handleCancelJob = async (job: JobRecord) => {
     const action =
@@ -355,117 +546,191 @@ export function AdminDataClient({
         </div>
       </div>
 
+      {/* Graph Data Section */}
+      <LivingLibrarySection />
+
       {/* Background Jobs Section */}
       <section className="mb-8">
-        <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
-          <span className="w-3 h-3 bg-primary rounded-full"></span>
-          Background Jobs ({jobs.length})
-        </h2>
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <span className="w-3 h-3 bg-primary rounded-full"></span>
+            Background Jobs ({jobs.length})
+          </h2>
+          {jobs.length > 0 && (
+            <button
+              onClick={handleCancelAllJobs}
+              disabled={cancellingAll}
+              className="px-3 py-1.5 text-sm rounded-lg border border-error/40 text-error hover:bg-error/10 disabled:opacity-50 whitespace-nowrap"
+            >
+              {cancellingAll ? "Cancelling…" : "Cancel all jobs"}
+            </button>
+          )}
+        </div>
         <p className="text-sm text-foreground-muted mb-4">
           Persistent job queue for transcription, conversion, and other long-running tasks.
+          {activeJobCount > 0 ? ` ${activeJobCount} active.` : ""}
         </p>
         {jobs.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
             No background jobs found.
           </div>
         ) : (
-          <div className="bg-surface-elevated rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-3 text-foreground-muted font-medium">Job ID</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">Type</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">Status</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">Progress</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">Message</th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">Updated</th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((job) => (
-                  <React.Fragment key={job.id}>
-                    <tr
-                      className="border-b border-border last:border-0 hover:bg-surface cursor-pointer"
-                      onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
-                    >
-                      <td className="p-3 text-foreground font-mono text-xs">
-                        <span className="mr-1.5 text-foreground-muted">
-                          {expandedJob === job.id ? "\u25BC" : "\u25B6"}
-                        </span>
-                        {job.id}
-                      </td>
-                      <td className="p-3 text-foreground-muted capitalize">{job.type}</td>
-                      <td className="p-3">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                            job.status === "completed"
-                              ? "bg-green-500/10 text-green-700 dark:text-green-400"
-                              : job.status === "running"
-                                ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                                : job.status === "error"
-                                  ? "bg-red-500/10 text-red-700 dark:text-red-400"
-                                  : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
-                          }`}
-                        >
-                          {job.status === "running" && (
-                            <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
-                          )}
-                          {job.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-foreground-muted">
-                        {job.status === "running" || job.status === "completed" ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full transition-all"
-                                style={{ width: `${job.progress}%` }}
-                              />
-                            </div>
-                            <span className="text-xs">{job.progress}%</span>
-                          </div>
-                        ) : (
-                          <span className="text-xs">—</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-foreground-muted text-xs max-w-[200px] truncate">
-                        {job.message || "—"}
-                      </td>
-                      <td
-                        className="p-3 text-foreground-muted text-xs text-right whitespace-nowrap"
-                        suppressHydrationWarning
+          <>
+            <div className="bg-surface-elevated rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-3 text-foreground-muted font-medium">Job ID</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">Type</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">Status</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">Progress</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">Message</th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">Updated</th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedJobs.map((job) => (
+                    <React.Fragment key={job.id}>
+                      <tr
+                        className="border-b border-border last:border-0 hover:bg-surface cursor-pointer"
+                        onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
                       >
-                        {job.updatedAt ? new Date(job.updatedAt).toLocaleString() : "—"}
-                      </td>
-                      <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => handleCancelJob(job)}
-                          disabled={deleting === job.id}
-                          className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                        <td className="p-3 text-foreground font-mono text-xs">
+                          <span className="mr-1.5 text-foreground-muted">
+                            {expandedJob === job.id ? "\u25BC" : "\u25B6"}
+                          </span>
+                          {job.id}
+                        </td>
+                        <td className="p-3 text-foreground-muted capitalize">{job.type}</td>
+                        <td className="p-3">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              job.status === "completed"
+                                ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                                : job.status === "running"
+                                  ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                                  : job.status === "error"
+                                    ? "bg-red-500/10 text-red-700 dark:text-red-400"
+                                    : "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400"
+                            }`}
+                          >
+                            {job.status === "running" && (
+                              <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
+                            )}
+                            {job.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-foreground-muted">
+                          {job.status === "running" || job.status === "completed" ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary rounded-full transition-all"
+                                  style={{ width: `${job.progress}%` }}
+                                />
+                              </div>
+                              <span className="text-xs">{job.progress}%</span>
+                            </div>
+                          ) : (
+                            <span className="text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-foreground-muted text-xs max-w-[200px] truncate">
+                          {job.message || "—"}
+                        </td>
+                        <td
+                          className="p-3 text-foreground-muted text-xs text-right whitespace-nowrap"
+                          suppressHydrationWarning
                         >
-                          {deleting === job.id
-                            ? "..."
-                            : job.status === "running" || job.status === "pending"
-                              ? "Cancel"
-                              : "Clear"}
-                        </button>
-                      </td>
-                    </tr>
-                    {expandedJob === job.id && (
-                      <tr className="border-b border-border">
-                        <td colSpan={7} className="p-0">
-                          <pre className="p-3 bg-surface text-foreground-muted text-xs font-mono overflow-x-auto max-h-80 overflow-y-auto whitespace-pre-wrap">
-                            {job.logs || "No logs captured yet."}
-                          </pre>
+                          {job.updatedAt ? new Date(job.updatedAt).toLocaleString() : "—"}
+                        </td>
+                        <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleCancelJob(job)}
+                            disabled={deleting === job.id}
+                            className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                          >
+                            {deleting === job.id
+                              ? "..."
+                              : job.status === "running" || job.status === "pending"
+                                ? "Cancel"
+                                : "Clear"}
+                          </button>
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      {expandedJob === job.id && (
+                        <tr className="border-b border-border">
+                          <td colSpan={7} className="p-0">
+                            <pre className="p-3 bg-surface text-foreground-muted text-xs font-mono overflow-x-auto max-h-80 overflow-y-auto whitespace-pre-wrap">
+                              {job.logs || "No logs captured yet."}
+                            </pre>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Jobs pagination */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-foreground-muted">
+                  Showing {(jobsClampedPage - 1) * jobsPageSize + 1}–
+                  {Math.min(jobsClampedPage * jobsPageSize, jobs.length)} of {jobs.length}
+                </p>
+                <select
+                  value={jobsPageSize}
+                  onChange={(e) => {
+                    setJobsPageSize(Number(e.target.value));
+                    setJobsPage(1);
+                  }}
+                  className="px-2 py-1 text-xs bg-surface-elevated border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value={10}>10 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                </select>
+              </div>
+              {jobsTotalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setJobsPage(1)}
+                    disabled={jobsClampedPage <= 1}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setJobsPage(jobsClampedPage - 1)}
+                    disabled={jobsClampedPage <= 1}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-2 py-1 text-xs text-foreground-muted">
+                    Page {jobsClampedPage} of {jobsTotalPages}
+                  </span>
+                  <button
+                    onClick={() => setJobsPage(jobsClampedPage + 1)}
+                    disabled={jobsClampedPage >= jobsTotalPages}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setJobsPage(jobsTotalPages)}
+                    disabled={jobsClampedPage >= jobsTotalPages}
+                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </section>
 

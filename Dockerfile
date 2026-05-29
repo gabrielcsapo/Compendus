@@ -61,6 +61,7 @@ RUN apt-get update && apt-get install -y \
     ghostscript \
     ffmpeg \
     curl \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && git config --global safe.directory '*'
 
@@ -85,7 +86,13 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
-ENV NODE_OPTIONS="--max-old-space-size=4096"
+# Heap kept generous to protect PDF/image processing under the 8 GB container
+# ceiling. Entity extraction is GLiNER/ONNX in-process — no separate model server.
+ENV NODE_OPTIONS="--max-old-space-size=3072"
+# onnxruntime-node delivers inference results via libuv's worker pool; the default
+# size (4) can be starved by the app's other native work (compression, sharp),
+# stalling embedding. Give it generous headroom.
+ENV UV_THREADPOOL_SIZE=16
 EXPOSE 3000 3001
 
 CMD ["pnpm", "start"]

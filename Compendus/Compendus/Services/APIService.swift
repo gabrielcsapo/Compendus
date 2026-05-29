@@ -80,6 +80,56 @@ class APIService {
         return try await fetch(url)
     }
 
+    // MARK: - Living Library (knowledge graph)
+
+    /// Browse graph entities, ranked by cross-library reach.
+    func fetchEntities(type: String? = nil, query: String? = nil, limit: Int = 60) async throws -> EntitiesResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        var urlString = "/api/graph/entities?limit=\(limit)"
+        if let type = type {
+            urlString += "&type=\(type)"
+        }
+        if let query = query {
+            urlString += "&q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)"
+        }
+        guard let url = config.apiURL(urlString) else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Fetch one entity with its cross-book mentions.
+    func fetchEntity(id: String) async throws -> EntityDetailResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        guard let url = config.apiURL("/api/graph/entities/\(encoded)") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Grounded next steps to wander to from an entity.
+    func fetchWander(entityId: String, limit: Int = 6) async throws -> WanderResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let encoded = entityId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entityId
+        guard let url = config.apiURL("/api/graph/entities/\(encoded)/wander?limit=\(limit)") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Log a completed wander session for activity tracking (best-effort, never throws).
+    /// `startedAt` is the session start; `ideasVisited` is how many ideas were surfaced.
+    func logWanderSession(startedAt: Date, ideasVisited: Int) async {
+        guard config.isConfigured else { return }
+        guard let url = config.apiURL("/api/wander/sessions") else { return }
+
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "startedAt": startedAt.timeIntervalSince1970 * 1000,
+            "ideasVisited": max(1, ideasVisited),
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        _ = try? await session.data(for: request)
+    }
+
     /// Fetch all series with cover data for fan-out display
     func fetchSeries() async throws -> SeriesResponse {
         guard config.isConfigured else {

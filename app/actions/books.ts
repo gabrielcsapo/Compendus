@@ -580,6 +580,15 @@ export async function cancelBackgroundJob(
   return cancelJob(jobId);
 }
 
+export async function cancelAllBackgroundJobs(): Promise<{
+  success: boolean;
+  message: string;
+  cancelled: number;
+}> {
+  const { cancelAllJobs } = await import("../lib/queue");
+  return cancelAllJobs();
+}
+
 export async function getRecentBooks(
   limit: number = 10,
   explicitProfileId?: string,

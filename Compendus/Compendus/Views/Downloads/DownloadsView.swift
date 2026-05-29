@@ -333,6 +333,15 @@ struct DownloadsView: View {
 
     // MARK: - Main Content
 
+    /// The Continue Reading / Also Reading section (local + remote books with
+    /// progress or highlights) only renders on the unfiltered, non-search home.
+    /// Selecting a specific filter or searching hides it, so an empty filtered
+    /// result must fall through to the filter's empty state rather than a blank
+    /// scroll view.
+    private var showsContinueReading: Bool {
+        !continueReadingItems.isEmpty && searchText.isEmpty && effectiveFilter == .all && !isSeriesMode
+    }
+
     @ViewBuilder
     private var mainContent: some View {
         if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
@@ -341,7 +350,7 @@ struct DownloadsView: View {
             }
         } else if isSeriesMode {
             seriesGridContent
-        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
+        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && !showsContinueReading {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -397,7 +406,7 @@ struct DownloadsView: View {
     private var booksScrollContent: some View {
         ScrollView {
             // Continue Reading section (local + remote books with progress)
-            if !continueReadingItems.isEmpty && searchText.isEmpty && effectiveFilter == .all && !isSeriesMode {
+            if showsContinueReading {
                 ContinueReadingSection(
                     items: continueReadingItems,
                     onLocalBookTap: { book in

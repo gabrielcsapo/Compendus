@@ -3,7 +3,9 @@ import type { Context } from "hono";
 import { eq } from "drizzle-orm";
 import { createHash } from "crypto";
 import { processBook } from "../../app/lib/processing";
+import { CONVERTIBLE_FORMATS } from "../../app/lib/processing/ensure-epub";
 import { db, books } from "../../app/lib/db";
+import { enqueueJob, getJob } from "../../app/lib/queue";
 import { storeBookFile } from "../../app/lib/storage";
 import type { BookFormat } from "../../app/lib/types";
 import Busboy from "busboy";
@@ -11,6 +13,20 @@ import { createWriteStream, readFileSync, unlinkSync, mkdtempSync, rmdirSync } f
 import { tmpdir } from "os";
 import { join } from "path";
 import { Readable } from "stream";
+
+/**
+ * Queue a background EPUB conversion for a freshly-uploaded book when its format
+ * needs one (PDF/MOBI/AZW3). This makes every book readable in the web reader and
+ * analyzable for the Living Library graph without a manual step. No-op for EPUBs
+ * and for formats that can't become EPUB (audiobooks, comics).
+ */
+function queueEpubConversionIfNeeded(book: typeof books.$inferSelect): void {
+  if (!CONVERTIBLE_FORMATS.includes(book.format)) return;
+  const jobId = `convert-${book.id}`;
+  const existing = getJob(jobId);
+  if (existing && (existing.status === "pending" || existing.status === "running")) return;
+  enqueueJob(jobId, "convert", { bookId: book.id });
+}
 
 interface ParsedFile {
   fieldName: string;
@@ -173,6 +189,7 @@ app.post("/api/upload", async (c) => {
     if (result.success && result.bookId) {
       const book = await db.select().from(books).where(eq(books.id, result.bookId)).get();
       if (book) {
+        queueEpubConversionIfNeeded(book);
         return c.json({
           success: true,
           book: {
