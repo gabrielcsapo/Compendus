@@ -9,6 +9,7 @@ export default function AdminLayout() {
     if (location.pathname === "/admin/batch-edit") return "batch-edit";
     if (location.pathname === "/admin/unmatched") return "unmatched";
     if (location.pathname === "/admin/profiles") return "profiles";
+    if (location.pathname === "/admin/duplicates") return "duplicates";
     return "data";
   };
 
@@ -43,6 +44,9 @@ export default function AdminLayout() {
         </TabLink>
         <TabLink to="/admin/profiles" active={activeTab === "profiles"}>
           Profiles
+        </TabLink>
+        <TabLink to="/admin/duplicates" active={activeTab === "duplicates"}>
+          Duplicates
         </TabLink>
       </div>
 

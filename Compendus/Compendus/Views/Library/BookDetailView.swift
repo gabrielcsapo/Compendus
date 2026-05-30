@@ -23,7 +23,7 @@ struct BookDetailView: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(ReadAlongService.self) private var readAlongService
-    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(KokoroModelManager.self) private var kokoroModelManager
     @Environment(TTSAudioCache.self) private var ttsAudioCache
     @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
     @Environment(ComicExtractor.self) private var comicExtractor
@@ -45,6 +45,10 @@ struct BookDetailView: View {
     @State private var isLoadingRelated = true
     @State private var showingEditSheet = false
     @State private var editedBook: Book?
+    @State private var bookTags: [BookTag] = []
+    @State private var bookCollections: [BookCollection] = []
+    @State private var allCollections: [BookCollection] = []
+    @State private var showingRatingSheet = false
 
     /// Use edited version of the book if available
     private var displayBook: Book {
@@ -72,8 +76,24 @@ struct BookDetailView: View {
             inlineHeader
         }
         .sheet(isPresented: $showingEditSheet) { editSheet }
+        .onChange(of: showingEditSheet) { _, isShowing in
+            // Tags can be edited in the sheet — refresh the chips when it closes.
+            if !isShowing {
+                Task { await loadTags() }
+            }
+        }
+        .sheet(isPresented: $showingRatingSheet) {
+            RatingSheet(
+                initialRating: displayBook.rating,
+                initialReview: displayBook.review ?? "",
+                onSave: { rating, review in saveRating(rating: rating, review: review) }
+            )
+            .presentationDetents([.medium, .large])
+        }
         .task {
             checkIfDownloaded()
+            await loadTags()
+            await loadCollections()
             await loadRelatedBooks()
         }
         .onChange(of: downloadCompletion) { _, completed in
@@ -98,8 +118,25 @@ struct BookDetailView: View {
     @ViewBuilder
     private var inlineHeader: some View {
         HStack {
-            Button { showingEditSheet = true } label: {
-                Image(systemName: "pencil")
+            Menu {
+                Button { showingEditSheet = true } label: {
+                    Label("Edit Details", systemImage: "pencil")
+                }
+                Button { showingRatingSheet = true } label: {
+                    Label(
+                        displayBook.rating != nil ? "Edit Rating & Review" : "Rate & Review",
+                        systemImage: "star"
+                    )
+                }
+                Divider()
+                Button { toggleRead() } label: {
+                    Label(
+                        isMarkedRead ? "Mark as Unread" : "Mark as Read",
+                        systemImage: isMarkedRead ? "circle" : "checkmark.circle"
+                    )
+                }
+            } label: {
+                Image(systemName: "ellipsis")
                     .font(.body)
                     .padding(8)
                     .background(.ultraThinMaterial, in: Circle())
@@ -114,6 +151,8 @@ struct BookDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }
+
+    private var isMarkedRead: Bool { displayBook.isRead ?? false }
 
     @ViewBuilder
     private var editSheet: some View {
@@ -132,7 +171,7 @@ struct BookDetailView: View {
             .environment(transcriptionService)
             .environment(apiService)
             .environment(storageManager)
-            .environment(pocketTTSModelManager)
+            .environment(kokoroModelManager)
             .environment(ttsAudioCache)
             .environment(backgroundProcessingManager)
             .environment(comicExtractor)
@@ -157,6 +196,14 @@ struct BookDetailView: View {
 
             metadataRow
                 .padding(.top, 12)
+
+            tagsRow
+                .padding(.top, 12)
+                .padding(.horizontal, 20)
+
+            collectionsRow
+                .padding(.top, 10)
+                .padding(.horizontal, 20)
 
             progressSection
                 .padding(.top, 12)
@@ -290,8 +337,133 @@ struct BookDetailView: View {
             Text(displayBook.authorsDisplay)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            if isMarkedRead {
+                Label("Completed", systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.top, 2)
+            }
+
+            ratingRow
+                .padding(.top, 6)
         }
         .padding(.horizontal, 20)
+    }
+
+    /// Tappable star rating — opens the rating & review sheet.
+    @ViewBuilder
+    private var ratingRow: some View {
+        Button { showingRatingSheet = true } label: {
+            HStack(spacing: 8) {
+                StarsView(rating: displayBook.rating ?? 0)
+                Text(displayBook.rating != nil ? "\(displayBook.rating!)/5" : "Rate this book")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Tags
+
+    @ViewBuilder
+    private var tagsRow: some View {
+        if !bookTags.isEmpty {
+            FlowLayout(spacing: 8) {
+                ForEach(bookTags) { tag in
+                    Text(tag.name)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(tagColor(tag).opacity(0.18), in: Capsule())
+                        .foregroundStyle(tagColor(tag))
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func tagColor(_ tag: BookTag) -> Color {
+        if let hex = tag.color, !hex.isEmpty { return Color(hex: hex) }
+        return .accentColor
+    }
+
+    // MARK: - Collections
+
+    private var availableCollections: [BookCollection] {
+        let current = Set(bookCollections.map(\.id))
+        return allCollections.filter { !current.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private var collectionsRow: some View {
+        FlowLayout(spacing: 8) {
+            ForEach(bookCollections) { collection in
+                Menu {
+                    Button(role: .destructive) {
+                        removeFromCollection(collection.id)
+                    } label: {
+                        Label("Remove from \(collection.name)", systemImage: "minus.circle")
+                    }
+                } label: {
+                    collectionChip(collection)
+                }
+            }
+
+            Menu {
+                if availableCollections.isEmpty {
+                    Text(allCollections.isEmpty ? "No collections yet" : "In all collections")
+                } else {
+                    ForEach(availableCollections) { collection in
+                        Button {
+                            addToCollection(collection.id)
+                        } label: {
+                            Label(
+                                collection.icon.map { "\($0) \(collection.name)" } ?? collection.name,
+                                systemImage: "folder"
+                            )
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.caption2)
+                    Text("Add to collection")
+                        .font(.caption)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .foregroundStyle(.secondary)
+                .overlay(
+                    Capsule().strokeBorder(
+                        Color.secondary.opacity(0.4),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func collectionChip(_ collection: BookCollection) -> some View {
+        let color: Color = (collection.color.map { Color(hex: $0) }) ?? .accentColor
+        HStack(spacing: 4) {
+            if let icon = collection.icon, !icon.isEmpty {
+                Text(icon)
+            } else {
+                Image(systemName: "folder.fill")
+                    .font(.caption2)
+            }
+            Text(collection.name)
+                .font(.caption)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.18), in: Capsule())
+        .foregroundStyle(color)
     }
 
     // MARK: - Metadata Row
@@ -645,6 +817,66 @@ struct BookDetailView: View {
         isLoadingRelated = false
     }
 
+    private func loadTags() async {
+        do {
+            let response = try await apiService.fetchBookTags(bookId: book.id)
+            bookTags = response.tags
+        } catch {
+            // Offline or error — leave tags empty
+        }
+    }
+
+    private func loadCollections() async {
+        if let response = try? await apiService.fetchBookCollections(bookId: book.id) {
+            bookCollections = response.collections
+        }
+        if let response = try? await apiService.fetchCollections() {
+            allCollections = response.collections
+        }
+    }
+
+    private func addToCollection(_ collectionId: String) {
+        guard let collection = allCollections.first(where: { $0.id == collectionId }) else { return }
+        if !bookCollections.contains(where: { $0.id == collectionId }) {
+            bookCollections.append(collection)
+        }
+        Task {
+            try? await apiService.addBookToCollection(bookId: book.id, collectionId: collectionId)
+        }
+    }
+
+    private func removeFromCollection(_ collectionId: String) {
+        bookCollections.removeAll { $0.id == collectionId }
+        Task {
+            try? await apiService.removeBookFromCollection(bookId: book.id, collectionId: collectionId)
+        }
+    }
+
+    /// Toggle read/completed state, optimistically updating the local copy.
+    private func toggleRead() {
+        let newValue = !isMarkedRead
+        var updated = displayBook
+        updated.isRead = newValue
+        editedBook = updated
+        Task {
+            _ = try? await apiService.updateBook(id: book.id, updates: UpdateBookRequest(isRead: newValue))
+        }
+    }
+
+    /// Persist rating + review, optimistically updating the local copy.
+    private func saveRating(rating: Int?, review: String) {
+        var updated = displayBook
+        updated.rating = rating
+        updated.review = review.isEmpty ? nil : review
+        editedBook = updated
+        Task {
+            _ = try? await apiService.updateBook(
+                id: book.id,
+                updates: UpdateBookRequest(rating: rating, review: review)
+            )
+        }
+    }
+
     private func checkIfDownloaded() {
         downloadedBook = downloadManager.getDownloadedBook(id: book.id, modelContext: modelContext)
         isDownloaded = downloadedBook != nil
@@ -689,6 +921,79 @@ struct DetailRow: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.subheadline)
+        }
+    }
+}
+
+/// Compact read-only star display (0–5).
+struct StarsView: View {
+    let rating: Int
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(1...5, id: \.self) { i in
+                Image(systemName: i <= rating ? "star.fill" : "star")
+                    .font(.caption)
+                    .foregroundStyle(i <= rating ? Color.yellow : Color.secondary)
+            }
+        }
+    }
+}
+
+/// Sheet for setting a book's rating and writing a review.
+struct RatingSheet: View {
+    let initialRating: Int?
+    let initialReview: String
+    let onSave: (Int?, String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var rating: Int
+    @State private var review: String
+
+    init(initialRating: Int?, initialReview: String, onSave: @escaping (Int?, String) -> Void) {
+        self.initialRating = initialRating
+        self.initialReview = initialReview
+        self.onSave = onSave
+        _rating = State(initialValue: initialRating ?? 0)
+        _review = State(initialValue: initialReview)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Your Rating") {
+                    HStack {
+                        Spacer()
+                        ForEach(1...5, id: \.self) { i in
+                            Image(systemName: i <= rating ? "star.fill" : "star")
+                                .font(.title2)
+                                .foregroundStyle(i <= rating ? Color.yellow : Color.secondary)
+                                .onTapGesture { rating = i }
+                                .accessibilityLabel("\(i) star\(i == 1 ? "" : "s")")
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Review") {
+                    TextField("Write your thoughts...", text: $review, axis: .vertical)
+                        .lineLimit(4...10)
+                }
+            }
+            .navigationTitle("Rating & Review")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(rating == 0 ? nil : rating, review)
+                        dismiss()
+                    }
+                }
+            }
         }
     }
 }

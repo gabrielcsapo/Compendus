@@ -19,7 +19,7 @@ struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
-    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(KokoroModelManager.self) private var kokoroModelManager
     @State private var editedServerURL = ""
     @State private var isTestingConnection = false
     @State private var connectionStatus: ConnectionStatus = .unknown
@@ -163,7 +163,7 @@ struct SettingsView: View {
                 // Background Processing section
                 Section {
                     Toggle("Auto-generate read-along for eBooks", isOn: $appSettings.autoGenerateTTS)
-                        .disabled(!pocketTTSModelManager.isModelAvailable)
+                        .disabled(!kokoroModelManager.isModelAvailable)
 
                     Toggle("Auto-transcribe audiobooks", isOn: $appSettings.autoTranscribeAudiobooks)
 
@@ -208,7 +208,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Background Processing")
                 } footer: {
-                    if !pocketTTSModelManager.isModelAvailable {
+                    if !kokoroModelManager.isModelAvailable {
                         Text("TTS model not available. Download it to enable read-along generation.")
                     } else {
                         Text("Automatically generate read-along audio or transcripts when books are downloaded. Processing runs on-device while connected to power.")
@@ -493,6 +493,6 @@ struct SettingsView: View {
         .environment(ThemeManager())
         .environment(HighlightColorManager())
         .environment(BackgroundProcessingManager())
-        .environment(PocketTTSModelManager())
+        .environment(KokoroModelManager())
         .modelContainer(for: DownloadedBook.self, inMemory: true)
 }

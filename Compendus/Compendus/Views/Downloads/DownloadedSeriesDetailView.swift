@@ -20,7 +20,7 @@ struct DownloadedSeriesDetailView: View {
     @Environment(StorageManager.self) private var storageManager
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(ReadAlongService.self) private var readAlongService
-    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(KokoroModelManager.self) private var kokoroModelManager
     @Environment(TTSAudioCache.self) private var ttsAudioCache
     @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
     @Environment(ComicExtractor.self) private var comicExtractor
@@ -125,7 +125,7 @@ struct DownloadedSeriesDetailView: View {
                         .environment(transcriptionService)
                         .environment(apiService)
                         .environment(storageManager)
-                        .environment(pocketTTSModelManager)
+                        .environment(kokoroModelManager)
                         .environment(ttsAudioCache)
                         .environment(backgroundProcessingManager)
                         .environment(comicExtractor)

@@ -8,10 +8,8 @@ import { getTags, addTagToBookByName, removeTagFromBook } from "../actions/tags"
 import { getDistinctSeries, getDistinctAuthors } from "../actions/batch";
 import { CoverExtractButton } from "./CoverExtractButton";
 import { CoverUploadButton } from "./CoverUploadButton";
-import { MetadataRefreshButton } from "./MetadataRefreshButton";
 import { ReconvertEpubButton } from "./ConvertToEpubButton";
 import type { Book, Tag } from "../lib/db/schema";
-import type { BookFormat } from "../lib/types";
 
 const LANGUAGES = [
   "",
@@ -78,8 +76,6 @@ interface EditBookModalProps {
   currentTags: Tag[];
   bookFormat: string;
   hasCover: boolean;
-  coverUrl?: string;
-  bookAuthors: string[];
   hasConvertedEpub?: boolean;
 }
 
@@ -90,8 +86,6 @@ export function EditBookModal({
   currentTags,
   bookFormat,
   hasCover,
-  coverUrl,
-  bookAuthors,
   hasConvertedEpub,
 }: EditBookModalProps) {
   const router = useRouter();
@@ -667,21 +661,6 @@ export function EditBookModal({
                 <CoverUploadButton bookId={book.id} hasCover={hasCover} />
               </div>
             </div>
-          </div>
-
-          {/* Metadata */}
-          <div className="md:col-span-2 pt-4 mt-4 border-t border-border">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
-              Metadata
-            </h3>
-            <MetadataRefreshButton
-              bookId={book.id}
-              bookTitle={book.title}
-              bookAuthors={bookAuthors}
-              bookFormat={bookFormat as BookFormat}
-              hasCover={hasCover}
-              coverUrl={coverUrl}
-            />
           </div>
 
           {/* Reconvert EPUB */}

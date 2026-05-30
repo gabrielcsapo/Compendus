@@ -27,7 +27,7 @@ import { extractBookSource, type BookSection } from "./book-source";
 import { chunkSections, type PassageChunk } from "./chunker";
 import { embedBatch, vectorToBuffer, EMBEDDING_MODEL } from "./embeddings";
 import { extractEntitiesBatch, ensureGlinerReady, isNoiseSpan } from "./gliner-extract";
-import { EntityResolver, recomputeStatsForBook } from "./resolution";
+import { EntityResolver, recomputeStatsForBook, rebuildCanonicalMapping } from "./resolution";
 import { extractRelations, relationKey, type RelEntity, type ExtractedRelation } from "./relations";
 import { extractKeyphrases } from "./keyphrase";
 
@@ -263,9 +263,12 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
   const relationshipCount = persistRelationships(bookId, relations);
   log(`persisted ${relationshipCount} typed relationships`);
 
-  // 8. Recompute cross-library counts (book_count powers ranking + wander).
+  // 8. Rebuild the canonical identity mapping (merges variants, flags noise) and
+  //    recompute canonical-level counts. Non-destructive: extraction rows are
+  //    untouched, only the derived mapping + count caches change.
   onProgress?.(96, "Linking ideas across your library…");
-  recomputeStatsForBook(bookId);
+  rebuildCanonicalMapping();
+  recomputeStatsForBook();
 
   finalizeStatus(bookId, chunks.length, touched.size, relationshipCount);
   onProgress?.(100, "Analysis complete");
@@ -302,27 +305,40 @@ async function extractConcepts(
   );
   let mentions = 0;
   for (const kp of keyphrases.slice(0, 40)) {
-    const entityId = await resolver.resolve({ name: kp.phrase, type: "concept" });
-    touched.add(entityId);
-    let grounded = 0;
-    for (let k = 0; k < chunks.length && grounded < CONCEPT_MAX_MENTIONS; k++) {
+    // Ground FIRST: find passages containing the phrase verbatim. YAKE can build
+    // n-grams that cross punctuation/sentence boundaries (e.g. "park. Father
+    // Kleinsorge" → "park father kleinsorge"), which never match a contiguous
+    // substring — those are noise. Only create the entity if it actually grounds,
+    // so we never mint a zero-mention phantom concept.
+    const hits: Array<{ passageId: string; charStart: number; surfaceText: string }> = [];
+    for (let k = 0; k < chunks.length && hits.length < CONCEPT_MAX_MENTIONS; k++) {
       const idx = chunks[k].text.toLowerCase().indexOf(kp.normalized);
       if (idx < 0) continue;
+      hits.push({
+        passageId: refs[k].id,
+        charStart: idx,
+        surfaceText: chunks[k].text.slice(idx, idx + kp.normalized.length),
+      });
+    }
+    if (hits.length === 0) continue; // ungrounded phrase — skip entirely
+
+    const entityId = await resolver.resolve({ name: kp.phrase, type: "concept" });
+    touched.add(entityId);
+    for (const h of hits) {
       db.insert(entityMentions)
         .values({
           id: randomUUID(),
           entityId,
-          passageId: refs[k].id,
+          passageId: h.passageId,
           bookId,
-          surfaceText: chunks[k].text.slice(idx, idx + kp.normalized.length),
-          charStart: idx,
-          charEnd: idx + kp.normalized.length,
+          surfaceText: h.surfaceText,
+          charStart: h.charStart,
+          charEnd: h.charStart + kp.normalized.length,
           role: "concept",
           confidence: null,
           createdAt: new Date(),
         })
         .run();
-      grounded++;
       mentions++;
     }
   }

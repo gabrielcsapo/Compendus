@@ -426,6 +426,55 @@ class APIService {
         }
     }
 
+    // MARK: - Collections
+
+    /// Fetch all collections for the current profile
+    func fetchCollections() async throws -> CollectionsResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/collections") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Fetch the collections a book belongs to
+    func fetchBookCollections(bookId: String) async throws -> CollectionsResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/collections") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Add a book to a collection
+    func addBookToCollection(bookId: String, collectionId: String) async throws {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/collections") else { throw APIError.invalidURL }
+
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["collectionId": collectionId])
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let message = String(data: data, encoding: .utf8)
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, message)
+        }
+    }
+
+    /// Remove a book from a collection
+    func removeBookFromCollection(bookId: String, collectionId: String) async throws {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/books/\(bookId)/collections/\(collectionId)") else { throw APIError.invalidURL }
+
+        var request = buildRequest(url)
+        request.httpMethod = "DELETE"
+
+        let (_, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
+        }
+    }
+
     // MARK: - Downloads
 
     /// Get URL for downloading a book file
@@ -732,20 +781,20 @@ struct JobProgressResponse: Codable {
 
 /// Request body for updating book metadata (only encodes non-nil fields)
 struct UpdateBookRequest: Codable {
-    var title: String?
-    var subtitle: String?
-    var authors: [String]?
-    var publisher: String?
-    var publishedDate: String?
-    var description: String?
-    var isbn: String?
-    var language: String?
-    var pageCount: Int?
-    var series: String?
-    var seriesNumber: String?
-    var isRead: Bool?
-    var rating: Int?
-    var review: String?
+    var title: String? = nil
+    var subtitle: String? = nil
+    var authors: [String]? = nil
+    var publisher: String? = nil
+    var publishedDate: String? = nil
+    var description: String? = nil
+    var isbn: String? = nil
+    var language: String? = nil
+    var pageCount: Int? = nil
+    var series: String? = nil
+    var seriesNumber: String? = nil
+    var isRead: Bool? = nil
+    var rating: Int? = nil
+    var review: String? = nil
     var source: String = "ios"
 
     enum CodingKeys: String, CodingKey {
@@ -780,7 +829,8 @@ struct BookTag: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let color: String?
-    let createdAt: Int?
+    // Server returns this as an ISO-8601 string; keep as String? so decoding doesn't fail.
+    let createdAt: String?
 }
 
 struct BookTagsResponse: Codable {
@@ -791,4 +841,20 @@ struct BookTagsResponse: Codable {
 struct AddTagResponse: Codable {
     let success: Bool
     let tag: BookTag
+}
+
+// MARK: - Collection Types
+
+/// A library collection. Named `BookCollection` to avoid shadowing the
+/// Swift standard library `Collection` protocol.
+struct BookCollection: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let color: String?
+    let icon: String?
+}
+
+struct CollectionsResponse: Codable {
+    let success: Bool
+    let collections: [BookCollection]
 }

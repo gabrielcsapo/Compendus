@@ -75,7 +75,7 @@ class TTSPreGenerationService {
     func generateForBook(
         _ book: DownloadedBook,
         voiceId: Int,
-        ttsContext: PocketTTSContext,
+        ttsContext: KokoroTTSContext,
         cache: TTSAudioCache,
         modelContainer: ModelContainer
     ) {
@@ -129,7 +129,7 @@ class TTSPreGenerationService {
         bookLocalPath: String,
         fileURL: URL,
         voiceId: Int,
-        ttsContext: PocketTTSContext,
+        ttsContext: KokoroTTSContext,
         cache: TTSAudioCache,
         modelContainer: ModelContainer
     ) async {
@@ -264,13 +264,18 @@ class TTSPreGenerationService {
                         chapterSentences[i].audioStartTime = chapterCumulativeTime
                         chapterSentences[i].audioEndTime = chapterCumulativeTime + duration
 
-                        // Compute proportional word timings
-                        chapterSentences[i].wordTimings = TextProcessingUtils.estimateWordTimings(
-                            sentence: rawText,
-                            plainTextRange: sentence.plainTextRange,
-                            startTime: chapterCumulativeTime,
-                            endTime: chapterCumulativeTime + duration
-                        )
+                        // Prefer Kokoro's real per-word timestamps; fall back to proportional.
+                        chapterSentences[i].wordTimings = result.alignedWords.isEmpty
+                            ? TextProcessingUtils.estimateWordTimings(
+                                sentence: rawText,
+                                plainTextRange: sentence.plainTextRange,
+                                startTime: chapterCumulativeTime,
+                                endTime: chapterCumulativeTime + duration)
+                            : TextProcessingUtils.wordTimings(
+                                fromAligned: result.alignedWords,
+                                sentence: rawText,
+                                plainTextRange: sentence.plainTextRange,
+                                startTime: chapterCumulativeTime)
 
                         chapterCumulativeTime += duration
                         chapterSamples.append(contentsOf: samples)

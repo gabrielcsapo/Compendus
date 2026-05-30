@@ -7,7 +7,7 @@
  * and semantic neighbors — each carrying a human-readable reason ("why this
  * connection") and a source passage. Nothing is surfaced without a passage.
  */
-import { and, desc, eq, like } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, rawDb, entities, passages } from "../db";
 import { bufferToVector, cosine } from "./embeddings";
 import type { EntityType } from "../db/schema";
@@ -80,22 +80,52 @@ export function listEntities(opts: {
   const limit = Math.min(opts.limit ?? 50, 200);
   const offset = opts.offset ?? 0;
 
-  const conds = [];
-  if (opts.type) conds.push(eq(entities.type, opts.type as EntityType));
-  if (opts.q) conds.push(like(entities.normalizedName, `%${opts.q.toLowerCase()}%`));
+  // Only surface canonical, non-excluded entities (identity lives in the mapping):
+  // a canonical entity is one whose mapping points at itself and isn't hidden.
+  // `mention_count > 0` guards against any ungrounded entity (no resolved mentions).
+  const where: string[] = ["c.canonical_id = e.id", "c.excluded = 0", "e.mention_count > 0"];
+  const params: unknown[] = [];
+  if (opts.type) {
+    where.push("e.type = ?");
+    params.push(opts.type);
+  }
+  if (opts.q) {
+    where.push("e.normalized_name LIKE ?");
+    params.push(`%${opts.q.toLowerCase()}%`);
+  }
+  const rows = rawDb
+    .prepare(
+      `SELECT e.id AS id, e.type AS type, e.canonical_name AS canonicalName,
+              e.summary AS summary, e.aliases AS aliases,
+              e.mention_count AS mentionCount, e.book_count AS bookCount,
+              e.date_text AS dateText
+       FROM entities e
+       JOIN entity_canonical c ON c.entity_id = e.id
+       WHERE ${where.join(" AND ")}
+       ORDER BY e.book_count DESC, e.mention_count DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as Array<{
+    id: string;
+    type: EntityType;
+    canonicalName: string;
+    summary: string | null;
+    aliases: string | null;
+    mentionCount: number;
+    bookCount: number;
+    dateText: string | null;
+  }>;
 
-  const rows = db
-    .select()
-    .from(entities)
-    .where(conds.length ? and(...conds) : undefined)
-    // Rank by cross-library breadth first — entities spanning many books are the
-    // most rewarding to wander into.
-    .orderBy(desc(entities.bookCount), desc(entities.mentionCount))
-    .limit(limit)
-    .offset(offset)
-    .all();
-
-  return rows.map(toSummary);
+  return rows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    canonicalName: r.canonicalName,
+    summary: r.summary,
+    aliases: parseAliases(r.aliases),
+    mentionCount: r.mentionCount,
+    bookCount: r.bookCount,
+    dateText: r.dateText,
+  }));
 }
 
 // --- entity detail -------------------------------------------------------------
@@ -107,7 +137,12 @@ export interface MentionView {
   chapterTitle: string | null;
   spineIndex: number | null;
   page: number | null;
-  position: number | null; // normalized 0-1 reader position (best-effort)
+  position: number | null; // normalized 0-1 reader position (best-effort, whole book)
+  // Progress *within* the passage's chapter (0-1). Anchored at the spine
+  // boundary the reader also knows, this survives the char-space mismatch
+  // between the knowledge pipeline's clean text and the reader's rendered text
+  // far better than `position` does. Deep-links should prefer spineIndex + this.
+  chapterProgress: number | null;
   surfaceText: string;
   snippet: string;
 }
@@ -136,6 +171,25 @@ function bookMaxChar(bookId: string): number {
   return row?.m && row.m > 0 ? row.m : 0;
 }
 
+/**
+ * Per-spine [lo, hi] clean-text char range for a book, so a passage's offset can
+ * be expressed as progress *within its chapter*. Anchoring at the spine boundary
+ * (the one structure the reader shares with the pipeline) is what makes the
+ * deep-link land on the right page despite the two text spaces differing.
+ */
+function bookSpineRanges(bookId: string): Map<number, { lo: number; hi: number }> {
+  const rows = rawDb
+    .prepare(
+      `SELECT spine_index AS s, MIN(char_start) AS lo, MAX(char_end) AS hi
+       FROM passages WHERE book_id = ? AND spine_index IS NOT NULL
+       GROUP BY spine_index`,
+    )
+    .all(bookId) as Array<{ s: number; lo: number; hi: number }>;
+  const m = new Map<number, { lo: number; hi: number }>();
+  for (const r of rows) m.set(r.s, { lo: r.lo, hi: r.hi });
+  return m;
+}
+
 export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | null {
   const entity = db.select().from(entities).where(eq(entities.id, id)).get();
   if (!entity) return null;
@@ -145,7 +199,7 @@ export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | n
       `SELECT m.passage_id AS passageId, m.book_id AS bookId, m.surface_text AS surfaceText,
               p.chapter_title AS chapterTitle, p.spine_index AS spineIndex, p.page AS page,
               p.char_start AS charStart, p.text AS text, b.title AS bookTitle
-       FROM entity_mentions m
+       FROM canonical_mentions m
        JOIN passages p ON p.id = m.passage_id
        JOIN books b ON b.id = m.book_id
        WHERE m.entity_id = ?
@@ -165,9 +219,18 @@ export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | n
   }>;
 
   const maxCharByBook = new Map<string, number>();
+  const spineRangesByBook = new Map<string, Map<number, { lo: number; hi: number }>>();
   const mentions: MentionView[] = mentionRows.map((r) => {
     if (!maxCharByBook.has(r.bookId)) maxCharByBook.set(r.bookId, bookMaxChar(r.bookId));
+    if (!spineRangesByBook.has(r.bookId))
+      spineRangesByBook.set(r.bookId, bookSpineRanges(r.bookId));
     const total = maxCharByBook.get(r.bookId)!;
+    const range =
+      r.spineIndex != null ? spineRangesByBook.get(r.bookId)!.get(r.spineIndex) : undefined;
+    const chapterProgress =
+      range && r.charStart != null && range.hi > range.lo
+        ? Math.max(0, Math.min(1, (r.charStart - range.lo) / (range.hi - range.lo)))
+        : null;
     return {
       passageId: r.passageId,
       bookId: r.bookId,
@@ -176,6 +239,7 @@ export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | n
       spineIndex: r.spineIndex,
       page: r.page,
       position: r.charStart != null && total > 0 ? r.charStart / total : null,
+      chapterProgress,
       surfaceText: r.surfaceText,
       snippet: snippet(r.text),
     };
@@ -252,7 +316,7 @@ function passageVectors(): PassageVec[] {
 // --- wander engine -------------------------------------------------------------
 
 export interface WanderStep {
-  kind: "relationship" | "co_occurrence" | "semantic";
+  kind: "relationship" | "co_occurrence" | "semantic" | "same_as_candidate";
   reason: string;
   entityId: string | null;
   entityName: string | null;
@@ -269,6 +333,40 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
 
   const steps: WanderStep[] = [];
   const usedEntities = new Set<string>([entityId]);
+
+  // 0. Probable-same-entity candidates — "is this the same person/place?" These
+  //    are heuristic proposals, NOT asserted identity; surfaced first because a
+  //    likely duplicate is the most relevant neighbor (and the cue to confirm/merge).
+  const cands = rawDb
+    .prepare(
+      `SELECT CASE WHEN entity_a = ? THEN entity_b ELSE entity_a END AS otherId,
+              method AS method, score AS score
+       FROM entity_candidate_links
+       WHERE status = 'open' AND (entity_a = ? OR entity_b = ?)
+       ORDER BY score DESC NULLS LAST LIMIT 5`,
+    )
+    .all(entityId, entityId, entityId) as Array<{
+    otherId: string;
+    method: string;
+    score: number | null;
+  }>;
+  for (const r of cands) {
+    if (usedEntities.has(r.otherId)) continue;
+    const other = db.select().from(entities).where(eq(entities.id, r.otherId)).get();
+    if (!other) continue;
+    usedEntities.add(r.otherId);
+    steps.push({
+      kind: "same_as_candidate",
+      reason: `Possibly the same ${other.type} as ${entity.canonicalName}`,
+      entityId: other.id,
+      entityName: other.canonicalName,
+      entityType: other.type,
+      passageId: null,
+      bookId: null,
+      bookTitle: null,
+      snippet: null,
+    });
+  }
 
   const passageInfo = (pid: string | null) => {
     if (!pid) return { snippet: null, bookId: null, bookTitle: null };
@@ -323,13 +421,13 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
   //    every other entity's neighbors; NPMI rewards a genuinely distinctive
   //    pairing instead. NPMI ∈ [-1, 1]; we keep only positive associations.
   const N = (
-    rawDb.prepare("SELECT COUNT(DISTINCT passage_id) AS n FROM entity_mentions").get() as {
+    rawDb.prepare("SELECT COUNT(DISTINCT passage_id) AS n FROM canonical_mentions").get() as {
       n: number;
     }
   ).n;
   const cx = (
     rawDb
-      .prepare("SELECT COUNT(DISTINCT passage_id) AS c FROM entity_mentions WHERE entity_id = ?")
+      .prepare("SELECT COUNT(DISTINCT passage_id) AS c FROM canonical_mentions WHERE entity_id = ?")
       .get(entityId) as { c: number }
   ).c;
   const coRows = rawDb
@@ -337,9 +435,9 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
       `SELECT em2.entity_id AS otherId, e.canonical_name AS otherName, e.type AS otherType,
               e.book_count AS bookCount,
               COUNT(DISTINCT em2.passage_id) AS shared, MIN(em2.passage_id) AS pid,
-              (SELECT COUNT(DISTINCT passage_id) FROM entity_mentions WHERE entity_id = em2.entity_id) AS cy
-       FROM entity_mentions em1
-       JOIN entity_mentions em2 ON em2.passage_id = em1.passage_id AND em2.entity_id != em1.entity_id
+              (SELECT COUNT(DISTINCT passage_id) FROM canonical_mentions WHERE entity_id = em2.entity_id) AS cy
+       FROM canonical_mentions em1
+       JOIN canonical_mentions em2 ON em2.passage_id = em1.passage_id AND em2.entity_id != em1.entity_id
        JOIN entities e ON e.id = em2.entity_id
        WHERE em1.entity_id = ?
        GROUP BY em2.entity_id`,
@@ -380,7 +478,7 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
   if (steps.length < limit) {
     const myPassages = rawDb
       .prepare(
-        `SELECT p.embedding AS embedding FROM entity_mentions m
+        `SELECT p.embedding AS embedding FROM canonical_mentions m
          JOIN passages p ON p.id = m.passage_id
          WHERE m.entity_id = ? AND p.embedding IS NOT NULL LIMIT 12`,
       )
@@ -398,7 +496,7 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
       const mentionPassages = new Set(
         (
           rawDb
-            .prepare("SELECT passage_id AS pid FROM entity_mentions WHERE entity_id = ?")
+            .prepare("SELECT passage_id AS pid FROM canonical_mentions WHERE entity_id = ?")
             .all(entityId) as Array<{ pid: string }>
         ).map((r) => r.pid),
       );
@@ -415,7 +513,7 @@ export function wander(entityId: string, limit = 8): WanderStep[] {
         const top = rawDb
           .prepare(
             `SELECT e.id AS id, e.canonical_name AS name, e.type AS type
-             FROM entity_mentions m JOIN entities e ON e.id = m.entity_id
+             FROM canonical_mentions m JOIN entities e ON e.id = m.entity_id
              WHERE m.passage_id = ? ORDER BY e.book_count DESC, e.mention_count DESC LIMIT 1`,
           )
           .get(pv.id) as { id: string; name: string; type: string } | undefined;

@@ -71,7 +71,7 @@ class DownloadManager: NSObject {
     /// Set by CompendusApp on appear for reading auto-generation settings
     weak var appSettings: AppSettings?
     /// Set by CompendusApp on appear for reading selected voice
-    weak var pocketTTSModelManager: PocketTTSModelManager?
+    weak var kokoroModelManager: KokoroModelManager?
 
     private static let backgroundSessionIdentifier = "com.compendus.background-download"
 
@@ -483,7 +483,7 @@ class DownloadManager: NSObject {
         let isAudiobook = ["m4b", "mp3", "m4a"].contains(format)
 
         if isEbook && settings.autoGenerateTTS {
-            guard let voiceManager = pocketTTSModelManager else {
+            guard let voiceManager = kokoroModelManager else {
                 print("[DownloadManager] PocketTTS model manager not available, skipping TTS auto-queue")
                 return
             }

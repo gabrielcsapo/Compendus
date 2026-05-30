@@ -32,6 +32,13 @@ import {
 interface UseReaderOptions {
   bookId: string;
   initialPosition?: number;
+  /**
+   * Chapter-anchored deep-link target (from Living Library wander links). When
+   * set, this takes precedence over `initialPosition`: it's resolved against the
+   * reader's own chapter char-ranges, so it lands on the right page despite the
+   * pipeline and reader using different text spaces.
+   */
+  initialLocator?: { spineIndex: number; chapterProgress: number };
   formatOverride?: string;
   nativePdfMode?: boolean;
 }
@@ -117,6 +124,7 @@ function getClientProfileId(): string | undefined {
 export function useReader({
   bookId,
   initialPosition = 0,
+  initialLocator,
   formatOverride,
   nativePdfMode = false,
 }: UseReaderOptions): UseReaderReturn {
@@ -174,6 +182,25 @@ export function useReader({
 
   // Track if initial position has been applied
   const initialPositionApplied = useRef(false);
+
+  // Column pagination applies the initial target exactly once, after the client
+  // first reports a real page count. A dedicated ref (vs initialPositionApplied,
+  // which the full-text effect sets early) keeps a later re-paginate — font
+  // change, resize — from yanking the reader back to the deep-link spot.
+  const columnInitialApplied = useRef(false);
+
+  // Resolve a chapter-anchored locator to a whole-book 0-1 position using the
+  // reader's OWN chapter char-ranges. Matching by spineIndex (not array order)
+  // stays correct even when some spine items failed to parse. Returns null when
+  // the locator can't be resolved yet (or isn't set).
+  const resolveLocatorPosition = useCallback((): number | null => {
+    if (!initialLocator || !fullTextContent || fullTextContent.totalCharacters <= 0) return null;
+    const ch = fullTextContent.chapters.find((c) => c.spineIndex === initialLocator.spineIndex);
+    if (!ch) return null;
+    const span = ch.characterEnd - ch.characterStart;
+    const globalChar = ch.characterStart + initialLocator.chapterProgress * span;
+    return Math.max(0, Math.min(1, globalChar / fullTextContent.totalCharacters));
+  }, [initialLocator, fullTextContent]);
 
   // Track prefetched pages to avoid duplicate requests
   const prefetchedPages = useRef(new Set<number>());
@@ -448,19 +475,29 @@ export function useReader({
       : bookInfo?.totalPages || 0;
 
   // Callback for client to report total pages from CSS column measurement (or PDF.js page count).
-  const setClientTotalPagesCallback = useCallback(
-    (total: number) => {
-      setClientTotalPages(total);
-      // For native PDF mode, initial page is set by getReaderPageForPosition in the getReaderInfo
-      // effect (server knows the exact page boundaries). Don't override it here with an
-      // approximate calculation, which uses the wrong formula and clobbers the correct value.
-      if (!nativePdfMode && initialPosition > 0 && total > 1) {
-        const targetPage = Math.max(1, Math.round(initialPosition * total));
-        setCurrentPage(targetPage);
-      }
-    },
-    [initialPosition, nativePdfMode],
-  );
+  const setClientTotalPagesCallback = useCallback((total: number) => {
+    setClientTotalPages(total);
+  }, []);
+
+  // Apply the initial deep-link target for column-paginated text. This lives in an
+  // effect — NOT inside setClientTotalPagesCallback — so it's resilient to ordering:
+  // ReaderContent reports its page count exactly once, and that can fire a tick
+  // BEFORE fullTextContent (and thus resolveLocatorPosition) is ready, in which case
+  // an in-callback jump computes nothing and is lost forever. Re-running on
+  // [clientTotalPages, resolveLocatorPosition] guarantees we apply once both the page
+  // count and the chapter ranges exist, whichever lands last. The ref makes it fire
+  // exactly once, so a later re-paginate (font/resize) doesn't yank the reader back.
+  // (Native PDF sets its initial page via getReaderPageForPosition in the info effect.)
+  useEffect(() => {
+    if (nativePdfMode || columnInitialApplied.current || !isColumnPaginated) return;
+    const total = clientTotalPages;
+    if (!total || total <= 1) return;
+    const locatorPos = resolveLocatorPosition();
+    const pos = locatorPos != null ? locatorPos : initialPosition > 0 ? initialPosition : null;
+    if (pos == null) return;
+    columnInitialApplied.current = true;
+    setCurrentPage(Math.max(1, Math.round(pos * total)));
+  }, [clientTotalPages, isColumnPaginated, nativePdfMode, resolveLocatorPosition, initialPosition]);
 
   // Navigation functions
   const goToPage = useCallback(

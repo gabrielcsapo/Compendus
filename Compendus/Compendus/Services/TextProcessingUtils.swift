@@ -106,6 +106,63 @@ enum TextProcessingUtils {
         return result
     }
 
+    /// Build word timings from the TTS engine's **real** per-word timestamps.
+    ///
+    /// `aligned` carries sentence-relative start/end times (seconds) for each spoken word,
+    /// in reading order, from Kokoro's `pred_dur` output. We keep those real times and only
+    /// map each word to its character span in the chapter plain text by sequential search of
+    /// the original sentence (same matching strategy as `estimateWordTimings`). Words that
+    /// don't appear verbatim in the original — e.g. TTS preprocessing expanded "Dr." →
+    /// "Doctor" or "5" → "five" — fall back to the running cursor position so the highlight
+    /// keeps advancing. `startTime` is the sentence's chapter-absolute start (seconds).
+    static func wordTimings(
+        fromAligned aligned: [AlignedWord],
+        sentence: String,
+        plainTextRange: NSRange,
+        startTime: Double
+    ) -> [WordTiming] {
+        guard !aligned.isEmpty else { return [] }
+
+        let nsText = sentence as NSString
+        var searchStart = 0
+        var result: [WordTiming] = []
+        result.reserveCapacity(aligned.count)
+
+        for w in aligned {
+            let wordStr = w.text
+            guard !wordStr.isEmpty else { continue }
+
+            let plainTextOffset: Int
+            let plainTextLength: Int
+
+            let remaining = nsText.length - searchStart
+            let foundRange = remaining > 0
+                ? nsText.range(of: wordStr, range: NSRange(location: searchStart, length: remaining))
+                : NSRange(location: NSNotFound, length: 0)
+
+            if foundRange.location != NSNotFound {
+                plainTextOffset = plainTextRange.location + foundRange.location
+                plainTextLength = foundRange.length
+                searchStart = foundRange.location + foundRange.length
+            } else {
+                // Word not present verbatim (preprocessing changed it): anchor at the cursor.
+                plainTextOffset = plainTextRange.location + min(searchStart, nsText.length)
+                plainTextLength = min(wordStr.count, max(0, nsText.length - searchStart))
+                searchStart = min(searchStart + wordStr.count + 1, nsText.length)
+            }
+
+            result.append(WordTiming(
+                word: wordStr,
+                start: startTime + Double(w.startTime),
+                end: startTime + Double(w.endTime),
+                plainTextOffset: plainTextOffset,
+                plainTextLength: plainTextLength
+            ))
+        }
+
+        return result
+    }
+
     /// Split text into sentence spans using NLTokenizer.
     /// Small consecutive sentences are merged into larger chunks for natural
     /// TTS prosody. Long sentences are further split at clause boundaries.

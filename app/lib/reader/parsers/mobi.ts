@@ -229,6 +229,7 @@ async function extractContent(
       chapters.push({
         id: spineItem.id,
         title,
+        spineIndex: i,
         html,
         text,
         characterStart: totalCharacters,

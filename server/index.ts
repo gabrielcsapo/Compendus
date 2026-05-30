@@ -9,6 +9,7 @@ import { profileRoutes } from "./routes/profiles";
 import { syncRoutes } from "./routes/sync";
 import { searchRoutes } from "./routes/search";
 import { booksRoutes } from "./routes/books";
+import { collectionsRoutes } from "./routes/collections";
 import { seriesRoutes } from "./routes/series";
 import { uploadRoutes } from "./routes/upload";
 import { coverRoutes } from "./routes/cover";
@@ -112,6 +113,7 @@ app.use("/api/admin*", requireAdmin);
 
 app.route("/", searchRoutes);
 app.route("/", booksRoutes);
+app.route("/", collectionsRoutes);
 app.route("/", seriesRoutes);
 app.route("/", coverRoutes);
 app.route("/", uploadRoutes);

@@ -66,7 +66,7 @@ class BackgroundProcessingManager {
     private weak var transcriptionService: OnDeviceTranscriptionService?
     private weak var ttsPreGenerationService: TTSPreGenerationService?
     private weak var ttsAudioCache: TTSAudioCache?
-    private weak var pocketTTSModelManager: PocketTTSModelManager?
+    private weak var kokoroModelManager: KokoroModelManager?
     private weak var appSettings: AppSettings?
 
     @ObservationIgnored private var observationTask: Task<Void, Never>?
@@ -83,14 +83,14 @@ class BackgroundProcessingManager {
         transcriptionService: OnDeviceTranscriptionService,
         ttsPreGenerationService: TTSPreGenerationService,
         ttsAudioCache: TTSAudioCache,
-        pocketTTSModelManager: PocketTTSModelManager,
+        kokoroModelManager: KokoroModelManager,
         appSettings: AppSettings,
         modelContainer: ModelContainer
     ) {
         self.transcriptionService = transcriptionService
         self.ttsPreGenerationService = ttsPreGenerationService
         self.ttsAudioCache = ttsAudioCache
-        self.pocketTTSModelManager = pocketTTSModelManager
+        self.kokoroModelManager = kokoroModelManager
         self.appSettings = appSettings
         self.modelContainer = modelContainer
     }
@@ -244,16 +244,16 @@ class BackgroundProcessingManager {
                 return
             }
 
-            // Create a PocketTTS context for generation
-            guard let modelDir = PocketTTSModelManager.findModelDirectory() else {
-                logger.error("PocketTTS model not found, re-queuing task")
+            // Create a Kokoro context for generation
+            guard KokoroModelManager.findModelDirectory() != nil else {
+                logger.error("Kokoro model not found, re-queuing task")
                 self.pendingTasks.insert(task, at: 0)
                 self.state = .idle
                 return
             }
 
             do {
-                let ttsContext = try PocketTTSContext(modelPath: modelDir, voiceIndex: UInt32(voiceId))
+                let ttsContext = try KokoroTTSContext.createFromBundle(voiceIndex: UInt32(voiceId))
                 service.generateForBook(
                     book,
                     voiceId: voiceId,

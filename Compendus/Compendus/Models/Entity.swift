@@ -26,7 +26,14 @@ struct EntityMention: Codable, Hashable {
     let bookId: String
     let bookTitle: String
     let chapterTitle: String?
+    /// 0-based EPUB spine index of the passage's chapter.
+    let spineIndex: Int?
+    /// Whole-book normalized position (legacy/best-effort). Drifts because the
+    /// pipeline and reader use different text spaces — prefer the locator below.
     let position: Double?
+    /// Progress *within* the chapter (0-1). Paired with `spineIndex` this forms a
+    /// chapter-anchored locator the native reader can open precisely.
+    let chapterProgress: Double?
     let surfaceText: String
     let snippet: String
 }

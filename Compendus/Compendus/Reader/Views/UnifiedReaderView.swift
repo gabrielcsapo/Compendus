@@ -26,7 +26,7 @@ struct UnifiedReaderView: View {
     @Environment(AudiobookPlayer.self) private var audiobookPlayer
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
     @Environment(APIService.self) private var apiService
-    @Environment(PocketTTSModelManager.self) private var pocketTTSModelManager
+    @Environment(KokoroModelManager.self) private var kokoroModelManager
     @Environment(TTSAudioCache.self) private var ttsAudioCache
     @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
     @Environment(StorageManager.self) private var storageManager
@@ -89,6 +89,8 @@ struct UnifiedReaderView: View {
     @State private var matchingAudiobook: DownloadedBook?
     @State private var showReadAlongPill = false
     @State private var readAlongPillDismissed = false
+    /// Presents the Read Aloud options popover from the ⋯ menu (after the first-time pill).
+    @State private var showReadAloudOptions = false
     /// Persists across sessions — once a user has seen the Read Aloud hint
     /// for any book, don't surface the bottom toast again. Read Aloud is
     /// still accessible from the ⋯ menu.
@@ -248,6 +250,17 @@ struct UnifiedReaderView: View {
                     .presentationDetents([.fraction(0.55), .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.55)))
                     .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showReadAloudOptions) {
+                ReadAloudOptionsSheet(
+                    availableSources: readAlongPillSources,
+                    bookId: book.id,
+                    audiobookHasTranscript: matchingAudiobook?.hasTranscript ?? true,
+                    onStartAudiobook: { activateReadAlong() },
+                    onStartTTS: { activateTTSReadAloud() },
+                    onChangeVoice: { _ in restartTTSWithNewVoice() },
+                    onDownloadForLater: { queueTTSPreGeneration() }
+                )
             }
             .sheet(isPresented: $showingTOC) {
                 if let comicEngine = engine as? ComicEngine {
@@ -1183,7 +1196,7 @@ struct UnifiedReaderView: View {
                     Label("Notes", systemImage: "note.text")
                 }
 
-                if !engine.isPDF && !engine.isComic && (matchingAudiobook != nil || pocketTTSModelManager.isModelAvailable || readAlongService.isActive) {
+                if !engine.isPDF && !engine.isComic && (matchingAudiobook != nil || kokoroModelManager.isModelAvailable || readAlongService.isActive) {
                     if readAlongService.isActive {
                         Button {
                             readAlongService.deactivate()
@@ -1192,10 +1205,7 @@ struct UnifiedReaderView: View {
                         }
                     } else {
                         Button {
-                            withAnimation {
-                                readAlongPillDismissed = false
-                                showReadAlongPill = true
-                            }
+                            showReadAloudOptions = true
                         } label: {
                             Label("Read Aloud", systemImage: "speaker.wave.2")
                         }
@@ -1736,13 +1746,13 @@ struct UnifiedReaderView: View {
         showHighlightSetupIfNeeded()
 
         // Check for matching audiobook / TTS availability (defer to avoid blocking)
-        Task.detached(priority: .userInitiated) { [book, modelContext, readAlongService, pocketTTSModelManager] in
+        Task.detached(priority: .userInitiated) { [book, modelContext, readAlongService, kokoroModelManager] in
             let audiobook = readAlongService.findMatchingAudiobook(for: book, in: modelContext)
             await MainActor.run {
                 if let audiobook {
                     self.matchingAudiobook = audiobook
                 }
-                if self.matchingAudiobook != nil || pocketTTSModelManager.isModelAvailable {
+                if self.matchingAudiobook != nil || kokoroModelManager.isModelAvailable {
                     withAnimation { self.showReadAlongPill = true }
                 }
             }
@@ -2193,7 +2203,7 @@ struct UnifiedReaderView: View {
             return
         }
 
-        print("[TTS] Activating read aloud, voice=\(pocketTTSModelManager.selectedVoiceIndex)")
+        print("[TTS] Activating read aloud, voice=\(kokoroModelManager.selectedVoiceIndex)")
 
         // Both changes must be in the same animation transaction so the pill
         // transitions from "available" to "active/loading" without disappearing.
@@ -2202,11 +2212,11 @@ struct UnifiedReaderView: View {
             readAlongService.state = .loading
         }
 
-        Task.detached(priority: .userInitiated) { [pocketTTSModelManager, readAlongService, book, ttsAudioCache, transcriptionService] in
+        Task.detached(priority: .userInitiated) { [kokoroModelManager, readAlongService, book, ttsAudioCache, transcriptionService] in
             do {
-                let voiceIndex = await pocketTTSModelManager.selectedVoiceIndex
+                let voiceIndex = await kokoroModelManager.selectedVoiceIndex
                 print("[TTS] Loading model with voice \(voiceIndex)...")
-                let context = try PocketTTSContext.createFromBundle(voiceIndex: voiceIndex)
+                let context = try KokoroTTSContext.createFromBundle(voiceIndex: voiceIndex)
                 print("[TTS] Model loaded, activating service...")
                 await MainActor.run {
                     readAlongService.activateWithTTS(
@@ -2233,11 +2243,11 @@ struct UnifiedReaderView: View {
         if matchingAudiobook != nil {
             sources.append(.audiobook)
         }
-        if pocketTTSModelManager.isModelAvailable {
+        if kokoroModelManager.isModelAvailable {
             let cached = ttsAudioCache.hasCachedAudio(
                 bookId: book.id,
                 spineIndex: 0,
-                voiceId: Int(pocketTTSModelManager.selectedVoiceIndex)
+                voiceId: Int(kokoroModelManager.selectedVoiceIndex)
             )
             sources.append(cached ? .ttsCached : .tts)
         }
@@ -2263,7 +2273,7 @@ struct UnifiedReaderView: View {
 
     /// Queue TTS audio pre-generation for all chapters.
     private func queueTTSPreGeneration() {
-        let voiceId = Int(pocketTTSModelManager.selectedVoiceIndex)
+        let voiceId = Int(kokoroModelManager.selectedVoiceIndex)
         backgroundProcessingManager.enqueue(.ttsGeneration(bookId: book.id, voiceId: voiceId))
     }
 

@@ -24,8 +24,14 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 function readerHref(m: MentionView): string {
-  // Deep-link straight to the passage when we have a normalized position;
-  // otherwise fall back to the book's detail page.
+  // Prefer a chapter-anchored locator (spine + within-chapter progress): the
+  // reader shares the spine structure, so this lands on the right page where a
+  // whole-book `position` fraction drifts (the pipeline's clean text and the
+  // reader's rendered text are different char spaces). Fall back to the global
+  // fraction, then to the book's detail page.
+  if (m.spineIndex != null && m.chapterProgress != null) {
+    return `/book/${m.bookId}/read?spine=${m.spineIndex}&p=${m.chapterProgress.toFixed(4)}`;
+  }
   return m.position != null
     ? `/book/${m.bookId}/read?position=${m.position.toFixed(4)}`
     : `/book/${m.bookId}`;

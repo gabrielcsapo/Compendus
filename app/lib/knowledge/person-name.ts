@@ -102,6 +102,40 @@ function genderCompatible(a: "m" | "f" | null, b: "m" | "f" | null): boolean {
   return !(a === "m" && b === "f") && !(a === "f" && b === "m");
 }
 
+/** A single-letter core token is an initial ("m" for "Masakazu"). Normalization
+ *  has already stripped the period from "M.", so this is just a length check. */
+function isInitial(tok: string): boolean {
+  return tok.length === 1;
+}
+
+/**
+ * Whether two same-length core token lists describe one person via initials —
+ * the surname (last token) must match exactly, and every preceding position must
+ * be either equal or an initial standing in for the other's full given name
+ * ("m" ↔ "masakazu"). Same-length only: "m fujii" matches "masakazu fujii" but
+ * not "masakazu t fujii" (different shape → not confidently the same).
+ */
+function coreInitialCompatible(a: string[], b: string[]): boolean {
+  if (a.length !== b.length || a.length < 2) return false;
+  // Surname must be a real, exact match (never reduce a surname to an initial).
+  if (a[a.length - 1] !== b[b.length - 1]) return false;
+  let sawInitialBridge = false;
+  for (let i = 0; i < a.length - 1; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x === y) continue;
+    const xi = isInitial(x);
+    const yi = isInitial(y);
+    // Exactly one is an initial, and it matches the other's first letter.
+    if (xi !== yi && (xi ? x[0] === y[0] : y[0] === x[0])) {
+      sawInitialBridge = true;
+      continue;
+    }
+    return false; // a real disagreement (two different given names, or clashing initials)
+  }
+  return sawInitialBridge; // require at least one initial bridge, else it's just an exact match
+}
+
 export interface NameCandidate {
   id: string;
   normalizedName: string;
@@ -144,6 +178,19 @@ export function matchPersonName<T extends NameCandidate>(norm: string, candidate
         genderCompatible(ig, genderOf(x.p.titles)),
     );
     if (subs.length === 1) return subs[0].c;
+  }
+
+  // Initial ↔ given name ("M. Fujii" ≈ "Masakazu Fujii"). Weaker signal than the
+  // above, so only fires when the input itself contains an initial and exactly
+  // one candidate is initial-compatible (abstain on any ambiguity).
+  if (ip.coreTokens.some(isInitial)) {
+    const matches = parsed.filter(
+      (x) =>
+        coreInitialCompatible(ip.coreTokens, x.p.coreTokens) &&
+        titlesCompatible(ip.titles, x.p.titles) &&
+        genderCompatible(ig, genderOf(x.p.titles)),
+    );
+    if (matches.length === 1) return matches[0].c;
   }
 
   return null;

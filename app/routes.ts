@@ -51,6 +51,11 @@ export const routes: RouteConfig[] = [
             path: "profiles",
             component: () => import("./routes/admin-profiles.js"),
           },
+          {
+            id: "admin-duplicates",
+            path: "duplicates",
+            component: () => import("./routes/admin-duplicates.js"),
+          },
         ],
       },
       {

@@ -168,6 +168,7 @@ export async function parseEpub(buffer: Buffer, bookId: string): Promise<TextCon
       chapters.push({
         id: spineItem.id,
         title,
+        spineIndex: i,
         html,
         text,
         characterStart: totalCharacters,

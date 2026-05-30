@@ -503,18 +503,24 @@ export const passages = sqliteTable(
   ],
 );
 
-// Entities: canonical, library-global nodes (people, places, ideas, inventions…).
+// Entities: the IMMUTABLE extraction layer. One row per distinct thing GLiNER/
+// YAKE extracted, keyed by a deterministic stable id (hash of type+normalized
+// name). resolve() only ever INSERTS here — it never merges or deletes. Identity
+// decisions (which extracted entities are "the same" canonical node, which are
+// noise to hide) live entirely in `entity_canonical` below, so the graph can be
+// re-clustered, re-tuned, and corrected without ever mutating this record. The
+// `mention_count`/`book_count` here are a per-extraction cache; canonical-level
+// counts are aggregated through the mapping (see the resolved view).
 export const entities = sqliteTable(
   "entities",
   {
     id: text("id").primaryKey(),
     type: text("type", { enum: ENTITY_TYPES }).notNull(),
-    canonicalName: text("canonical_name").notNull(),
+    canonicalName: text("canonical_name").notNull(), // surface form as extracted
     normalizedName: text("normalized_name").notNull(), // lowercased/stripped, for matching
     aliases: text("aliases"), // JSON array of alternate surface forms
     summary: text("summary"), // short generated description (optional)
     embedding: blob("embedding"), // entity-level vector for resolution / neighbors
-    // Cross-library signal — how widely an entity appears (powers ranking + wander)
     mentionCount: integer("mention_count").notNull().default(0),
     bookCount: integer("book_count").notNull().default(0),
     salience: real("salience"), // computed centrality, optional
@@ -533,6 +539,73 @@ export const entities = sqliteTable(
     index("idx_entities_type").on(table.type),
     index("idx_entities_normalized").on(table.normalizedName),
     index("idx_entities_type_normalized").on(table.type, table.normalizedName),
+  ],
+);
+
+// Entity canonical mapping: the derived "identity" layer (the pivot). Exactly one
+// row per extracted entity. IDENTITY IS ASSERTED CONSERVATIVELY: `canonicalId`
+// points at self by default and is ONLY ever pointed elsewhere by a human-pinned
+// merge — automatic heuristics never assert identity (they emit candidate links,
+// see entityCandidateLinks). Exact-name duplicates collapse for free at the
+// extraction layer (same normalized name → same stable id), so no auto-merge is
+// needed for the one case we can be certain about. `excluded` hides an extracted
+// entity (e.g. classified noise) WITHOUT deleting it. `pinned` marks the human
+// decision. Rebuilding identity = recomputing these rows; extraction never
+// changes, so it's idempotent and fully reversible.
+export const entityCanonical = sqliteTable(
+  "entity_canonical",
+  {
+    entityId: text("entity_id")
+      .primaryKey()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    canonicalId: text("canonical_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    method: text("method").notNull().default("self"), // self | pinned (heuristics no longer merge here)
+    score: real("score"), // similarity that drove a pinned merge, when applicable
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    excluded: integer("excluded", { mode: "boolean" }).notNull().default(false),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_canonical_canonical").on(table.canonicalId),
+    index("idx_canonical_excluded").on(table.excluded),
+  ],
+);
+
+// Probable-duplicate candidate links: heuristics (person-name variants, near-
+// identical name embeddings) PROPOSE that two extracted entities might be the
+// same, as a graph EDGE rather than a merge. This never asserts identity — it
+// surfaces "related, possibly same" suggestions in wander and is the queue a
+// human promotes to a real pin. `status`: open (proposed) | confirmed (a person
+// accepted it → drives a pin) | rejected (a person said no → suppress future
+// proposals). Recomputed on each mapping rebuild for `open` rows; confirmed/
+// rejected human verdicts are preserved.
+export const entityCandidateLinks = sqliteTable(
+  "entity_candidate_links",
+  {
+    id: text("id").primaryKey(),
+    // Ordered (a < b by id) so the pair is unique regardless of discovery order.
+    entityA: text("entity_a")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    entityB: text("entity_b")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    method: text("method").notNull(), // person_name | embedding
+    score: real("score"), // similarity / confidence behind the proposal
+    status: text("status").notNull().default("open"), // open | confirmed | rejected
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    uniqueIndex("idx_candidate_pair").on(table.entityA, table.entityB),
+    index("idx_candidate_a").on(table.entityA),
+    index("idx_candidate_b").on(table.entityB),
+    index("idx_candidate_status").on(table.status),
   ],
 );
 
@@ -701,6 +774,10 @@ export type Passage = typeof passages.$inferSelect;
 export type NewPassage = typeof passages.$inferInsert;
 export type Entity = typeof entities.$inferSelect;
 export type NewEntity = typeof entities.$inferInsert;
+export type EntityCanonical = typeof entityCanonical.$inferSelect;
+export type NewEntityCanonical = typeof entityCanonical.$inferInsert;
+export type EntityCandidateLink = typeof entityCandidateLinks.$inferSelect;
+export type NewEntityCandidateLink = typeof entityCandidateLinks.$inferInsert;
 export type EntityMention = typeof entityMentions.$inferSelect;
 export type NewEntityMention = typeof entityMentions.$inferInsert;
 export type EntityRelationship = typeof entityRelationships.$inferSelect;

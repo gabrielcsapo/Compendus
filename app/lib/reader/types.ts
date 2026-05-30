@@ -14,6 +14,10 @@ export interface NormalizedChapter {
   title: string;
   html: string;
   text: string;
+  // 0-based index in the EPUB spine. Carried explicitly (not the array index)
+  // so it stays aligned with the knowledge pipeline's `spine_index` even when
+  // some spine items fail to load and get skipped here.
+  spineIndex: number;
   characterStart: number;
   characterEnd: number;
   // EPUB CSS file paths (EPUB-internal paths for the resource API)
@@ -115,6 +119,7 @@ export interface FullTextContentResponse {
   cssUrls: string[];
   chapters: Array<{
     title: string;
+    spineIndex: number;
     characterStart: number;
     characterEnd: number;
   }>;

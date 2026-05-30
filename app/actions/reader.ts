@@ -563,6 +563,7 @@ export async function getFullTextContent(
     );
     chapters.push({
       title: chapter.title,
+      spineIndex: chapter.spineIndex,
       characterStart: chapter.characterStart,
       characterEnd: chapter.characterEnd,
     });

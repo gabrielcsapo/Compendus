@@ -15,6 +15,8 @@ import { THEMES } from "@/lib/reader/settings";
 interface ReaderShellProps {
   bookId: string;
   initialPosition?: number;
+  /** Chapter-anchored deep-link target from Living Library wander links. */
+  initialLocator?: { spineIndex: number; chapterProgress: number };
   returnUrl?: string;
   formatOverride?: string;
   bookFormat?: string;
@@ -26,6 +28,7 @@ interface ReaderShellProps {
 export function ReaderShell({
   bookId,
   initialPosition = 0,
+  initialLocator,
   returnUrl = "/",
   formatOverride: formatOverrideProp,
   bookFormat,
@@ -46,7 +49,13 @@ export function ReaderShell({
     navigate(returnUrl);
   }, [navigate, returnUrl]);
 
-  const reader = useReader({ bookId, initialPosition, formatOverride, nativePdfMode: isNativePdf });
+  const reader = useReader({
+    bookId,
+    initialPosition,
+    initialLocator,
+    formatOverride,
+    nativePdfMode: isNativePdf,
+  });
   const pdfViewerRef = useRef<PdfReaderViewHandle | null>(null);
 
   // Keep ?page=N in the URL in sync with the current page for native PDF.

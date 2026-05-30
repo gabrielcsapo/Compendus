@@ -8,9 +8,17 @@ import type { Book } from "../lib/db/schema";
 
 interface ToggleReadButtonProps {
   book: Book;
+  /** Width/layout classes — defaults to full width for the sidebar layout. */
+  className?: string;
+  /** "outline" (default) shows a teal-outlined button; "ghost" is a quiet secondary action. */
+  variant?: "outline" | "ghost";
 }
 
-export function ToggleReadButton({ book }: ToggleReadButtonProps) {
+export function ToggleReadButton({
+  book,
+  className = "w-full",
+  variant = "outline",
+}: ToggleReadButtonProps) {
   const router = useRouter();
   const [isUpdating, setIsUpdating] = useState(false);
   const isRead = book.isRead ?? false;
@@ -29,8 +37,14 @@ export function ToggleReadButton({ book }: ToggleReadButtonProps) {
     <button
       onClick={handleToggle}
       disabled={isUpdating}
-      className={`${buttonStyles.base} ${buttonStyles.secondary} w-full text-center justify-center flex items-center gap-2 ${
-        isRead ? "!border-success !text-success hover:!bg-success hover:!text-white" : ""
+      className={`${buttonStyles.base} ${
+        variant === "ghost" ? buttonStyles.ghost : buttonStyles.secondary
+      } ${className} text-center justify-center flex items-center gap-2 ${
+        isRead
+          ? variant === "ghost"
+            ? "!text-success"
+            : "!border-success !text-success hover:!bg-success hover:!text-white"
+          : ""
       }`}
     >
       {isRead ? (

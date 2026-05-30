@@ -10,15 +10,14 @@ import { SeriesSection } from "../components/SeriesSection";
 import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCover } from "../components/BookCover";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
-import { EditBookButton } from "../components/EditBookButton";
-import { RematchButton } from "../components/RematchButton";
+import { BookActionsMenu } from "../components/BookActionsMenu";
 import { AuthorLinks } from "../components/AuthorLink";
-import type { BookFormat } from "../lib/types";
-import { ConvertToEpubButton, ReconvertEpubButton } from "../components/ConvertToEpubButton";
+import { ConvertToEpubButton } from "../components/ConvertToEpubButton";
 import { TranscribeButton } from "../components/TranscribeButton";
-import { AnalyzeButton } from "../components/AnalyzeButton";
 import { ToggleReadButton } from "../components/ToggleReadButton";
-import { BookReview } from "../components/BookReview";
+import { BookRating } from "../components/BookRating";
+import { BookInfoButton } from "../components/BookInfoButton";
+import { CollapsibleDescription } from "../components/CollapsibleDescription";
 import { getCurrentProfile } from "../actions/profiles";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
@@ -39,6 +38,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
     ? rawAuthors.filter((a): a is string => typeof a === "string")
     : [];
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
+  const coverUrl = getCoverUrl(book, "full") ?? undefined;
 
   // Parse coverColor hex to RGB for gradient
   const heroGradient = (() => {
@@ -51,328 +51,235 @@ export default async function BookDetail({ params }: { params?: Record<string, s
   })();
 
   return (
-    <main className="max-w-5xl my-8 px-4 sm:px-6 mx-auto">
-      {heroGradient && (
-        <div
-          className="absolute inset-x-0 h-[420px] -z-10 pointer-events-none"
-          style={{
-            top: "var(--header-height, 64px)",
-            background: heroGradient,
-          }}
-        />
-      )}
-      <div className="mb-8">
-        <Link
-          to="/library"
-          className="inline-flex items-center gap-1.5 text-sm text-foreground-muted hover:text-primary transition-colors group"
-        >
-          <svg
-            className="w-4 h-4 transition-transform group-hover:-translate-x-0.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
+    <main className="pb-16">
+      {/* ── Cinematic hero: ambient cover backdrop + cover, title & actions ── */}
+      <section className="relative">
+        {/* Ambient backdrop — blurred cover + color wash, fading into the page */}
+        <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
+          {coverUrl && (
+            <div
+              className="absolute inset-0 bg-cover bg-center scale-110 blur-3xl opacity-25 dark:opacity-40"
+              style={{ backgroundImage: `url("${coverUrl}")` }}
             />
-          </svg>
-          Back to Library
-        </Link>
-      </div>
-
-      {/* Mobile-only primary CTA — visible before scrolling to the cover */}
-      <div className="md:hidden mb-4">
-        <PrimaryAction book={book} progressPercent={progressPercent} />
-      </div>
-
-      <div className="grid md:grid-cols-[280px_1fr] gap-6 md:gap-8 items-start">
-        {/* Cover & Actions */}
-        <aside
-          className="space-y-4 md:sticky md:self-start max-w-xs mx-auto md:max-w-none md:mx-0"
-          style={{ top: "calc(var(--header-height, 64px) + 1.5rem)" }}
-        >
-          {/* Cover */}
-          <div>
-            <div className="shadow-paper rounded-xl overflow-hidden">
-              <CoverDropZone
-                bookId={book.id}
-                coverPath={book.coverPath}
-                coverColor={book.coverColor}
-                title={book.title}
-                updatedAt={book.updatedAt}
-              />
-            </div>
-          </div>
-
-          {/* Progress - show prominently if reading */}
-          {progressPercent > 0 && (
-            <div className="p-3 bg-surface-elevated rounded-lg border border-border">
-              <div className="flex justify-between text-sm text-foreground-muted mb-2">
-                <span>Reading Progress</span>
-                <span className="font-medium text-foreground">{progressPercent}%</span>
-              </div>
-              <div className="h-2 bg-surface rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </div>
           )}
+          {heroGradient && (
+            <div className="absolute inset-0" style={{ background: heroGradient }} />
+          )}
+          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background to-transparent" />
+        </div>
 
-          {/* Primary Actions */}
-          <div className="space-y-2">
-            <PrimaryAction book={book} progressPercent={progressPercent} />
-            {/* For PDF books: offer EPUB as an optional better-experience alternative */}
-            {book.format === "pdf" && (
-              <ConvertToEpubButton
-                bookId={book.id}
-                hasEpub={!!book.convertedEpubPath}
-                progressPercent={progressPercent}
-                variant="secondary"
-              />
-            )}
-            <a
-              href={`/books/${book.id}.${book.format}`}
-              download={book.fileName}
-              className={`${buttonStyles.base} ${buttonStyles.secondary} w-full text-center justify-center gap-2`}
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+          <Link
+            to="/library"
+            className="inline-flex items-center gap-1.5 text-sm text-foreground-muted hover:text-primary transition-colors group"
+          >
+            <svg
+              className="w-4 h-4 transition-transform group-hover:-translate-x-0.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
-              Download {book.format.toUpperCase()}
-            </a>
-            <ToggleReadButton book={book} />
-          </div>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+            Back to Library
+          </Link>
 
-          {/* Transcribe audiobook */}
-          {["m4b", "mp3", "m4a"].includes(book.format) && (
-            <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
-          )}
-
-          {/* Living Library analysis — admin only, EPUB (the source extractor is EPUB-based) */}
-          {isAdmin && book.format === "epub" && <AnalyzeButton bookId={book.id} />}
-
-          {/* Linked formats — streamed via Suspense */}
-          <Suspense>
-            <LinkedFormatsSection bookId={id} book={book} />
-          </Suspense>
-        </aside>
-
-        {/* Content */}
-        <div className="space-y-6 min-w-0">
-          {/* Header — no card background, page-level prominence */}
-          <div className="space-y-3">
-            <div className="flex items-start justify-between gap-4">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-foreground leading-tight break-words">
-                {book.title}
-              </h1>
-              <div className="flex items-center gap-2 shrink-0 pt-1">
-                <RematchButton
+          <div className="mt-6 flex flex-col sm:flex-row gap-6 md:gap-8 items-start sm:items-center">
+            {/* Cover */}
+            <div className="w-40 sm:w-48 md:w-56 shrink-0 mx-auto sm:mx-0">
+              <div className="shadow-paper rounded-xl overflow-hidden ring-1 ring-black/10">
+                <CoverDropZone
                   bookId={book.id}
-                  bookTitle={book.title}
-                  bookAuthors={authors}
-                  bookFormat={book.format as BookFormat}
-                  hasCover={!!book.coverPath}
-                  coverUrl={getCoverUrl(book, "full") ?? undefined}
+                  coverPath={book.coverPath}
+                  coverColor={book.coverColor}
+                  title={book.title}
+                  updatedAt={book.updatedAt}
                 />
-                <EditBookButton
-                  book={book}
-                  tags={tags}
-                  bookFormat={book.format}
-                  hasCover={!!book.coverPath}
-                  coverUrl={getCoverUrl(book, "full") ?? undefined}
-                  bookAuthors={authors}
-                  hasConvertedEpub={!!book.convertedEpubPath}
-                />
-                {(book.format === "epub" || book.convertedEpubPath) && (
+              </div>
+            </div>
+
+            {/* Title, metadata & actions */}
+            <div className="flex-1 min-w-0 space-y-3">
+              <div className="flex items-start justify-between gap-4">
+                <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight text-foreground leading-[1.1] break-words">
+                  {book.title}
+                </h1>
+                <div className="flex items-center gap-2 shrink-0 pt-1">
+                  <BookActionsMenu
+                    book={book}
+                    tags={tags}
+                    authors={authors}
+                    coverUrl={coverUrl}
+                    isAdmin={isAdmin}
+                  />
+                </div>
+              </div>
+
+              {book.subtitle && (
+                <p className="text-lg sm:text-xl text-foreground-muted font-light break-words">
+                  {book.subtitle}
+                </p>
+              )}
+
+              {authors.length > 0 && (
+                <p className="text-lg text-foreground-muted">
+                  by{" "}
+                  <AuthorLinks
+                    authors={authors}
+                    className="text-primary hover:text-primary-hover font-medium"
+                  />
+                </p>
+              )}
+
+              {book.series && (
+                <p className="text-base text-foreground-muted">
+                  {book.seriesNumber && <span>Book {book.seriesNumber} in </span>}
                   <Link
-                    to={`/book/${book.id}/edit`}
-                    className={`${buttonStyles.base} ${buttonStyles.ghost} px-2.5`}
-                    title="Edit EPUB Content"
+                    to={`/library?series=${encodeURIComponent(book.series)}`}
+                    className="text-primary hover:text-primary-hover font-medium"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-                      />
-                    </svg>
+                    {book.series}
                   </Link>
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {book.isRead && (
+                  <span className={`${badgeStyles.base} ${badgeStyles.success}`}>Completed</span>
+                )}
+                <span className={`${badgeStyles.base} ${badgeStyles.primary} uppercase`}>
+                  {book.format}
+                </span>
+                {book.language && (
+                  <span className={`${badgeStyles.base} ${badgeStyles.neutral}`}>
+                    {book.language}
+                  </span>
+                )}
+                {book.pageCount && (
+                  <span className={`${badgeStyles.base} ${badgeStyles.neutral}`}>
+                    {book.pageCount} pages
+                  </span>
                 )}
               </div>
-            </div>
 
-            {book.subtitle && (
-              <p className="text-lg sm:text-xl text-foreground-muted font-light break-words">
-                {book.subtitle}
-              </p>
-            )}
+              {/* Tags & collections */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {tags.map((tag) => (
+                  <Link
+                    key={tag.id}
+                    to={`/tags?tag=${tag.id}`}
+                    className="inline-block px-3 py-1 text-sm rounded-full bg-secondary-light text-secondary hover:opacity-80 transition-opacity"
+                    style={
+                      tag.color
+                        ? { backgroundColor: tag.color + "20", color: tag.color }
+                        : undefined
+                    }
+                  >
+                    {tag.name}
+                  </Link>
+                ))}
+                <Suspense>
+                  <CollectionsInline bookId={id} />
+                </Suspense>
+              </div>
 
-            {authors.length > 0 && (
-              <p className="text-lg text-foreground-muted">
-                by{" "}
-                <AuthorLinks
-                  authors={authors}
-                  className="text-primary hover:text-primary-hover font-medium"
-                />
-              </p>
-            )}
+              {/* Rating — inline stars, opens a modal to edit rating & review */}
+              <div className="pt-1">
+                <BookRating book={book} />
+              </div>
 
-            {book.series && (
-              <p className="text-base text-foreground-muted">
-                {book.seriesNumber && <span>Book {book.seriesNumber} in </span>}
-                <Link
-                  to={`/library?series=${encodeURIComponent(book.series)}`}
-                  className="text-primary hover:text-primary-hover font-medium"
+              {/* Reading progress — compact inline bar */}
+              {progressPercent > 0 && (
+                <div className="max-w-xs pt-1">
+                  <div className="flex justify-between text-xs text-foreground-muted mb-1">
+                    <span>Reading progress</span>
+                    <span className="font-medium text-foreground">{progressPercent}%</span>
+                  </div>
+                  <div className="h-1.5 bg-surface-elevated rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Primary action + quiet secondary actions */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-3">
+                <PrimaryAction book={book} progressPercent={progressPercent} className="" />
+                <a
+                  href={`/books/${book.id}.${book.format}`}
+                  download={book.fileName}
+                  className={`${buttonStyles.base} ${buttonStyles.ghost} gap-1.5`}
                 >
-                  {book.series}
-                </Link>
-              </p>
-            )}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                  Download
+                </a>
+                <ToggleReadButton book={book} className="" variant="ghost" />
+                <BookInfoButton book={book} />
+              </div>
 
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              {book.isRead && (
-                <span className={`${badgeStyles.base} ${badgeStyles.success}`}>Completed</span>
+              {/* Format conversion / transcription — reading-relevant alternatives */}
+              {(book.format === "pdf" || ["m4b", "mp3", "m4a"].includes(book.format)) && (
+                <div className="flex flex-col gap-2 pt-1 max-w-sm">
+                  {book.format === "pdf" && (
+                    <ConvertToEpubButton
+                      bookId={book.id}
+                      hasEpub={!!book.convertedEpubPath}
+                      progressPercent={progressPercent}
+                      variant="secondary"
+                    />
+                  )}
+                  {["m4b", "mp3", "m4a"].includes(book.format) && (
+                    <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
+                  )}
+                </div>
               )}
-              <span className={`${badgeStyles.base} ${badgeStyles.primary} uppercase`}>
-                {book.format}
-              </span>
-              {book.language && (
-                <span className={`${badgeStyles.base} ${badgeStyles.neutral}`}>
-                  {book.language}
-                </span>
-              )}
-              {book.pageCount && (
-                <span className={`${badgeStyles.base} ${badgeStyles.neutral}`}>
-                  {book.pageCount} pages
-                </span>
-              )}
+
+              {/* Linked formats — streamed via Suspense */}
+              <Suspense>
+                <LinkedFormatsSection bookId={id} book={book} />
+              </Suspense>
             </div>
           </div>
+        </div>
+      </section>
 
-          {/* Description */}
-          {book.description && (
-            <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
-                Description
-              </h2>
-              <p className="text-foreground whitespace-pre-line leading-relaxed break-words">
-                {book.description}
-              </p>
-            </section>
-          )}
-
-          {/* Rating & Review */}
+      {/* ── Content sections ──────────────────────────────────────────── */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 mt-8 space-y-6">
+        {/* Description */}
+        {book.description && (
           <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
-              Rating & Review
+              Description
             </h2>
-            <BookReview book={book} />
+            <CollapsibleDescription text={book.description} />
           </section>
+        )}
 
-          {/* Tags & Collections — streamed via Suspense */}
-          <Suspense fallback={<SectionSkeleton title="Organization" />}>
-            <OrganizationSection bookId={id} tags={tags} />
+        {/* Series — streamed via Suspense, only shown when book belongs to a series */}
+        {book.series && (
+          <Suspense fallback={<SectionSkeleton title="In this series" />}>
+            <SeriesSectionData book={book} />
           </Suspense>
+        )}
 
-          {/* Details */}
-          <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
-              Details
-            </h2>
-            <dl className="divide-y divide-border text-sm">
-              {book.pageCount && (
-                <div className="flex justify-between gap-4 py-3">
-                  <dt className="text-foreground-muted shrink-0">Pages</dt>
-                  <dd className="font-medium text-foreground text-right">{book.pageCount}</dd>
-                </div>
-              )}
-              {book.publisher && (
-                <div className="flex justify-between gap-4 py-3">
-                  <dt className="text-foreground-muted shrink-0">Publisher</dt>
-                  <dd className="font-medium text-foreground text-right truncate">
-                    {book.publisher}
-                  </dd>
-                </div>
-              )}
-              {book.publishedDate && (
-                <div className="flex justify-between gap-4 py-3">
-                  <dt className="text-foreground-muted shrink-0">Published</dt>
-                  <dd className="font-medium text-foreground text-right">{book.publishedDate}</dd>
-                </div>
-              )}
-              {book.isbn && (
-                <div className="flex justify-between gap-4 py-3">
-                  <dt className="text-foreground-muted shrink-0">ISBN</dt>
-                  <dd className="font-medium text-foreground font-mono text-right break-all">
-                    {book.isbn}
-                  </dd>
-                </div>
-              )}
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-foreground-muted shrink-0">File Size</dt>
-                <dd className="font-medium text-foreground text-right">
-                  {formatFileSize(book.fileSize)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-foreground-muted shrink-0">Added</dt>
-                <dd className="font-medium text-foreground text-right">
-                  {book.importedAt?.toLocaleDateString()}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-foreground-muted shrink-0">Filename</dt>
-                <dd className="font-medium text-foreground break-all text-right min-w-0">
-                  {book.fileName}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 py-3">
-                <dt className="text-foreground-muted shrink-0">Location</dt>
-                <dd className="text-foreground break-all font-mono text-xs text-right min-w-0">
-                  {book.filePath}
-                </dd>
-              </div>
-              {book.convertedEpubPath && (
-                <div className="flex justify-between items-center gap-4 py-3">
-                  <dt className="text-foreground-muted shrink-0">Converted EPUB</dt>
-                  <dd className="flex items-center gap-3">
-                    <a
-                      href={`/books/${book.id}/as-epub`}
-                      download={`${book.id}.epub`}
-                      className="text-sm text-primary hover:text-primary-hover transition-colors"
-                    >
-                      Download
-                    </a>
-                    <ReconvertEpubButton bookId={book.id} />
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </section>
-
-          {/* Series — streamed via Suspense, only shown when book belongs to a series */}
-          {book.series && (
-            <Suspense fallback={<SectionSkeleton title="In this series" />}>
-              <SeriesSectionData book={book} />
-            </Suspense>
-          )}
-
-          {/* Related Books — streamed via Suspense */}
-          <Suspense fallback={<SectionSkeleton title="Related Books" />}>
-            <RelatedBooksSection book={book} />
-          </Suspense>
-        </div>
+        {/* Related Books — streamed via Suspense */}
+        <Suspense fallback={<SectionSkeleton title="Related Books" />}>
+          <RelatedBooksSection book={book} />
+        </Suspense>
       </div>
     </main>
   );
@@ -426,49 +333,12 @@ async function LinkedFormatsSection({
   );
 }
 
-// Async server component — streams organization section (collections require DB query)
-async function OrganizationSection({
-  bookId,
-  tags,
-}: {
-  bookId: string;
-  tags: Awaited<ReturnType<typeof getTagsForBook>>;
-}) {
+// Async server component — streams collection chips + "add to collection" control
+// inline in the hero (collections require a DB query).
+async function CollectionsInline({ bookId }: { bookId: string }) {
   const collections = await getCollectionsForBook(bookId);
-
   return (
-    <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-4">
-        Organization
-      </h2>
-
-      {tags.length > 0 && (
-        <div className="mb-5">
-          <h3 className="text-xs font-medium text-foreground-muted mb-2">Tags</h3>
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
-              <Link
-                key={tag.id}
-                to={`/tags?tag=${tag.id}`}
-                className="inline-block px-3 py-1 text-sm rounded-full bg-secondary-light text-secondary hover:opacity-80 transition-opacity"
-                style={
-                  tag.color
-                    ? {
-                        backgroundColor: tag.color + "20",
-                        color: tag.color,
-                      }
-                    : undefined
-                }
-              >
-                {tag.name}
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <BookCollectionsManager bookId={bookId} currentCollections={collections} />
-    </section>
+    <BookCollectionsManager bookId={bookId} currentCollections={collections} variant="inline" />
   );
 }
 
@@ -569,9 +439,11 @@ function SectionSkeleton({ title }: { title: string }) {
 function PrimaryAction({
   book,
   progressPercent,
+  className = "w-full",
 }: {
   book: Awaited<ReturnType<typeof getBook>>;
   progressPercent: number;
+  className?: string;
 }) {
   if (!book) return null;
   if (["mobi", "azw3"].includes(book.format)) {
@@ -587,7 +459,7 @@ function PrimaryAction({
   return (
     <Link
       to={`/book/${book.id}/read`}
-      className={`${buttonStyles.base} ${buttonStyles.primary} w-full text-center justify-center gap-2`}
+      className={`${buttonStyles.base} ${buttonStyles.primary} ${className} text-center justify-center gap-2`}
     >
       {isAudio ? (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -617,10 +489,4 @@ function PrimaryAction({
           : "Start Reading"}
     </Link>
   );
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }

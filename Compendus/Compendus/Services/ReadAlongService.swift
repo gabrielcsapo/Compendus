@@ -92,7 +92,7 @@ class ReadAlongService {
 
     // MARK: - TTS References
 
-    private var pocketTTSContext: PocketTTSContext?
+    private var kokoroTTSContext: KokoroTTSContext?
     private var ttsAudioCache: TTSAudioCache?
     @ObservationIgnored private var ttsVoiceIndex: UInt32 = 0
 
@@ -302,7 +302,7 @@ class ReadAlongService {
             ttsBuffersQueued = 0
             ttsPlaybackStartHostTime = 0
             ttsPlaybackStartSampleTime = 0
-            pocketTTSContext = nil
+            kokoroTTSContext = nil
             ttsBackgrounded = false
             for observer in backgroundObservers {
                 NotificationCenter.default.removeObserver(observer)
@@ -786,7 +786,7 @@ class ReadAlongService {
     func activateWithTTS(
         ebook: DownloadedBook,
         engine: NativeEPUBEngine,
-        ttsContext: PocketTTSContext,
+        ttsContext: KokoroTTSContext,
         voiceIndex: UInt32,
         audioCache: TTSAudioCache? = nil,
         transcriptionService: OnDeviceTranscriptionService? = nil
@@ -796,7 +796,7 @@ class ReadAlongService {
         self.audioSource = .tts
         self.ebook = ebook
         self.engine = engine
-        self.pocketTTSContext = ttsContext
+        self.kokoroTTSContext = ttsContext
         self.ttsVoiceIndex = voiceIndex
         self.ttsAudioCache = audioCache
 
@@ -1482,7 +1482,7 @@ class ReadAlongService {
             let sentenceText = TextProcessingUtils.preprocessTextForTTS(rawSentenceText)
 
             do {
-                guard let ttsContext = pocketTTSContext else {
+                guard let ttsContext = kokoroTTSContext else {
                     logger.error("PocketTTS context lost mid-pipeline at chunk \(i)")
                     break
                 }
@@ -1542,17 +1542,24 @@ class ReadAlongService {
                 let audioDuration = Double(sampleCount) / 24000.0
                 successCount += 1
 
-                // Update sentence timing and compute proportional word timings
+                // Update sentence timing and word timings
                 await MainActor.run {
                     guard i < self.ttsSentences.count else { return }
                     self.ttsSentences[i].audioStartTime = cumulativeTime
                     self.ttsSentences[i].audioEndTime = cumulativeTime + audioDuration
-                    self.ttsSentences[i].wordTimings = TextProcessingUtils.estimateWordTimings(
-                        sentence: self.ttsSentences[i].text,
-                        plainTextRange: self.ttsSentences[i].plainTextRange,
-                        startTime: cumulativeTime,
-                        endTime: cumulativeTime + audioDuration
-                    )
+                    // Prefer Kokoro's real per-word timestamps; fall back to proportional
+                    // estimation only if the engine returned no usable word alignment.
+                    self.ttsSentences[i].wordTimings = result.alignedWords.isEmpty
+                        ? TextProcessingUtils.estimateWordTimings(
+                            sentence: self.ttsSentences[i].text,
+                            plainTextRange: self.ttsSentences[i].plainTextRange,
+                            startTime: cumulativeTime,
+                            endTime: cumulativeTime + audioDuration)
+                        : TextProcessingUtils.wordTimings(
+                            fromAligned: result.alignedWords,
+                            sentence: self.ttsSentences[i].text,
+                            plainTextRange: self.ttsSentences[i].plainTextRange,
+                            startTime: cumulativeTime)
                     self.ttsDuration = cumulativeTime + audioDuration
                     self.ttsTotalSamplesScheduled += sampleCount
                     // Rebuild transcript for karaoke overlay
@@ -1846,7 +1853,7 @@ class ReadAlongService {
         ttsGenerationTask = Task { [weak self] in
             guard let self = self else { return }
 
-            guard let pocketTTSContext = self.pocketTTSContext,
+            guard let kokoroTTSContext = self.kokoroTTSContext,
                   index < self.ttsSentences.count else { return }
 
             var cumulativeTime = self.ttsSentences[index].audioStartTime
@@ -1875,7 +1882,7 @@ class ReadAlongService {
                     }
 
                     // Stream audio chunks directly to player as they arrive
-                    let result = try await pocketTTSContext.generateAudioStreaming(
+                    let result = try await kokoroTTSContext.generateAudioStreaming(
                         text: sentenceText,
                         onChunk: { [weak self] chunkSamples in
                             guard !chunkSamples.isEmpty else { return }

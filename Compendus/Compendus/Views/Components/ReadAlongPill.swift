@@ -38,12 +38,11 @@ struct ReadAlongPill: View {
     @Environment(ReadAlongService.self) private var readAlong
     @Environment(AudiobookPlayer.self) private var player
     @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
-    @Environment(PocketTTSModelManager.self) private var voiceManager
+    @Environment(KokoroModelManager.self) private var voiceManager
     @Environment(TTSAudioCache.self) private var ttsAudioCache
 
     @State private var showingSourcePicker = false
     @State private var showingOptionsSheet = false
-    @State private var showingVoicePicker = false
 
     // MARK: - Computed
 
@@ -121,10 +120,15 @@ struct ReadAlongPill: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isActive)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showingSourcePicker)
         .sheet(isPresented: $showingOptionsSheet) {
-            optionsSheet
-        }
-        .sheet(isPresented: $showingVoicePicker) {
-            voicePickerSheet
+            ReadAloudOptionsSheet(
+                availableSources: availableSources,
+                bookId: bookId,
+                audiobookHasTranscript: audiobookHasTranscript,
+                onStartAudiobook: onStartAudiobook,
+                onStartTTS: onStartTTS,
+                onChangeVoice: onChangeVoice,
+                onDownloadForLater: onDownloadForLater
+            )
         }
     }
 
@@ -330,203 +334,6 @@ struct ReadAlongPill: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isPlaying)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isLoading)
     }
-
-    // MARK: - Options Sheet
-
-    private var optionsSheet: some View {
-        NavigationStack {
-            List {
-                // Start/switch options (hidden when already active with single source)
-                if !isActive || hasDualSources {
-                    Section {
-                        if hasDualSources {
-                            Button {
-                                showingOptionsSheet = false
-                                onStartAudiobook()
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Read Along")
-                                        Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                } icon: {
-                                    Image(systemName: "headphones")
-                                }
-                            }
-
-                            Button {
-                                showingOptionsSheet = false
-                                onStartTTS()
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Read Aloud")
-                                        Text("On-device text-to-speech · \(voiceManager.selectedVoice?.name ?? "Default")")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                } icon: {
-                                    Image(systemName: "speaker.wave.2")
-                                }
-                            }
-                        } else if availableSources.contains(where: { if case .audiobook = $0 { return true }; return false }) {
-                            Button {
-                                showingOptionsSheet = false
-                                onStartAudiobook()
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Start Read Along")
-                                        Text(audiobookHasTranscript ? "Follow along with audiobook" : "Requires transcription first")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                } icon: {
-                                    Image(systemName: "headphones")
-                                }
-                            }
-                        } else {
-                            Button {
-                                showingOptionsSheet = false
-                                onStartTTS()
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Start Read Aloud")
-                                        Text("On-device text-to-speech")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                } icon: {
-                                    Image(systemName: "speaker.wave.2")
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("Listen")
-                    }
-                }
-
-                // TTS settings
-                if hasTTSSource {
-                    Section {
-                        // Voice
-                        Button {
-                            showingOptionsSheet = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                showingVoicePicker = true
-                            }
-                        } label: {
-                            HStack {
-                                Label("Voice", systemImage: "person.wave.2")
-                                Spacer()
-                                Text(voiceManager.selectedVoice?.displayName ?? "Default")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        // Speed
-                        HStack {
-                            Label("Speed", systemImage: "gauge.with.dots.needle.67percent")
-                            Spacer()
-                            Picker("Speed", selection: Binding(
-                                get: { readAlong.ttsPlaybackRate },
-                                set: { readAlong.setTTSPlaybackRate($0) }
-                            )) {
-                                ForEach(Self.speedOptions, id: \.self) { speed in
-                                    Text(speed == 1.0 ? "1x" : (speed == floor(speed) ? "\(Int(speed))x" : "\(String(format: "%.2g", speed))x"))
-                                        .tag(speed)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-
-                        // Download for later
-                        if let onDownloadForLater {
-                            Button {
-                                showingOptionsSheet = false
-                                onDownloadForLater()
-                            } label: {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Download for Later")
-                                        if cachedChapters > 0 {
-                                            Text("\(cachedChapters) chapters cached")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        } else {
-                                            Text("Pre-generate audio · runs while connected to power")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                } icon: {
-                                    Image(systemName: "arrow.down.circle")
-                                }
-                            }
-                        }
-                    } header: {
-                        Text("Text-to-Speech")
-                    }
-                }
-            }
-            .navigationTitle("Read Aloud Options")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        showingOptionsSheet = false
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-
-    // MARK: - Voice Picker Sheet
-
-    private var voicePickerSheet: some View {
-        NavigationStack {
-            List(voiceManager.availableVoices) { voice in
-                Button {
-                    if voice.id != voiceManager.selectedVoiceIndex {
-                        voiceManager.selectedVoiceIndex = voice.id
-                        onChangeVoice?(voice.id)
-                    }
-                    showingVoicePicker = false
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(voice.name)
-                                .font(.body)
-                            Text(voice.gender)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if voice.id == voiceManager.selectedVoiceIndex {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.accent)
-                        }
-                    }
-                }
-                .foregroundStyle(.primary)
-            }
-            .navigationTitle("Voice")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        showingVoicePicker = false
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-
 
     // MARK: - Helpers
 

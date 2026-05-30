@@ -4,7 +4,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 interface AnalyzeButtonProps {
   bookId: string;
+  /** "full" (default) renders a standalone button; "menuItem" renders inside a dropdown menu. */
+  variant?: "full" | "menuItem";
 }
+
+const MENU_ITEM_CLASS =
+  "flex w-full items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-foreground hover:bg-surface-elevated transition-colors text-left disabled:opacity-60 disabled:cursor-default disabled:hover:bg-transparent";
 
 type AnalyzeState =
   | { type: "idle" }
@@ -14,7 +19,7 @@ type AnalyzeState =
   | { type: "completed"; entityCount: number; relationshipCount: number }
   | { type: "error"; message: string };
 
-export function AnalyzeButton({ bookId }: AnalyzeButtonProps) {
+export function AnalyzeButton({ bookId, variant = "full" }: AnalyzeButtonProps) {
   const [state, setState] = useState<AnalyzeState>({ type: "loading" });
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -119,6 +124,43 @@ export function AnalyzeButton({ bookId }: AnalyzeButtonProps) {
       setState({ type: "error", message: "Failed to start analysis" });
     }
   };
+
+  if (variant === "menuItem") {
+    if (state.type === "analyzing") {
+      return (
+        <div className={MENU_ITEM_CLASS}>
+          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin text-foreground-muted" />
+          <span className="flex-1">Analyzing…</span>
+          <span className="text-xs text-foreground-muted tabular-nums">{state.progress}%</span>
+        </div>
+      );
+    }
+    if (state.type === "starting" || state.type === "loading") {
+      return (
+        <div className={MENU_ITEM_CLASS}>
+          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin text-foreground-muted" />
+          <span>{state.type === "starting" ? "Starting…" : "Checking…"}</span>
+        </div>
+      );
+    }
+    const label =
+      state.type === "completed"
+        ? "Re-analyze Metadata"
+        : state.type === "error"
+          ? "Retry analysis"
+          : "Analyze Metadata";
+    return (
+      <button type="button" onClick={startAnalysis} className={MENU_ITEM_CLASS}>
+        <ConstellationIcon />
+        <span className="flex-1">{label}</span>
+        {state.type === "completed" && (
+          <span className="text-xs text-foreground-muted tabular-nums">
+            {state.entityCount} · {state.relationshipCount}
+          </span>
+        )}
+      </button>
+    );
+  }
 
   if (state.type === "loading") {
     return (

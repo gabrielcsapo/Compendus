@@ -88,7 +88,10 @@ class TTSAudioCache {
 
     private var cacheBaseURL: URL {
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("tts-cache", isDirectory: true)
+        // Namespaced for the Kokoro engine — old PocketTTS-era caches (different voices,
+        // different sample timbre, estimated word timings) live under "tts-cache" and are
+        // intentionally not reused.
+        return docs.appendingPathComponent("tts-cache-kokoro", isDirectory: true)
     }
 
     private func bookCacheURL(bookId: String) -> URL {

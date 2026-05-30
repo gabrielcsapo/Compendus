@@ -8,10 +8,27 @@
 //
 
 import SwiftUI
+import SwiftData
+import EPUBReader
 
 struct WanderView: View {
     @Environment(APIService.self) private var apiService
     @Environment(AppNavigation.self) private var nav
+
+    // Reader-cover dependencies (all injected at the app root, so available here).
+    // Mirrors the set BookDetailView forwards into ReaderContainerView.
+    @Environment(DownloadManager.self) private var downloadManager
+    @Environment(AudiobookPlayer.self) private var audiobookPlayer
+    @Environment(StorageManager.self) private var storageManager
+    @Environment(ReaderSettings.self) private var readerSettings
+    @Environment(HighlightColorManager.self) private var highlightColorManager
+    @Environment(OnDeviceTranscriptionService.self) private var transcriptionService
+    @Environment(ReadAlongService.self) private var readAlongService
+    @Environment(KokoroModelManager.self) private var kokoroModelManager
+    @Environment(TTSAudioCache.self) private var ttsAudioCache
+    @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
+    @Environment(ComicExtractor.self) private var comicExtractor
+    @Environment(\.modelContext) private var modelContext
 
     @State private var entity: GraphEntity?
     @State private var steps: [WanderStep] = []
@@ -19,6 +36,12 @@ struct WanderView: View {
     @State private var history: [String] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+
+    // Opening a passage in the native reader.
+    @State private var bookToRead: DownloadedBook?
+    @State private var readerPosition: String?
+    @State private var showNotDownloaded = false
+    @State private var notDownloadedTitle = ""
 
     // Activity tracking: time + ideas surfaced this visit, logged on disappear.
     @State private var sessionStartedAt = Date()
@@ -34,6 +57,14 @@ struct WanderView: View {
         }
         .overlay(alignment: .topTrailing) { closeButton }
         .preferredColorScheme(.dark)
+        .fullScreenCover(item: $bookToRead) { book in
+            readerCover(for: book)
+        }
+        .alert("Not on this device", isPresented: $showNotDownloaded) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Download “\(notDownloadedTitle)” from your library to open this passage.")
+        }
         .task {
             if pool.isEmpty { await start() }
         }
@@ -108,19 +139,29 @@ struct WanderView: View {
                 .padding(.bottom, 28)
 
             if let snippet = entity.mentions?.first {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(snippet.snippet)
-                        .font(.system(size: 19, design: .serif))
-                        .lineSpacing(6)
-                        .foregroundStyle(Color(white: 0.78))
-                    Text("— \(snippet.bookTitle)\(snippet.chapterTitle.map { " · \($0)" } ?? "")")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color(white: 0.5))
+                Button {
+                    openPassage(snippet)
+                } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(snippet.snippet)
+                            .font(.system(size: 19, design: .serif))
+                            .lineSpacing(6)
+                            .foregroundStyle(Color(white: 0.78))
+                        Text("— \(snippet.bookTitle)\(snippet.chapterTitle.map { " · \($0)" } ?? "")")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color(white: 0.5))
+                        Text("Open passage →")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(amber.opacity(0.85))
+                            .padding(.top, 2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 18)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Color(white: 0.3)).frame(width: 1)
+                    }
                 }
-                .padding(.leading, 18)
-                .overlay(alignment: .leading) {
-                    Rectangle().fill(Color(white: 0.3)).frame(width: 1)
-                }
+                .buttonStyle(.plain)
             } else {
                 Text("Mentioned across your library.")
                     .font(.system(size: 17))
@@ -251,6 +292,51 @@ struct WanderView: View {
         entity = try await detail.entity
         steps = try await wander.steps
         ideasVisited += 1
+    }
+
+    // MARK: - Open passage in reader
+
+    /// Open the passage's book in the native reader at a chapter-anchored locator.
+    /// Requires the book to be downloaded on device; otherwise prompts to download.
+    private func openPassage(_ mention: EntityMention) {
+        guard let downloaded = downloadManager.getDownloadedBook(id: mention.bookId, modelContext: modelContext)
+        else {
+            notDownloadedTitle = mention.bookTitle
+            showNotDownloaded = true
+            return
+        }
+        readerPosition = locatorJSON(for: mention)
+        bookToRead = downloaded
+    }
+
+    /// Build the native reader's EPUB locator JSON from a mention. Prefers the
+    /// chapter-anchored {spineIndex, progress} pair (the engine reads `progress`
+    /// as within-chapter progression); returns nil to resume at the saved spot
+    /// when the chapter anchor isn't available.
+    private func locatorJSON(for mention: EntityMention) -> String? {
+        guard let spine = mention.spineIndex, let progress = mention.chapterProgress else { return nil }
+        let dict: [String: Any] = ["type": "epub", "spineIndex": spine, "progress": progress]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let json = String(data: data, encoding: .utf8)
+        else { return nil }
+        return json
+    }
+
+    @ViewBuilder
+    private func readerCover(for book: DownloadedBook) -> some View {
+        ReaderContainerView(book: book, initialPosition: readerPosition)
+            .environment(readerSettings)
+            .environment(highlightColorManager)
+            .environment(readAlongService)
+            .environment(audiobookPlayer)
+            .environment(transcriptionService)
+            .environment(apiService)
+            .environment(storageManager)
+            .environment(kokoroModelManager)
+            .environment(ttsAudioCache)
+            .environment(backgroundProcessingManager)
+            .environment(comicExtractor)
+            .modelContext(modelContext)
     }
 
     // MARK: - Labels

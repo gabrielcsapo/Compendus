@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { db, books, bookAnalysis, wanderSessions } from "../../app/lib/db";
 import { enqueueJob, getJob } from "../../app/lib/queue";
 import { listEntities, getEntityDetail, wander } from "../../app/lib/knowledge/graph";
-import { consolidateGraph } from "../../app/lib/knowledge/resolution";
+import {
+  rebuildCanonicalMapping,
+  listCandidateLinks,
+  setCandidateStatus,
+  undoCandidateReview,
+} from "../../app/lib/knowledge/resolution";
 import { requireAdmin } from "../middleware/profile";
 
 const app = new Hono();
@@ -12,16 +17,53 @@ const app = new Hono();
 // Analysis mutates the shared library graph — admin only (like transcription).
 app.use("/api/books/:id/analyze", requireAdmin);
 app.use("/api/graph/consolidate", requireAdmin);
+app.use("/api/graph/candidates", requireAdmin);
+app.use("/api/graph/candidates/:id/:verdict", requireAdmin);
 
 /**
  * POST /api/graph/consolidate
- * One-shot graph-wide cleanup: retroactively applies the noise-filter and
- * person-merge fixes to already-extracted entities (which per-book re-analysis
- * cannot touch). Idempotent. Returns the counts changed.
+ * Rebuild the canonical identity mapping (merge variants, flag noise) from the
+ * immutable extraction layer. Non-destructive and idempotent — only rewrites the
+ * derived mapping; re-runnable after tuning. Returns the rebuild counts.
  */
 app.post("/api/graph/consolidate", (c) => {
-  const result = consolidateGraph();
+  const result = rebuildCanonicalMapping();
   return c.json({ success: true, result });
+});
+
+/**
+ * GET /api/graph/candidates?status=open — probable-duplicate links for human
+ * review. Heuristics propose; a person confirms/rejects (identity is never
+ * asserted automatically).
+ */
+app.get("/api/graph/candidates", (c) => {
+  const status = c.req.query("status") || "open";
+  const limit = parseInt(c.req.query("limit") || "100", 10);
+  return c.json({ success: true, candidates: listCandidateLinks(status, limit) });
+});
+
+/**
+ * POST /api/graph/candidates/:id/:verdict — record a human verdict on a candidate
+ * link. `confirmed` pins the merge; `rejected` suppresses re-proposal; `undo`
+ * reverts a prior verdict back to open (and unpins a confirmed merge).
+ */
+app.post("/api/graph/candidates/:id/:verdict", (c) => {
+  const verdict = c.req.param("verdict");
+  const id = c.req.param("id");
+  if (verdict === "undo") {
+    const ok = undoCandidateReview(id);
+    if (!ok) return c.json({ success: false, error: "Candidate link not found" }, 404);
+    return c.json({ success: true });
+  }
+  if (verdict !== "confirmed" && verdict !== "rejected") {
+    return c.json(
+      { success: false, error: "verdict must be 'confirmed', 'rejected', or 'undo'" },
+      400,
+    );
+  }
+  const ok = setCandidateStatus(id, verdict);
+  if (!ok) return c.json({ success: false, error: "Candidate link not found" }, 404);
+  return c.json({ success: true });
 });
 
 /**

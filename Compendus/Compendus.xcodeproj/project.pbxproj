@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		36EA78AEF80572E668BF61EC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3198DB17E9FF90C3612D619A /* Foundation.framework */; };
-		AA00000001000002PTTSMDL0 /* PocketTTSModel in Resources */ = {isa = PBXBuildFile; fileRef = AA00000001000001PTTSMDL0 /* PocketTTSModel */; };
+		AA00000001000002PTTSMDL0 /* KokoroModel in Resources */ = {isa = PBXBuildFile; fileRef = AA00000001000001PTTSMDL0 /* KokoroModel */; };
 		F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18582F3679000029A1F0 /* ZIPFoundation */; };
 		F91E18752F37E6270029A1F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18742F37E6270029A1F0 /* WidgetKit.framework */; };
 		F91E18772F37E6270029A1F0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18762F37E6270029A1F0 /* SwiftUI.framework */; };
@@ -53,7 +53,7 @@
 /* Begin PBXFileReference section */
 		3198DB17E9FF90C3612D619A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompendusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		AA00000001000001PTTSMDL0 /* PocketTTSModel */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PocketTTSModel; sourceTree = "<group>"; };
+		AA00000001000001PTTSMDL0 /* KokoroModel */ = {isa = PBXFileReference; lastKnownFileType = folder; path = KokoroModel; sourceTree = "<group>"; };
 		F91E180A2F366F9C0029A1F0 /* Compendus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compendus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompendusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18742F37E6270029A1F0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -152,7 +152,7 @@
 				F91E18932F37EAAF0029A1F0 /* CompendusWidgetExtension.entitlements */,
 				F91E180C2F366F9C0029A1F0 /* Compendus */,
 				F91E18782F37E6270029A1F0 /* CompendusWidget */,
-				AA00000001000001PTTSMDL0 /* PocketTTSModel */,
+				AA00000001000001PTTSMDL0 /* KokoroModel */,
 				F91E18542F3678BE0029A1F0 /* Frameworks */,
 				F91E180B2F366F9C0029A1F0 /* Products */,
 				0A957213575147E9065818B7 /* CompendusTests */,
@@ -306,7 +306,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9CF53942F4848380099E42C /* Launch Screen.storyboard in Resources */,
-				AA00000001000002PTTSMDL0 /* PocketTTSModel in Resources */,
+				AA00000001000002PTTSMDL0 /* KokoroModel in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

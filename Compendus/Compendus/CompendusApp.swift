@@ -32,7 +32,7 @@ struct CompendusApp: App {
     @State private var appSettings = AppSettings()
     @State private var highlightColorManager = HighlightColorManager()
     @State private var readAlongService = ReadAlongService()
-    @State private var pocketTTSModelManager = PocketTTSModelManager()
+    @State private var kokoroModelManager = KokoroModelManager()
     @State private var ttsAudioCache = TTSAudioCache()
     @State private var ttsPreGenerationService = TTSPreGenerationService()
     @State private var backgroundProcessingManager = BackgroundProcessingManager()
@@ -76,7 +76,7 @@ struct CompendusApp: App {
                 .environment(appSettings)
                 .environment(highlightColorManager)
                 .environment(readAlongService)
-                .environment(pocketTTSModelManager)
+                .environment(kokoroModelManager)
                 .environment(ttsAudioCache)
                 .environment(ttsPreGenerationService)
                 .environment(backgroundProcessingManager)
@@ -94,7 +94,7 @@ struct CompendusApp: App {
                     downloadManager.reconnectBackgroundSession()
                     downloadManager.backgroundProcessingManager = backgroundProcessingManager
                     downloadManager.appSettings = appSettings
-                    downloadManager.pocketTTSModelManager = pocketTTSModelManager
+                    downloadManager.kokoroModelManager = kokoroModelManager
                     audiobookPlayer.modelContainer = sharedModelContainer
                     appDelegate.audiobookPlayer = audiobookPlayer
                     appDelegate.modelContainer = sharedModelContainer
@@ -117,7 +117,7 @@ struct CompendusApp: App {
                         transcriptionService: onDeviceTranscriptionService,
                         ttsPreGenerationService: ttsPreGenerationService,
                         ttsAudioCache: ttsAudioCache,
-                        pocketTTSModelManager: pocketTTSModelManager,
+                        kokoroModelManager: kokoroModelManager,
                         appSettings: appSettings,
                         modelContainer: sharedModelContainer
                     )
