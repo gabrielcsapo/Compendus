@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ReaderTOCView: View {
     let items: [TOCItem]

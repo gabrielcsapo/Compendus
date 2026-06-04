@@ -2,6 +2,11 @@
  * Worker pool for CPU-intensive processing tasks
  * Maintains a pool of persistent worker threads to avoid startup overhead.
  * Tasks are dispatched to idle workers or queued until one becomes available.
+ *
+ * Every dispatched task has a hard timeout: a worker that wedges on a pathological
+ * book (infinite loop / never-returning conversion) is terminated and replaced, and
+ * its task is rejected — so ONE bad book fails cleanly instead of stalling the whole
+ * backfill queue behind a hung await. Worker crash/exit also rejects the in-flight task.
  */
 import { Worker } from "worker_threads";
 import { cpus } from "os";
@@ -9,6 +14,10 @@ import { join } from "path";
 import { existsSync } from "fs";
 import type { WorkerTask, WorkerResult, WorkerTaskType } from "./processing-worker";
 import type { BookFormat } from "../types";
+
+// A single conversion that runs longer than this is treated as wedged. Generous
+// enough for the largest real books (thousands of chapters) on a shared host.
+const TASK_TIMEOUT_MS = 120_000;
 
 interface PendingTask {
   task: WorkerTask;
@@ -19,6 +28,8 @@ interface PendingTask {
 interface WorkerState {
   worker: Worker;
   busy: boolean;
+  currentTaskId?: string;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 let taskIdCounter = 0;
@@ -61,6 +72,8 @@ class WorkerPool {
     const state: WorkerState = { worker, busy: false };
 
     worker.on("message", (result: WorkerResult) => {
+      this.clearTimer(state);
+      state.currentTaskId = undefined;
       const pending = this.pendingTasks.get(result.id);
       if (pending) {
         this.pendingTasks.delete(result.id);
@@ -70,35 +83,66 @@ class WorkerPool {
           pending.reject(new Error(result.error || "Worker task failed"));
         }
       }
-
       state.busy = false;
       this.processQueue();
     });
 
     worker.on("error", (error) => {
       console.error("[WorkerPool] Worker error:", error);
-      // Reject all pending tasks for this worker
-      state.busy = false;
-      // Replace the dead worker
-      const idx = this.workers.indexOf(state);
-      if (idx !== -1) {
-        this.workers.splice(idx, 1);
-        this.addWorker();
-      }
+      this.failCurrentTask(state, error);
+      this.replaceWorker(state);
     });
 
     worker.on("exit", (code) => {
       if (code !== 0) {
         console.error(`[WorkerPool] Worker exited with code ${code}`);
-        const idx = this.workers.indexOf(state);
-        if (idx !== -1) {
-          this.workers.splice(idx, 1);
-          this.addWorker();
-        }
+        this.failCurrentTask(state, new Error(`Worker exited with code ${code}`));
+        this.replaceWorker(state);
       }
     });
 
     this.workers.push(state);
+  }
+
+  private clearTimer(state: WorkerState): void {
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+  }
+
+  /** Reject the task currently in flight on this worker (crash / exit / timeout). */
+  private failCurrentTask(state: WorkerState, error: Error): void {
+    this.clearTimer(state);
+    if (state.currentTaskId) {
+      const pending = this.pendingTasks.get(state.currentTaskId);
+      if (pending) {
+        this.pendingTasks.delete(state.currentTaskId);
+        pending.reject(error);
+      }
+      state.currentTaskId = undefined;
+    }
+  }
+
+  /** Remove a dead/wedged worker from the pool, terminate it, and spin up a replacement. */
+  private replaceWorker(state: WorkerState): void {
+    this.clearTimer(state);
+    const idx = this.workers.indexOf(state);
+    if (idx === -1) return; // already replaced
+    this.workers.splice(idx, 1);
+    state.worker.terminate().catch(() => {});
+    this.addWorker();
+    this.processQueue();
+  }
+
+  private handleTimeout(state: WorkerState, taskId: string): void {
+    // Only act if THIS task is still the one in flight (guards against a late timer).
+    if (state.currentTaskId !== taskId) return;
+    console.error(
+      `[WorkerPool] Task ${taskId} timed out after ${TASK_TIMEOUT_MS}ms; terminating wedged worker`,
+    );
+    this.failCurrentTask(state, new Error(`Worker task timed out after ${TASK_TIMEOUT_MS}ms`));
+    this.replaceWorker(state);
   }
 
   private processQueue(): void {
@@ -113,14 +157,19 @@ class WorkerPool {
 
   private dispatchToWorker(state: WorkerState, pending: PendingTask): void {
     state.busy = true;
+    state.currentTaskId = pending.task.id;
     this.pendingTasks.set(pending.task.id, {
       resolve: pending.resolve,
       reject: pending.reject,
     });
+    state.timer = setTimeout(() => this.handleTimeout(state, pending.task.id), TASK_TIMEOUT_MS);
 
-    // Transfer buffer as Transferable for zero-copy
-    const bufferCopy = Buffer.from(pending.task.buffer);
-    state.worker.postMessage({ ...pending.task, buffer: bufferCopy }, [bufferCopy.buffer]);
+    // Send a copy via structured clone — do NOT use a transferList. A small
+    // Buffer is backed by Node's shared 8KB pool, whose ArrayBuffer is not
+    // transferable and makes postMessage throw "Cannot transfer object of
+    // unsupported type" (which then fails the conversion). The copy is cheap
+    // relative to the conversion and correct for every file size.
+    state.worker.postMessage({ ...pending.task, buffer: Buffer.from(pending.task.buffer) });
   }
 
   async runTask(type: WorkerTaskType, buffer: Buffer, format: BookFormat): Promise<unknown> {
@@ -140,6 +189,7 @@ class WorkerPool {
   }
 
   async shutdown(): Promise<void> {
+    for (const state of this.workers) this.clearTimer(state);
     const terminations = this.workers.map((state) => state.worker.terminate());
     await Promise.all(terminations);
     this.workers = [];

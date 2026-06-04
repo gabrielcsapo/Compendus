@@ -166,6 +166,12 @@ function createFileStream(
     start(controller) {
       stream.on("data", (chunk: Buffer) => {
         controller.enqueue(new Uint8Array(chunk));
+        // Consumer's buffer is full (slow client) — stop reading until pull()
+        // asks for more, so chunks can't pile up in the controller queue and
+        // grow per-connection memory on large (1GB+) downloads.
+        if ((controller.desiredSize ?? 1) <= 0) {
+          stream.pause();
+        }
       });
       stream.on("end", () => {
         controller.close();
@@ -173,6 +179,11 @@ function createFileStream(
       stream.on("error", (err) => {
         controller.error(err);
       });
+      // Start paused; reads are driven by pull() to honor backpressure.
+      stream.pause();
+    },
+    pull() {
+      stream.resume();
     },
     cancel() {
       stream.destroy();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
 import { getTagsWithCounts, getBooksWithTag } from "../actions/tags";
 import { BookGrid } from "../components/BookGrid";
@@ -9,25 +9,27 @@ type TagItem = Awaited<ReturnType<typeof getTagsWithCounts>>[number];
 
 export default function Tags({
   initialTags,
-  initialBooks,
   initialSelectedTagId,
+  booksSlot,
 }: {
   initialTags?: TagItem[];
-  initialBooks?: Awaited<ReturnType<typeof getBooksWithTag>>;
   initialSelectedTagId?: string | null;
+  /** Server-streamed books grid for the initially-selected tag. */
+  booksSlot?: ReactNode;
 }) {
   const [searchParams] = useSearchParams();
   const [tags, setTags] = useState<TagItem[] | null>(initialTags ?? null);
-  const [books, setBooks] = useState<Awaited<ReturnType<typeof getBooksWithTag>>>(
-    initialBooks ?? [],
-  );
+  const [books, setBooks] = useState<Awaited<ReturnType<typeof getBooksWithTag>>>([]);
   const [tagsLoading, setTagsLoading] = useState(!initialTags);
   const [booksLoading, setBooksLoading] = useState(false);
   const hadInitialTags = useRef(!!initialTags);
-  const hadInitialBooks = useRef(!!initialBooks && initialSelectedTagId != null);
+  // While true, the initially-selected tag's books are served by the streamed
+  // booksSlot; a client-side tag change flips this off and fetches inline.
+  const [showSlot, setShowSlot] = useState(initialSelectedTagId != null);
 
   const selectedTagId = searchParams.get("tag");
   const selectedTag = tags?.find((t) => t.id === selectedTagId) ?? null;
+  const showBooksSlot = showSlot && selectedTagId === initialSelectedTagId;
 
   // Load tags once on mount (not on every tag selection)
   useEffect(() => {
@@ -53,23 +55,23 @@ export default function Tags({
       setBooks([]);
       return;
     }
-    // Skip if server already provided books for this tag
-    if (hadInitialBooks.current && selectedTagId === initialSelectedTagId) {
-      hadInitialBooks.current = false;
+    // The initially-selected tag is served by the streamed booksSlot — don't refetch.
+    if (showSlot && selectedTagId === initialSelectedTagId) {
       return;
     }
-    hadInitialBooks.current = false;
     let cancelled = false;
     setBooksLoading(true);
     getBooksWithTag(selectedTagId).then((result) => {
       if (!cancelled) {
         setBooks(result);
         setBooksLoading(false);
+        setShowSlot(false);
       }
     });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTagId, tags]);
 
   if (tagsLoading || !tags) {
@@ -143,7 +145,9 @@ export default function Tags({
               Clear selection
             </Link>
           </div>
-          {booksLoading ? (
+          {showBooksSlot ? (
+            booksSlot
+          ) : booksLoading ? (
             <div className="flex items-center justify-center py-16">
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>

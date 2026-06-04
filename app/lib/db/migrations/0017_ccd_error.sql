@@ -1,0 +1,1 @@
+ALTER TABLE `books` ADD `ccd_error` text;

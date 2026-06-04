@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ComicThumbnailGridView: View {
     let engine: ComicEngine

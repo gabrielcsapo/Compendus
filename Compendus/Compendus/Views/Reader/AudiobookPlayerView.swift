@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 import AVKit
 import MediaPlayer
-import EPUBReader
+import CCReader
 
 struct AudiobookPlayerView: View {
     let book: DownloadedBook
@@ -107,18 +107,6 @@ struct AudiobookPlayerView: View {
             VStack(spacing: 0) {
                 // ── Bloom zone (cover art + metadata only) ──────────────────
                 ZStack {
-                    // Vibrant blurred cover background (Spotify-style)
-                    if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .saturation(1.8)
-                            .blur(radius: 50)
-                            .opacity(0.65)
-                            .clipped()
-                    }
-
                 // Bottom fade — blends bloom into the controls panel below
                 VStack(spacing: 0) {
                     Spacer()
@@ -229,7 +217,9 @@ struct AudiobookPlayerView: View {
                                 bookmarkCurrentMoment()
                             }
 
-                            // Elapsed / remaining time
+                            // Elapsed / remaining time — constrained to the
+                            // scrubber width and centered so the right-aligned
+                            // "remaining" label can't run off the screen edge.
                             HStack {
                                 Text(formatTime(player.currentTime))
                                     .font(.caption)
@@ -241,7 +231,7 @@ struct AudiobookPlayerView: View {
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
                             }
-                            .padding(.horizontal, 28)
+                            .frame(maxWidth: scrubberSize)
 
                             // Title, author, narrator — tap to reveal/hide the
                             // chrome row (transcribe / AirPlay / sleep / stop).
@@ -295,6 +285,21 @@ struct AudiobookPlayerView: View {
                 .animation(.easeInOut(duration: 0.3), value: showLyrics)
                 } // ZStack (bloom zone)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Vibrant blurred cover (Spotify-style). Painted as a BACKGROUND
+                // (and clipped) so it can't influence the bloom's layout — as a
+                // sizing child, the `.aspectRatio(.fill)` + blur made the zone
+                // wider than the screen and shoved all content to the right.
+                .background {
+                    if let uiImage = CoverImageDecoder.decode(bookId: book.id, data: book.coverData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .saturation(1.8)
+                            .blur(radius: 50)
+                            .opacity(0.65)
+                    }
+                }
+                .clipped()
 
                 // ── Controls zone (outside bloom) ────────────────────────────
                 // Next-in-series handoff card (P3.1) — fades in during the
@@ -548,30 +553,24 @@ struct AudiobookPlayerView: View {
         }
     }
 
+    // Moment bookmark (P1.1) — capture "this moment was important".
+    private var bookmarkButton: some View {
+        Button {
+            bookmarkCurrentMoment()
+        } label: {
+            Image(systemName: justBookmarked ? "bookmark.fill" : "bookmark")
+                .font(.title3)
+                .foregroundStyle(justBookmarked ? Color.accentColor : Color.primary)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("Bookmark this moment")
+    }
+
     private var playerControls: some View {
         VStack(spacing: 0) {
             // 6-button transport row (chapters, bookmark, back, play, fwd, speed)
             HStack {
-                Spacer()
-
-                // Chapters — falls back to a "Detect chapters" affordance when
-                // the book has no embedded chapter markers (P2.7).
-                chaptersButton
-
-                Spacer()
-
-                // Moment bookmark (P1.1) — capture "this moment was important"
-                Button {
-                    bookmarkCurrentMoment()
-                } label: {
-                    Image(systemName: justBookmarked ? "bookmark.fill" : "bookmark")
-                        .font(.title3)
-                        .foregroundStyle(justBookmarked ? Color.accentColor : Color.primary)
-                        .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("Bookmark this moment")
-
                 Spacer()
 
                 // Skip back — configurable interval
@@ -643,11 +642,19 @@ struct AudiobookPlayerView: View {
             }
             .padding(.bottom, 16)
 
-            // Secondary row — revealed by tapping the cover/scrubber area.
-            // Keeps the main view immersive when not needed; transport row
-            // above stays always-visible so skip / play remain one tap away.
-            if showsChrome {
-                HStack {
+            // Utility row — always visible. Corners: chapters/detect (sparkle)
+            // far-left, bookmark far-right. Middle: dictation (transcribe),
+            // AirPlay, sleep timer, stop.
+            HStack(spacing: 0) {
+                // Each item takes an equal slot (.frame(maxWidth: .infinity)) so
+                // the icons are spaced uniformly regardless of their own widths
+                // (e.g. the sleep timer's optional countdown, the invisible
+                // AirPlay view). Sparkle far-left, bookmark far-right.
+
+                // Sparkle / chapters — left corner
+                chaptersButton
+                    .frame(maxWidth: .infinity)
+
                 // Stop
                 Button {
                     showStopConfirmation = true
@@ -669,16 +676,13 @@ struct AudiobookPlayerView: View {
                 } message: {
                     Text("This will end your listening session.")
                 }
+                .frame(maxWidth: .infinity)
 
-                Spacer()
-
-                // Transcribe — tap = start Live Transcribe immediately,
-                // long-press = chooser sheet (Live vs Full Book). Replaces
-                // the always-visible TranscriptionPill so the player stays
-                // calm when transcribe isn't being used.
+                // Transcribe (dictation) — tap = start Live Transcribe,
+                // long-press = chooser sheet (Live vs Full Book).
                 if transcribeAvailable {
                     transcribeButton
-                    Spacer()
+                        .frame(maxWidth: .infinity)
                 }
 
                 // AirPlay — explicit size so MPVolumeView renders correctly
@@ -686,8 +690,7 @@ struct AudiobookPlayerView: View {
                     AirPlayButton()
                 }
                 .frame(width: 44, height: 44)
-
-                Spacer()
+                .frame(maxWidth: .infinity)
 
                 // Sleep timer
                 Button {
@@ -705,11 +708,14 @@ struct AudiobookPlayerView: View {
                     .frame(height: 36)
                 }
                 .accessibilityLabel(sleepTimerFireDate != nil ? "Sleep timer active" : "Set sleep timer")
+                .frame(maxWidth: .infinity)
+
+                // Bookmark this moment — right corner
+                bookmarkButton
+                    .frame(maxWidth: .infinity)
                 } // HStack
                 .padding(.horizontal, 4)
                 .padding(.bottom, 8)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            } // if showsChrome
         }
         .padding(.horizontal, 20)
         .padding(.bottom)
@@ -1121,13 +1127,18 @@ struct ChaptersListView: View {
 /// AirPlay route button in a SwiftUI sheet — it has worked since iOS 2 and handles
 /// all presentation context issues that AVRoutePickerView can hit in SwiftUI.
 struct AirPlayButton: UIViewRepresentable {
-    func makeUIView(context: Context) -> MPVolumeView {
-        let view = MPVolumeView()
-        view.showsVolumeSlider = false
-        view.tintColor = .label
+    // AVRoutePickerView always renders the AirPlay glyph (even in the simulator
+    // / when no routes are available), unlike MPVolumeView's route button which
+    // renders empty and left a gap in the utility row.
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = .secondaryLabel
+        view.activeTintColor = .tintColor
+        view.prioritizesVideoDevices = false
+        view.setContentHuggingPriority(.required, for: .horizontal)
         return view
     }
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 
 #Preview {

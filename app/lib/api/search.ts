@@ -3,6 +3,22 @@ import { eq, or, inArray, sql, asc, desc, and } from "drizzle-orm";
 import { searchBooks as searchBooksLib } from "../search";
 import { getRelatedBooks } from "../../actions/books";
 import type { Book, UserBookState } from "../db/schema";
+import { CCD_VERSION } from "../content-ast/types";
+
+// Formats whose READING goes through CCD (keep in sync with CCD_FORMATS in
+// processing/ccd.ts). Inlined here to keep pdfjs/epub-parser out of the books
+// API import graph. Reading status for the clients:
+//   ready      — converted at the current CCD version
+//   processing — supported but not yet converted (backfill in flight)
+//   failed     — conversion errored (corrupt/DRM/unsupported/no content)
+//   null       — format doesn't use CCD (comics/audio render natively)
+const CCD_READ_FORMATS = new Set(["epub", "pdf", "mobi", "azw3", "lit"]);
+function ccdStatusOf(book: Book): "ready" | "processing" | "failed" | null {
+  if (!CCD_READ_FORMATS.has(book.format)) return null;
+  if (book.ccdPath && book.ccdVersion === CCD_VERSION) return "ready";
+  if (book.ccdError) return "failed";
+  return "processing";
+}
 
 /**
  * Public API response format for a book
@@ -39,6 +55,8 @@ interface ApiBook {
   readingProgress: number | null;
   lastReadAt: string | null;
   lastPosition: string | null;
+  // CCD readiness: ready | processing | failed (null for comics/audio).
+  ccdStatus: "ready" | "processing" | "failed" | null;
 }
 
 interface ApiChapter {
@@ -138,6 +156,7 @@ export function toApiBook(
     readingProgress: userState?.readingProgress ?? null,
     lastReadAt: userState?.lastReadAt?.toISOString() ?? null,
     lastPosition: userState?.lastPosition ?? null,
+    ccdStatus: ccdStatusOf(book),
   };
 }
 

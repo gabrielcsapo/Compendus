@@ -3,6 +3,8 @@ import { Link } from "react-flight-router/client";
 import { buttonStyles, badgeStyles } from "../lib/styles";
 import { getCoverUrl } from "../lib/cover";
 import { getBook, getLinkedFormats, getRelatedBooks } from "../actions/books";
+import { getDeviceReadingProgress } from "../actions/reader";
+import { OtherDevices } from "../components/OtherDevices";
 import { getTagsForBook } from "../actions/tags";
 import { getCollectionsForBook } from "../actions/collections";
 import { getSeriesDetails } from "../actions/series";
@@ -19,13 +21,15 @@ import { BookRating } from "../components/BookRating";
 import { BookInfoButton } from "../components/BookInfoButton";
 import { CollapsibleDescription } from "../components/CollapsibleDescription";
 import { getCurrentProfile } from "../actions/profiles";
+import { ccdStatusOf, isReflowableFormat } from "../lib/book-types";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
-  const [book, tags, currentProfile] = await Promise.all([
+  const [book, tags, currentProfile, deviceProgress] = await Promise.all([
     getBook(id),
     getTagsForBook(id),
     getCurrentProfile(),
+    getDeviceReadingProgress(id),
   ]);
   if (!book) {
     throw new Response("Book not found", { status: 404 });
@@ -209,6 +213,9 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 </div>
               )}
 
+              {/* Per-device reading positions (other devices) */}
+              <OtherDevices devices={deviceProgress} />
+
               {/* Primary action + quiet secondary actions */}
               <div className="flex flex-wrap items-center gap-1.5 pt-3">
                 <PrimaryAction book={book} progressPercent={progressPercent} className="" />
@@ -234,13 +241,28 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               {/* Format conversion / transcription — reading-relevant alternatives */}
               {(book.format === "pdf" || ["m4b", "mp3", "m4a"].includes(book.format)) && (
                 <div className="flex flex-col gap-2 pt-1 max-w-sm">
-                  {book.format === "pdf" && (
-                    <ConvertToEpubButton
-                      bookId={book.id}
-                      hasEpub={!!book.convertedEpubPath}
-                      progressPercent={progressPercent}
-                      variant="secondary"
-                    />
+                  {/* PDF "Read as text" goes through the CCD reflow — only offer it
+                      once the CCD is ready (native PDF reading stays available above). */}
+                  {book.format === "pdf" && ccdStatusOf(book) === "ready" && (
+                    <Link
+                      to={`/book/${book.id}/read?format=epub`}
+                      className={`${buttonStyles.base} ${buttonStyles.secondary} text-center justify-center gap-2`}
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 6h16M4 12h16M4 18h7"
+                        />
+                      </svg>
+                      Read as text
+                    </Link>
                   )}
                   {["m4b", "mp3", "m4a"].includes(book.format) && (
                     <TranscribeButton bookId={book.id} hasTranscript={!!book.transcriptPath} />
@@ -436,6 +458,47 @@ function SectionSkeleton({ title }: { title: string }) {
   );
 }
 
+// Disabled affordance shown in place of "Read" when a reflowable book's CCD
+// isn't ready: a quiet spinner while it's being prepared, a muted/destructive
+// note when the conversion failed.
+function CcdGatedAction({
+  state,
+  className = "w-full",
+}: {
+  state: "processing" | "failed";
+  className?: string;
+}) {
+  if (state === "processing") {
+    return (
+      <div
+        className={`${buttonStyles.base} ${className} text-center justify-center gap-2 opacity-70 cursor-default pointer-events-none`}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        Preparing for reading…
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`${buttonStyles.base} ${buttonStyles.danger} ${className} text-center justify-center gap-2 opacity-70 cursor-not-allowed pointer-events-none`}
+      role="status"
+      title="This book couldn't be converted for reading (it may be corrupt, DRM-protected, or unsupported)."
+    >
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
+      </svg>
+      Couldn&apos;t be prepared for reading
+    </div>
+  );
+}
+
 function PrimaryAction({
   book,
   progressPercent,
@@ -446,6 +509,20 @@ function PrimaryAction({
   className?: string;
 }) {
   if (!book) return null;
+
+  // Reflowable formats (epub/mobi/azw3) read through CCD — gate on its readiness
+  // so users don't open a not-yet-converted or unconvertable book to a blank screen.
+  if (isReflowableFormat(book.format)) {
+    const ccdStatus = ccdStatusOf(book);
+    if (ccdStatus === "processing") {
+      return <CcdGatedAction state="processing" className={className} />;
+    }
+    if (ccdStatus === "failed") {
+      return <CcdGatedAction state="failed" className={className} />;
+    }
+    // ccdStatus === "ready" — fall through to the normal Read link below.
+  }
+
   if (["mobi", "azw3"].includes(book.format)) {
     return (
       <ConvertToEpubButton

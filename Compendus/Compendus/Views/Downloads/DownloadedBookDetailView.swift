@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct DownloadedBookDetailView: View {
     let book: DownloadedBook
@@ -62,6 +62,10 @@ struct DownloadedBookDetailView: View {
                     .padding(.top, 12)
 
                 actionSection
+                    .padding(.top, 16)
+                    .padding(.horizontal, 20)
+
+                CrossDeviceProgressView(bookId: book.id)
                     .padding(.top, 16)
                     .padding(.horizontal, 20)
 

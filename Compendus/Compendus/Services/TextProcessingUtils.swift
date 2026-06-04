@@ -312,6 +312,7 @@ enum TextProcessingUtils {
     /// Preprocess text for better TTS output.
     static func preprocessTextForTTS(_ text: String) -> String {
         var result = text
+        result = stripPageNumberNoise(result)
         result = expandAbbreviations(result)
         result = expandNumbers(result)
         result = normalizeEmDashesAndEllipsis(result)
@@ -324,6 +325,36 @@ enum TextProcessingUtils {
     }
 
     // MARK: - Text Preprocessing
+
+    /// Remove non-prose page-number / index noise from the SPOKEN text so TTS
+    /// doesn't read navigation scaffolding aloud (e.g. a contents page rendered
+    /// as "191 THE LORD HELPETH MAN AND BEAST 192 THE REAL PRINCESS …"). This
+    /// only affects the audio — highlight ranges use the original text, so the
+    /// on-page tint is unchanged. Deliberately conservative: it targets page
+    /// numbers that are alone on a line or that immediately precede an ALL-CAPS
+    /// index entry, leaving ordinary prose ("3 cats", "in 1920", "Chapter 3")
+    /// untouched.
+    static func stripPageNumberNoise(_ text: String) -> String {
+        var result = text
+        let patterns = [
+            // A 1–4 digit page number that directly precedes an ALL-CAPS word
+            // (the "<page> TITLE IN CAPS" table-of-contents / index pattern).
+            "(?<![\\w$])\\d{1,4}(?=\\s+[A-Z][A-Z'’]+\\b)",
+            // A page number alone on its own line (running head / footer).
+            "(?m)^\\s*\\d{1,4}\\s*$",
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: " ")
+        }
+        // Collapse any double spaces introduced by the removals.
+        if let ws = try? NSRegularExpression(pattern: "[ \\t]{2,}") {
+            let range = NSRange(result.startIndex..., in: result)
+            result = ws.stringByReplacingMatches(in: result, range: range, withTemplate: " ")
+        }
+        return result
+    }
 
     /// Expand common abbreviations to their full forms for natural speech.
     static func expandAbbreviations(_ text: String) -> String {

@@ -1,8 +1,17 @@
+import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { getCollections, getCollectionBookCounts } from "../actions/collections";
 import { CreateCollectionButton } from "../components/CreateCollectionModal";
 
-export default async function Collections() {
+export default function Collections() {
+  return (
+    <Suspense fallback={<CollectionsSkeleton />}>
+      <CollectionsData />
+    </Suspense>
+  );
+}
+
+async function CollectionsData() {
   const collections = await getCollections();
   // Batch-fetch all book counts in a single query instead of N+1
   const counts = await getCollectionBookCounts(collections.map((c) => c.id));
@@ -74,6 +83,32 @@ export default async function Collections() {
           </p>
         </div>
       )}
+    </main>
+  );
+}
+
+function CollectionsSkeleton() {
+  return (
+    <main className="container my-8 px-6 mx-auto animate-pulse">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <div className="h-8 bg-surface-elevated rounded w-40 mb-2" />
+          <div className="h-4 bg-surface-elevated rounded w-24" />
+        </div>
+        <div className="h-10 bg-surface-elevated rounded w-36" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="bg-surface border border-border rounded-xl overflow-hidden">
+            <div className="h-2 bg-surface-elevated" />
+            <div className="p-5 space-y-3">
+              <div className="h-5 bg-surface-elevated rounded w-3/4" />
+              <div className="h-4 bg-surface-elevated rounded w-full" />
+              <div className="h-4 bg-surface-elevated rounded w-16" />
+            </div>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }

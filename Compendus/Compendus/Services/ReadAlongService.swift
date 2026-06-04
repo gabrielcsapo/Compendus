@@ -14,7 +14,7 @@ import AVFoundation
 import MediaPlayer
 
 import os.log
-import EPUBReader
+import CCReader
 
 private let logger = Logger(subsystem: "com.compendus.reader", category: "ReadAlong")
 
@@ -44,6 +44,11 @@ class ReadAlongService {
 
     /// Range of the active sentence in the current chapter's attributed string.
     var activeSentenceRange: NSRange?
+
+    /// Range of the currently spoken word in the current chapter's attributed
+    /// string (TTS mode, when word-level timings are available). Drives the
+    /// stronger in-place "karaoke" word tint on the live page. Nil when unknown.
+    var activeWordRange: NSRange?
 
     /// The spine index (chapter) the read-along is currently highlighting.
     var activeSpineIndex: Int?
@@ -86,7 +91,7 @@ class ReadAlongService {
 
     // MARK: - References
 
-    private weak var engine: NativeEPUBEngine?
+    private weak var engine: NativeReaderEngine?
     private weak var player: AudiobookPlayer?
     private weak var transcriptionService: OnDeviceTranscriptionService?
 
@@ -186,7 +191,7 @@ class ReadAlongService {
     func activate(
         ebook: DownloadedBook,
         audiobook: DownloadedBook,
-        engine: NativeEPUBEngine,
+        engine: NativeReaderEngine,
         player: AudiobookPlayer,
         transcriptionService: OnDeviceTranscriptionService
     ) {
@@ -326,6 +331,7 @@ class ReadAlongService {
 
         // Clear highlight
         activeSentenceRange = nil
+        activeWordRange = nil
         currentTranscript = nil
 
         state = .inactive
@@ -537,7 +543,7 @@ class ReadAlongService {
 
     // MARK: - Chapter Handling
 
-    private func buildChapterAlignmentMap(audiobook: DownloadedBook, engine: NativeEPUBEngine) {
+    private func buildChapterAlignmentMap(audiobook: DownloadedBook, engine: NativeReaderEngine) {
         guard let chapters = audiobook.chapters, !chapters.isEmpty else {
             logger.info("No audiobook chapters to map")
             return
@@ -572,7 +578,7 @@ class ReadAlongService {
 
     /// Navigate the EPUB to the chapter that matches the current audio position.
     /// Called once during activation when resuming from a non-zero position.
-    private func syncEPUBToAudioPosition(engine: NativeEPUBEngine, player: AudiobookPlayer, audiobook: DownloadedBook) async {
+    private func syncEPUBToAudioPosition(engine: NativeReaderEngine, player: AudiobookPlayer, audiobook: DownloadedBook) async {
         let currentTime = player.currentTime
         guard currentTime > 0 else {
             logger.info("syncEPUB: currentTime is 0, no sync needed")
@@ -638,19 +644,18 @@ class ReadAlongService {
         }
     }
 
-    private func findMatchingSpineIndex(title: String, in entries: [EPUBTOCEntry], engine: NativeEPUBEngine, flatIndex: inout Int) -> Int? {
+    private func findMatchingSpineIndex(title: String, in entries: [CCDTocEntry], engine: NativeReaderEngine, flatIndex: inout Int) -> Int? {
         for entry in entries {
-            let currentIndex = flatIndex
             flatIndex += 1
 
             let entryTitle = entry.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             if entryTitle == title || entryTitle.contains(title) || title.contains(entryTitle) {
-                // Use the flat index as an approximation of spine index
-                return min(currentIndex, engine.spineCount - 1)
+                // CCD TOC entries carry the real spine index.
+                return entry.spineIndex
             }
 
             // Recurse into children
-            if let found = findMatchingSpineIndex(title: title, in: entry.children, engine: engine, flatIndex: &flatIndex) {
+            if let found = findMatchingSpineIndex(title: title, in: entry.children ?? [], engine: engine, flatIndex: &flatIndex) {
                 return found
             }
         }
@@ -732,7 +737,7 @@ class ReadAlongService {
     }
 
     /// Search all EPUB chapters for a phrase from the transcript and navigate there.
-    private func searchAndNavigateToChapter(phrase: String, engine: NativeEPUBEngine) async {
+    private func searchAndNavigateToChapter(phrase: String, engine: NativeReaderEngine) async {
         guard let spineIndex = await engine.findSpineIndex(containingPhrase: phrase) else {
             logger.info("Cross-chapter search: no match for '\(phrase.prefix(40))'")
             return
@@ -785,7 +790,7 @@ class ReadAlongService {
     /// Activate TTS read-aloud mode for an EPUB with no matching audiobook.
     func activateWithTTS(
         ebook: DownloadedBook,
-        engine: NativeEPUBEngine,
+        engine: NativeReaderEngine,
         ttsContext: KokoroTTSContext,
         voiceIndex: UInt32,
         audioCache: TTSAudioCache? = nil,
@@ -1270,6 +1275,10 @@ class ReadAlongService {
                 successCount += 1
 
                 await MainActor.run {
+                    // Bail if deactivate() tore down the engine while this cached
+                    // chunk was being decoded — play()/scheduleBuffer on a detached
+                    // node raises an AVFAudio exception and aborts the app.
+                    guard self.ttsPlayerNode === playerNode else { return }
                     self.ttsBuffersQueued += 1
                     self.ttsSentencePlaybackQueue.append(i)
                     let options: AVAudioPlayerNodeBufferOptions = successCount == 1 ? .interrupts : []
@@ -1303,6 +1312,7 @@ class ReadAlongService {
             let silenceBuffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
             silenceBuffer.frameLength = 1
             silenceBuffer.floatChannelData![0][0] = 0
+            guard playerNode.engine != nil else { return }
             await playerNode.scheduleBuffer(silenceBuffer)
 
             await MainActor.run { [weak self] in
@@ -1513,12 +1523,17 @@ class ReadAlongService {
                             buffer.floatChannelData![0].update(from: src.baseAddress!, count: chunkSamples.count)
                         }
 
-                        // Schedule immediately — AVAudioPlayerNode.scheduleBuffer is thread-safe
+                        // Schedule immediately — AVAudioPlayerNode.scheduleBuffer is thread-safe.
+                        // Bail if deactivate() detached the engine while this chunk was
+                        // being generated (scheduling on a node with no engine aborts).
+                        guard playerNode.engine != nil else { return }
                         playerNode.scheduleBuffer(buffer)
 
                         // Start playback on the very first audio chunk
                         DispatchQueue.main.async { [weak self] in
-                            guard let self = self, self.state == .loading else { return }
+                            guard let self = self, self.state == .loading,
+                                  self.ttsPlayerNode === playerNode,
+                                  playerNode.engine?.isRunning == true else { return }
                             playerNode.play()
                             self.ttsIsPlaying = true
                             self.state = .active
@@ -1580,10 +1595,12 @@ class ReadAlongService {
                 let sentinel = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
                 sentinel.frameLength = 1
                 sentinel.floatChannelData![0][0] = 0
-                playerNode.scheduleBuffer(sentinel) { [weak self] in
-                    Task { @MainActor in
-                        self?.ttsBuffersQueued -= 1
-                        self?.handleSentenceBufferCompleted()
+                if playerNode.engine != nil {
+                    playerNode.scheduleBuffer(sentinel) { [weak self] in
+                        Task { @MainActor in
+                            self?.ttsBuffersQueued -= 1
+                            self?.handleSentenceBufferCompleted()
+                        }
                     }
                 }
 
@@ -1613,6 +1630,7 @@ class ReadAlongService {
         silenceBuffer.floatChannelData![0][0] = 0
 
         let playbackFinished: Task<Void, Never> = Task { @MainActor [playerNode] in
+            guard playerNode.engine != nil else { return }
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 playerNode.scheduleBuffer(silenceBuffer) {
                     continuation.resume()
@@ -1674,16 +1692,47 @@ class ReadAlongService {
         guard let nodeTime = playerNode.lastRenderTime,
               let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else { return }
 
-        let currentTime = Double(playerTime.sampleTime) / playerTime.sampleRate
-        guard currentTime >= 0 else { return }
+        let rawTime = Double(playerTime.sampleTime) / playerTime.sampleRate
+        guard rawTime >= 0 else { return }
 
-        ttsCurrentTime = currentTime
+        // The player node's sample clock resets to 0 after every restart (seek /
+        // sentence jump). Offset by the restart sentence's absolute chapter start
+        // so ttsCurrentTime stays an absolute chapter timeline — keeps the mini
+        // player scrubber, word highlighting, and page auto-advance consistent
+        // after a seek instead of snapping the displayed time back near zero.
+        let baseOffset = ttsStartSentenceIndex < ttsSentences.count
+            ? ttsSentences[ttsStartSentenceIndex].audioStartTime
+            : 0
+        ttsCurrentTime = baseOffset + rawTime
         updateTTSNowPlayingInfo()
+
+        // Track the active word for the in-place karaoke tint on the live page.
+        updateActiveWordRange()
 
         // Advance page mid-sentence if the estimated reading position
         // has crossed a page boundary (fallback for cached audio where
         // sentences may not align with current page layout).
         checkMidSentencePageAdvance()
+    }
+
+    /// Compute the currently spoken word's attributed-string range from word
+    /// timings + current playback time, for the in-place karaoke word tint.
+    private func updateActiveWordRange() {
+        guard let engine = engine,
+              ttsCurrentSentenceIndex < ttsSentences.count else {
+            if activeWordRange != nil { activeWordRange = nil }
+            return
+        }
+        let sentence = ttsSentences[ttsCurrentSentenceIndex]
+        guard !sentence.wordTimings.isEmpty,
+              let plainTextMap = engine.currentChapterPlainTextMap,
+              let currentWord = sentence.wordTimings.last(where: { $0.start <= ttsCurrentTime }) else {
+            if activeWordRange != nil { activeWordRange = nil }
+            return
+        }
+        let wordPlainRange = NSRange(location: currentWord.plainTextOffset, length: max(1, currentWord.plainTextLength))
+        let mapped = plainTextMap.attrStringRange(for: wordPlainRange)
+        if activeWordRange != mapped { activeWordRange = mapped }
     }
 
     /// Advance the page mid-sentence based on the current reading position.
@@ -1806,6 +1855,7 @@ class ReadAlongService {
             ttsIsPlaying = false
             state = .paused
         } else {
+            guard playerNode.engine?.isRunning == true else { return }
             playerNode.play()
             ttsIsPlaying = true
             if state == .paused {
@@ -1896,11 +1946,14 @@ class ReadAlongService {
                                 buffer.floatChannelData![0].update(from: src.baseAddress!, count: chunkSamples.count)
                             }
 
+                            guard playerNode.engine != nil else { return }
                             playerNode.scheduleBuffer(buffer)
 
                             // Start playback on the first audio chunk after restart
                             DispatchQueue.main.async { [weak self] in
-                                guard let self = self, !self.ttsIsPlaying else { return }
+                                guard let self = self, !self.ttsIsPlaying,
+                                      self.ttsPlayerNode === playerNode,
+                                      playerNode.engine?.isRunning == true else { return }
                                 playerNode.play()
                                 self.ttsIsPlaying = true
                                 self.state = .active
@@ -1931,10 +1984,12 @@ class ReadAlongService {
                     let sentinel = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
                     sentinel.frameLength = 1
                     sentinel.floatChannelData![0][0] = 0
-                    playerNode.scheduleBuffer(sentinel) { [weak self] in
-                        Task { @MainActor in
-                            self?.ttsBuffersQueued -= 1
-                            self?.handleSentenceBufferCompleted()
+                    if playerNode.engine != nil {
+                        playerNode.scheduleBuffer(sentinel) { [weak self] in
+                            Task { @MainActor in
+                                self?.ttsBuffersQueued -= 1
+                                self?.handleSentenceBufferCompleted()
+                            }
                         }
                     }
                 } catch {
@@ -1947,6 +2002,7 @@ class ReadAlongService {
             let silenceBuffer = AVAudioPCMBuffer(pcmFormat: engineFormat, frameCapacity: 1)!
             silenceBuffer.frameLength = 1
             silenceBuffer.floatChannelData![0][0] = 0
+            guard playerNode.engine != nil else { return }
             await playerNode.scheduleBuffer(silenceBuffer)
 
             await MainActor.run { [weak self] in
@@ -1980,4 +2036,30 @@ class ReadAlongService {
         }
     }
 
+}
+
+// MARK: - PlaybackController
+
+/// Lets the shared docked player bar (PlaybackDockBar) drive read-along — both
+/// TTS (state in this service) and audiobook mode (delegated to `player`).
+extension ReadAlongService: PlaybackController {
+    var playbackTitle: String { isTTSMode ? "Read Aloud" : "Read Along" }
+    var playbackSubtitle: String? { nil }
+    var playbackIsPlaying: Bool { isTTSMode ? ttsIsPlaying : (player?.isPlaying ?? false) }
+    var playbackIsBuffering: Bool { state == .loading || state == .buffering }
+    var playbackCurrentTime: Double { currentPlaybackTime }
+    var playbackDuration: Double { isTTSMode ? ttsDuration : (player?.duration ?? 0) }
+    var playbackRate: Float { isTTSMode ? ttsPlaybackRate : (player?.playbackRate ?? 1) }
+
+    func playbackTogglePlayPause() { togglePlayPause() }
+    func playbackSeek(to time: Double) { seek(to: time) }
+    func playbackSkipBackward() { seek(to: max(0, currentPlaybackTime - 15)) }
+    func playbackSkipForward() {
+        let dur = playbackDuration
+        seek(to: dur > 0 ? min(dur, currentPlaybackTime + 30) : currentPlaybackTime + 30)
+    }
+    func playbackSetRate(_ rate: Float) {
+        if isTTSMode { setTTSPlaybackRate(rate) } else { player?.setPlaybackRate(rate) }
+    }
+    func playbackStop() { deactivate() }
 }

@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct HighlightColorsSettingsView: View {
     @Environment(HighlightColorManager.self) private var colorManager

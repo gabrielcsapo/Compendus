@@ -161,6 +161,7 @@ struct ReadAloudOptionsSheet: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .labelsHidden()
                         }
 
                         // Download for later

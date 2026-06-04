@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ReadAlongPill: View {
     enum Source {
@@ -43,6 +43,14 @@ struct ReadAlongPill: View {
 
     @State private var showingSourcePicker = false
     @State private var showingOptionsSheet = false
+
+    /// Whether the active pill is expanded into the full mini-player (scrubber +
+    /// skip + speed). Tapping the pill body toggles it.
+    @State private var expanded = false
+    /// True while the user is dragging the scrubber; we seek only on release so
+    /// TTS doesn't regenerate on every intermediate value.
+    @State private var isScrubbing = false
+    @State private var scrubValue: Double = 0
 
     // MARK: - Computed
 
@@ -237,102 +245,206 @@ struct ReadAlongPill: View {
     // MARK: - Active State (expanded pill with controls)
 
     private var activePill: some View {
-        HStack(spacing: 10) {
-            // Tappable info area — opens options sheet
+        VStack(spacing: 0) {
+            // Compact row — always visible
             HStack(spacing: 10) {
-                // Progress ring or loading spinner
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
-                        .frame(width: 32, height: 32)
-
-                    if let tp = transcriptionProgress {
+                // Tappable info area — toggles the expanded mini-player
+                HStack(spacing: 10) {
+                    // Progress ring or loading spinner
+                    ZStack {
                         Circle()
-                            .trim(from: 0, to: tp)
-                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
                             .frame(width: 32, height: 32)
-                    } else if !isLoading {
-                        Circle()
-                            .trim(from: 0, to: progress)
-                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .frame(width: 32, height: 32)
-                            .animation(.linear(duration: 0.3), value: progress)
-                    }
 
-                    if isLoading {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: readAlong.isTTSMode ? "speaker.wave.2" : "headphones")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .frame(width: 32, height: 32)
-
-                // Title + time + TTS info
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(readAlong.isTTSMode ? "Read Aloud" : "Read Along")
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-
-                    if !isLoading {
-                        HStack(spacing: 4) {
-                            Text("\(formatTime(currentTime)) / \(formatTime(duration))")
-                                .monospacedDigit()
-                            if readAlong.isTTSMode {
-                                Text("·")
-                                Text(currentSpeedLabel)
-                                    .monospacedDigit()
-                                Text("·")
-                                Text(voiceManager.selectedVoice?.name ?? "Voice")
-                            }
+                        if let tp = transcriptionProgress {
+                            Circle()
+                                .trim(from: 0, to: tp)
+                                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 32, height: 32)
+                        } else if !isLoading {
+                            Circle()
+                                .trim(from: 0, to: progress)
+                                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 32, height: 32)
+                                .animation(.linear(duration: 0.3), value: progress)
                         }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+
+                        if isLoading {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                        } else {
+                            Image(systemName: readAlong.isTTSMode ? "speaker.wave.2" : "headphones")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .frame(width: 32, height: 32)
+
+                    // Title + time + TTS info
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(readAlong.isTTSMode ? "Read Aloud" : "Read Along")
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+
+                        if !isLoading {
+                            HStack(spacing: 4) {
+                                Text("\(formatTime(currentTime)) / \(formatTime(duration))")
+                                    .monospacedDigit()
+                                if readAlong.isTTSMode {
+                                    Text("·")
+                                    Text(currentSpeedLabel)
+                                        .monospacedDigit()
+                                    Text("·")
+                                    Text(voiceManager.selectedVoice?.name ?? "Voice")
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Expand/collapse affordance
+                    if !isLoading {
+                        Image(systemName: "chevron.up")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
                     }
                 }
-
-                Spacer()
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                showingOptionsSheet = true
-            }
-
-            // Play/pause
-            Button {
-                if !isLoading {
-                    readAlong.togglePlayPause()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { expanded.toggle() }
                 }
-            } label: {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 32, height: 32)
+
+                // Play/pause
+                Button {
+                    if !isLoading { readAlong.togglePlayPause() }
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 32, height: 32)
+                }
+
+                // Close
+                Button {
+                    readAlong.deactivate()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                }
             }
 
-            // Close
-            Button {
-                readAlong.deactivate()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+            // Expanded transport controls — scrubber, skip, speed, options
+            if expanded && !isLoading {
+                expandedControls
+                    .padding(.top, 12)
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, expanded ? 14 : 8)
         .background(.ultraThinMaterial)
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
         .transition(.move(edge: .bottom).combined(with: .opacity))
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isPlaying)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isLoading)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: expanded)
+        .onChange(of: isActive) { _, active in if !active { expanded = false } }
+    }
+
+    /// Full transport surface revealed when the pill is expanded.
+    private var expandedControls: some View {
+        VStack(spacing: 12) {
+            // Seek scrubber — seek only on release to avoid TTS regen storms.
+            VStack(spacing: 2) {
+                Slider(
+                    value: Binding(
+                        get: { isScrubbing ? scrubValue : currentTime },
+                        set: { scrubValue = $0 }
+                    ),
+                    in: 0...max(duration, 0.1),
+                    onEditingChanged: { editing in
+                        if editing {
+                            isScrubbing = true
+                            scrubValue = currentTime
+                        } else {
+                            isScrubbing = false
+                            readAlong.seek(to: scrubValue)
+                        }
+                    }
+                )
+                HStack {
+                    Text(formatTime(isScrubbing ? scrubValue : currentTime)).monospacedDigit()
+                    Spacer()
+                    Text("-\(formatTime(max(0, duration - (isScrubbing ? scrubValue : currentTime))))").monospacedDigit()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            // Skip back / play-pause / skip forward
+            HStack(spacing: 36) {
+                Button { skip(by: -15) } label: {
+                    Image(systemName: "gobackward.15").font(.title2)
+                }
+                Button { readAlong.togglePlayPause() } label: {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 44))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                Button { skip(by: 30) } label: {
+                    Image(systemName: "goforward.30").font(.title2)
+                }
+            }
+            .foregroundStyle(.primary)
+
+            // Speed (TTS only) + options
+            HStack {
+                if readAlong.isTTSMode {
+                    Menu {
+                        ForEach(Self.speedOptions, id: \.self) { speed in
+                            Button { readAlong.setTTSPlaybackRate(speed) } label: {
+                                if readAlong.ttsPlaybackRate == speed {
+                                    Label(speedLabel(speed), systemImage: "checkmark")
+                                } else {
+                                    Text(speedLabel(speed))
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(currentSpeedLabel, systemImage: "speedometer")
+                            .font(.caption.weight(.medium))
+                    }
+                }
+                Spacer()
+                Button { showingOptionsSheet = true } label: {
+                    Label("Options", systemImage: "slider.horizontal.3")
+                        .font(.caption.weight(.medium))
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func skip(by seconds: Double) {
+        guard duration > 0 else { return }
+        let target = min(max(0, currentTime + seconds), duration)
+        readAlong.seek(to: target)
+    }
+
+    private func speedLabel(_ rate: Float) -> String {
+        if rate == 1.0 { return "1x" }
+        if rate == floor(rate) { return "\(Int(rate))x" }
+        return "\(String(format: "%.2g", rate))x"
     }
 
     // MARK: - Helpers

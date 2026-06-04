@@ -181,6 +181,7 @@ export function updateJobProgress(
   const row = db.select().from(backgroundJobs).where(eq(backgroundJobs.id, id)).get();
   if (!row) return null;
 
+  lastProgressAt = Date.now(); // heartbeat for the stuck-job detector
   const now = new Date();
   const set: Record<string, unknown> = { updatedAt: now };
 
@@ -305,10 +306,14 @@ export function cancelAllJobs(): { success: boolean; message: string; cancelled:
 
 let processorRunning = false;
 let processorStartedAt: number | null = null;
+/** Heartbeat: updated on every job-progress write. A job that keeps reporting
+ *  progress is NOT stuck, however long it runs (big books take many minutes). */
+let lastProgressAt: number | null = null;
 let currentAbortController: AbortController | null = null;
 
-/** Max time a single job can run before we consider the processor stuck (10 minutes) */
-const MAX_JOB_DURATION_MS = 10 * 60 * 1000;
+/** Consider the processor stuck only when the running job has reported NO
+ *  progress for this long (genuinely hung), not merely run a long time. */
+const STUCK_NO_PROGRESS_MS = 3 * 60 * 1000;
 
 async function processTranscribeJob(jobId: string, payload: TranscribePayload): Promise<void> {
   const { bookId, bookPath, outputPath } = payload;
@@ -370,19 +375,99 @@ async function processExtractJob(jobId: string, payload: ExtractPayload): Promis
   });
 }
 
+// Backfill CCD bundles for the whole library — idempotent (skips books already
+// at the current CCD version). Dynamic import keeps pdfjs/epub deps out of the
+// queue's static graph.
+const CCD_BACKFILL_DELAY_MS = 750;
+// Per-book hard cap. > the worker's 120s task timeout, so the worker recovers
+// worker-side hangs first; this catches main-thread hangs (e.g. ensureEpub).
+const CCD_BOOK_TIMEOUT_MS = 180_000;
+
+async function processCcdBackfillJob(jobId: string): Promise<void> {
+  const { generateCcd, needsCcd } = await import("./processing/ccd");
+  const all = db.select().from(books).all();
+  const todo = all.filter((b) => needsCcd(b));
+  let done = 0,
+    failed = 0;
+  for (const book of todo) {
+    if (currentAbortController?.signal.aborted) return;
+    try {
+      // Per-book hard timeout. The worker step has its own 120s cap, but the
+      // upstream ensureEpub (mobi/azw3→EPUB) runs on the main thread with no
+      // timeout — a single book whose conversion never settles (a hang that
+      // yields, so the host stays responsive but the await never returns) would
+      // otherwise wedge the entire backfill. This fails that one book and moves on.
+      await Promise.race([
+        generateCcd(book),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`generateCcd timed out after ${CCD_BOOK_TIMEOUT_MS}ms`)),
+            CCD_BOOK_TIMEOUT_MS,
+          ),
+        ),
+      ]);
+    } catch (e) {
+      failed++;
+      appendJobLog(
+        jobId,
+        `${book.id} (${book.format}): ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    done++;
+    updateJobProgress(jobId, {
+      status: "running",
+      progress: Math.round((done / Math.max(1, todo.length)) * 100),
+      message: `CCD ${done}/${todo.length} (${failed} failed)`,
+    });
+    // CPU-polite throttle: pause between books so the conversion loop doesn't
+    // starve the event loop / peg the shared host (which makes the site
+    // unusable). The await yields the loop; the delay leaves headroom.
+    await new Promise((r) => setTimeout(r, CCD_BACKFILL_DELAY_MS));
+  }
+  updateJobProgress(jobId, {
+    status: "completed",
+    progress: 100,
+    message: `CCD backfill complete: ${todo.length - failed}/${todo.length}`,
+    result: { total: todo.length, failed },
+  });
+}
+
+// Durable single-book CCD generation, enqueued at upload. Being a real queue job
+// (not the old fire-and-forget chain) means it survives a restart: an interrupted
+// run is reset to pending on boot and retried, so a book uploaded near a redeploy
+// can't get stranded in "processing" with no CCD.
+async function processGenerateCcdJob(jobId: string, payload: { bookId?: string }): Promise<void> {
+  const bookId = payload.bookId;
+  if (!bookId) throw new Error("generate-ccd: missing bookId");
+  const { generateCcd, needsCcd } = await import("./processing/ccd");
+  const book = db.select().from(books).where(eq(books.id, bookId)).get();
+  if (!book) {
+    appendJobLog(jobId, `${bookId}: book not found (deleted?) — skipping`);
+    return;
+  }
+  if (!needsCcd(book)) return; // already converted at the current version — nothing to do
+  updateJobProgress(jobId, { status: "running", progress: 30, message: "Building CCD…" });
+  await generateCcd(book); // persists ccd_path/ccd_version on success, or ccd_error on failure
+}
+
 async function processNextJob(): Promise<void> {
   if (processorRunning) {
-    // Safety valve: if the processor has been "running" for too long, force-reset it
-    if (processorStartedAt && Date.now() - processorStartedAt > MAX_JOB_DURATION_MS) {
+    // Safety valve: only treat the job as stuck if it has made NO progress for a
+    // while (a long-but-progressing job is healthy). Crucially, ABORT the stuck
+    // job before resetting — otherwise it keeps running while we start another,
+    // piling up concurrent runs that exhaust CPU/RAM.
+    const idleMs = Date.now() - (lastProgressAt ?? processorStartedAt ?? Date.now());
+    if (idleMs > STUCK_NO_PROGRESS_MS) {
       console.warn(
-        `[Queue] Processor appears stuck (running for ${Math.round((Date.now() - processorStartedAt) / 1000)}s), force-resetting`,
+        `[Queue] Job made no progress for ${Math.round(idleMs / 1000)}s — aborting and resetting`,
       );
+      currentAbortController?.abort();
       processorRunning = false;
       processorStartedAt = null;
+      lastProgressAt = null;
       currentAbortController = null;
-    } else {
-      return;
     }
+    return; // wait for the next tick before starting another job
   }
 
   // Find oldest pending job
@@ -398,6 +483,7 @@ async function processNextJob(): Promise<void> {
 
   processorRunning = true;
   processorStartedAt = Date.now();
+  lastProgressAt = Date.now();
   currentAbortController = new AbortController();
   const jobId = row.id;
 
@@ -417,6 +503,10 @@ async function processNextJob(): Promise<void> {
       await processConvertJob(jobId, payload as ConvertPayload);
     } else if (row.type === "extract") {
       await processExtractJob(jobId, payload as ExtractPayload);
+    } else if (row.type === "ccd-backfill") {
+      await processCcdBackfillJob(jobId);
+    } else if (row.type === "generate-ccd") {
+      await processGenerateCcdJob(jobId, payload as { bookId?: string });
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }
@@ -428,6 +518,7 @@ async function processNextJob(): Promise<void> {
       transcribe: "Transcription",
       convert: "Conversion",
       extract: "Analysis",
+      "generate-ccd": "Preparation",
     };
     updateJobProgress(jobId, {
       status: "completed",
@@ -476,7 +567,12 @@ export function startJobProcessor(): void {
 
   // Only reset enqueued job types (not inline jobs like audio merge)
   for (const row of stale) {
-    if (row.type === "transcribe" || row.type === "convert" || row.type === "extract") {
+    if (
+      row.type === "transcribe" ||
+      row.type === "convert" ||
+      row.type === "extract" ||
+      row.type === "generate-ccd"
+    ) {
       db.update(backgroundJobs)
         .set({ status: "pending", updatedAt: new Date() })
         .where(eq(backgroundJobs.id, row.id))

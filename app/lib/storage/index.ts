@@ -1,8 +1,11 @@
-import { mkdirSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, unlinkSync, readFileSync, rmSync } from "fs";
+import { gzipSync, gunzipSync } from "zlib";
 import { resolve, dirname, isAbsolute } from "path";
 import type { BookFormat } from "../types";
 
-const DATA_DIR = resolve(process.cwd(), "data");
+// COMPENDUS_DATA_DIR overrides the data root (tests point it at a throwaway dir);
+// defaults to <cwd>/data. Must match db/index.ts so DB + files share one root.
+const DATA_DIR = process.env.COMPENDUS_DATA_DIR || resolve(process.cwd(), "data");
 const BOOKS_DIR = resolve(DATA_DIR, "books");
 const COVERS_DIR = resolve(DATA_DIR, "covers");
 const AVATARS_DIR = resolve(DATA_DIR, "avatars");
@@ -16,6 +19,13 @@ export function resolveStoragePath(relativePath: string): string {
   if (isAbsolute(relativePath)) {
     // Legacy absolute path - return as-is for backwards compatibility
     return relativePath;
+  }
+  // Stored paths are "data/<...>"; when COMPENDUS_DATA_DIR overrides the data root
+  // (tests), remap that prefix to it so writes (BOOKS_DIR) and reads line up. In
+  // dev/prod (no override) this is identical to resolve(cwd, "data/<...>").
+  if (process.env.COMPENDUS_DATA_DIR) {
+    const m = relativePath.match(/^data[\\/](.*)$/);
+    if (m) return resolve(DATA_DIR, m[1]);
   }
   return resolve(process.cwd(), relativePath);
 }
@@ -130,6 +140,44 @@ export function deleteAvatarImage(profileId: string): boolean {
     return false;
   } catch {
     return false;
+  }
+}
+
+// ── CCD bundle (canonical content document) ──
+// One gzipped JSON bundle per book at data/books/{id}.ccd.json.gz.
+
+export function storeCcdBundle(bookId: string, bundleJson: string): string {
+  const fileName = `${bookId}.ccd.json.gz`;
+  const absolutePath = resolve(BOOKS_DIR, fileName);
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(absolutePath, gzipSync(Buffer.from(bundleJson, "utf8")));
+  return `data/books/${fileName}`;
+}
+
+/** Read + parse a CCD bundle by its stored relative path. Returns null if absent. */
+export function readCcdBundle<T = unknown>(ccdPath: string): T | null {
+  const absolutePath = resolveStoragePath(ccdPath);
+  if (!existsSync(absolutePath)) return null;
+  return JSON.parse(gunzipSync(readFileSync(absolutePath)).toString("utf8")) as T;
+}
+
+export function deleteCcdBundle(ccdPath: string): void {
+  try {
+    const absolutePath = resolveStoragePath(ccdPath);
+    if (existsSync(absolutePath)) unlinkSync(absolutePath);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Remove a book's cached resources + CCD pack (data/resource-cache/{id}/).
+ *  Mirrors server/lib/file-serving RESOURCE_CACHE_DIR; safe if absent. */
+export function deleteResourceCache(bookId: string): void {
+  try {
+    const dir = resolve(DATA_DIR, "resource-cache", bookId);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
   }
 }
 

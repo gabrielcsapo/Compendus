@@ -8,6 +8,7 @@
 
 import Foundation
 import SwiftData
+import CCReader
 
 struct DownloadProgress: Identifiable {
     let id: String  // Book ID
@@ -61,6 +62,23 @@ class DownloadManager: NSObject {
     /// Whether a metadata sync is currently in progress.
     private(set) var isSyncingMetadata: Bool = false
     @ObservationIgnored private var _session: URLSession?
+    @ObservationIgnored private var _foregroundSession: URLSession?
+
+    /// Whether new downloads should use the foreground session instead of the
+    /// background one. Always true on the Simulator, where the background-download
+    /// daemon (`nsurlsessiond`) is unavailable and tasks fail immediately with
+    /// `NSURLErrorUnknown` ("unknown error"). On device it flips to true only after
+    /// a background task fails to set up, so we transparently recover.
+    @ObservationIgnored private var preferForegroundSession: Bool = {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }()
+
+    /// Book IDs already retried on the foreground session, to avoid retry loops.
+    @ObservationIgnored private var foregroundRetriedBookIds: Set<String> = []
 
     /// Set by CompendusApp on appear for background session handling
     weak var appDelegate: AppDelegate?
@@ -87,6 +105,35 @@ class DownloadManager: NSObject {
         let newSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         _session = newSession
         return newSession
+    }
+
+    /// Foreground fallback session (standard configuration) used when the
+    /// background session's daemon is unavailable. Downloads here do not survive
+    /// app termination, but they work where background sessions cannot.
+    private var foregroundSession: URLSession {
+        if let existing = _foregroundSession {
+            return existing
+        }
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForResource = 3600
+        config.allowsCellularAccess = true
+        let newSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        _foregroundSession = newSession
+        return newSession
+    }
+
+    /// The session new download tasks should be started on.
+    private var downloadSession: URLSession {
+        preferForegroundSession ? foregroundSession : session
+    }
+
+    /// Start a download task on the appropriate session.
+    @discardableResult
+    private func startDownloadTask(url: URL, bookId: String) -> URLSessionDownloadTask {
+        let task = downloadSession.downloadTask(with: url)
+        task.taskDescription = bookId  // Persists across app termination (background session)
+        task.resume()
+        return task
     }
 
     init(config: ServerConfig, apiService: APIService) {
@@ -139,7 +186,9 @@ class DownloadManager: NSObject {
         // Determine download URL and final format
         let fmt = book.format.lowercased()
         let isCbr = fmt == "cbr"
-        let needsEpubConversion = ["mobi", "azw", "azw3"].contains(fmt)
+        // Reflowable ebooks are served as a self-contained CCD pack — no raw .epub
+        // on device, no on-device EPUB parsing. The pack is unzipped at completion.
+        let isReflowable = ["epub", "mobi", "azw", "azw3"].contains(fmt)
         let downloadURL: URL?
         let localFormat: String
 
@@ -147,13 +196,13 @@ class DownloadManager: NSObject {
             downloadURL = config.bookAsCbzURL(for: book.id)
             localFormat = "cbz"
             print("[DownloadManager] Converting CBR to CBZ for offline reading: \(book.id)")
-        } else if needsEpubConversion {
-            // MOBI/AZW3 are converted to EPUB inline by the server's /as-epub endpoint
-            downloadURL = config.bookAsEpubURL(for: book.id)
-            localFormat = "epub"
-            print("[DownloadManager] Downloading \(book.format.uppercased()) as EPUB: \(book.id)")
+        } else if isReflowable {
+            // CCD pack (manifest + image resources) replaces the raw ebook file.
+            downloadURL = config.apiURL("/api/reader/\(book.id)/ccd/pack")
+            localFormat = "ccdpack"
+            print("[DownloadManager] Downloading CCD pack for reflowable book: \(book.id)")
         } else {
-            // EPUB, PDF, and other formats download directly
+            // PDF and other formats download directly
             downloadURL = apiService.bookDownloadURL(bookId: book.id, format: book.format)
             localFormat = book.format
         }
@@ -186,10 +235,8 @@ class DownloadManager: NSObject {
         )
         activeDownloads[book.id] = progress
 
-        // Start background download task
-        let task = session.downloadTask(with: downloadURL)
-        task.taskDescription = book.id  // Persists across app termination
-        task.resume()
+        // Start download task (background session, or foreground fallback)
+        startDownloadTask(url: downloadURL, bookId: book.id)
 
         return nil
     }
@@ -261,10 +308,8 @@ class DownloadManager: NSObject {
         )
         activeDownloads[pending.id] = progress
 
-        // Start background download task
-        let task = session.downloadTask(with: downloadURL)
-        task.taskDescription = pending.id
-        task.resume()
+        // Start download task (background session, or foreground fallback)
+        startDownloadTask(url: downloadURL, bookId: pending.id)
     }
 
     /// Remove failed downloads from activeDownloads that have been in a failed state
@@ -320,12 +365,16 @@ class DownloadManager: NSObject {
     /// Cancel a download in progress
     @MainActor
     func cancelDownload(bookId: String, modelContext: ModelContext? = nil) {
-        session.getAllTasks { tasks in
-            for task in tasks {
-                if task.taskDescription == bookId {
+        let cancelMatching: (URLSession) -> Void = { session in
+            session.getAllTasks { tasks in
+                for task in tasks where task.taskDescription == bookId {
                     task.cancel()
                 }
             }
+        }
+        cancelMatching(session)
+        if let foreground = _foregroundSession {
+            cancelMatching(foreground)
         }
 
         activeDownloads.removeValue(forKey: bookId)
@@ -479,7 +528,7 @@ class DownloadManager: NSObject {
         guard let manager = backgroundProcessingManager,
               let settings = appSettings else { return }
 
-        let isEbook = ["epub"].contains(format)
+        let isEbook = ["epub", "mobi", "azw", "azw3"].contains(format)
         let isAudiobook = ["m4b", "mp3", "m4a"].contains(format)
 
         if isEbook && settings.autoGenerateTTS {
@@ -505,6 +554,19 @@ extension DownloadManager: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let bookId = downloadTask.taskDescription else { return }
 
+        // A download task writes the response body to disk even for error
+        // responses (e.g. a 404/500 JSON error from the CCD pack endpoint when a
+        // book isn't ready). Treating that as a successful file produces a
+        // confusing unzip failure downstream, so reject non-2xx responses here.
+        if let http = downloadTask.response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            print("[DownloadManager] Download for \(bookId) returned HTTP \(http.statusCode)")
+            let error = NSError(domain: "DownloadManager", code: http.statusCode, userInfo: [
+                NSLocalizedDescriptionKey: "The server couldn't provide this book (HTTP \(http.statusCode)). It may still be processing — try again later."
+            ])
+            DispatchQueue.main.async { self.markDownloadFailed(bookId: bookId, error: error) }
+            return
+        }
+
         guard let container = modelContainer else {
             print("[DownloadManager] No model container available for background completion")
             return
@@ -526,6 +588,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         // [String] (authors) is a transformable attribute that requires fault resolution,
         // so we must read it here before the object can be detached.
         let pendingFormat = pending.format
+        let pendingOriginalFormat = pending.originalFormat
         let pendingFileSize = pending.fileSize
         let pendingCoverData = pending.coverData
         let pendingBookId = pending.bookId
@@ -546,28 +609,49 @@ extension DownloadManager: URLSessionDownloadDelegate {
         do {
             // File operations must happen synchronously on this thread
             let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
-            try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
 
-            let fileName = "\(bookId).\(pendingFormat)"
-            let destinationURL = booksDir.appendingPathComponent(fileName)
-
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
-            }
-
-            try FileManager.default.moveItem(at: location, to: destinationURL)
-
+            let localPath: String
+            let storedFormat: String
             let actualFileSize: Int
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
-               let size = attrs[.size] as? Int {
-                actualFileSize = size
+
+            if pendingFormat.lowercased() == "ccdpack" {
+                // Reflowable ebook: the download is a CCD pack ZIP. Unpack it into
+                // the stable per-book pack dir; no raw .epub is ever stored.
+                let zipData = try Data(contentsOf: location)
+                let packDir = documentsURL
+                    .appendingPathComponent("ccd-packs", isDirectory: true)
+                    .appendingPathComponent(bookId, isDirectory: true)
+                try CCDPack.unpack(zipData: zipData, into: packDir)
+                try? FileManager.default.removeItem(at: location)
+                // localPath is a marker pointing at the pack dir (the reader derives
+                // the manifest/resources paths from the book id).
+                localPath = "ccd-packs/\(bookId)"
+                storedFormat = pendingOriginalFormat.isEmpty ? "epub" : pendingOriginalFormat.lowercased()
+                actualFileSize = zipData.count
             } else {
-                actualFileSize = pendingFileSize
+                let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
+                try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+
+                let fileName = "\(bookId).\(pendingFormat)"
+                let destinationURL = booksDir.appendingPathComponent(fileName)
+
+                if FileManager.default.fileExists(atPath: destinationURL.path) {
+                    try FileManager.default.removeItem(at: destinationURL)
+                }
+
+                try FileManager.default.moveItem(at: location, to: destinationURL)
+
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
+                   let size = attrs[.size] as? Int {
+                    actualFileSize = size
+                } else {
+                    actualFileSize = pendingFileSize
+                }
+                localPath = "books/\(fileName)"
+                storedFormat = pendingFormat
             }
 
-            let localPath = "books/\(fileName)"
-            let format = pendingFormat.lowercased()
+            let format = storedFormat.lowercased()
 
             // Perform SwiftData mutations on the main thread so @Query updates
             // atomically and PendingDownload objects are never detached mid-render.
@@ -582,7 +666,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     publisher: pendingPublisher,
                     publishedDate: pendingPublishedDate,
                     bookDescription: pendingBookDescription,
-                    format: pendingFormat,
+                    format: storedFormat,
                     fileSize: actualFileSize,
                     localPath: localPath,
                     coverData: pendingCoverData,
@@ -674,24 +758,66 @@ extension DownloadManager: URLSessionDownloadDelegate {
             print("[DownloadManager] HTTP Status: \(response.statusCode)")
         }
 
-        // Update PendingDownload status on main thread to avoid detaching
-        // objects from the context while @Query still holds references
-        DispatchQueue.main.async {
-            if let container = self.modelContainer {
-                let mainContext = ModelContext(container)
+        // The background-download daemon (nsurlsessiond) can be unavailable —
+        // notably in the Simulator — failing the task immediately with
+        // NSURLErrorUnknown ("unknown error") before any request goes out. When
+        // that happens, transparently retry the download once on a foreground
+        // session instead of surfacing the cryptic failure to the user.
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain,
+           nsError.code == NSURLErrorUnknown,
+           !preferForegroundSession,
+           !foregroundRetriedBookIds.contains(bookId) {
+            foregroundRetriedBookIds.insert(bookId)
+            preferForegroundSession = true
+            print("[DownloadManager] Background session unavailable; retrying \(bookId) on foreground session")
+            DispatchQueue.main.async {
+                guard let container = self.modelContainer else {
+                    self.markDownloadFailed(bookId: bookId, error: error)
+                    return
+                }
+                let ctx = ModelContext(container)
                 let descriptor = FetchDescriptor<PendingDownload>(
                     predicate: #Predicate { $0.id == bookId }
                 )
-                if let pending = try? mainContext.fetch(descriptor).first {
-                    pending.status = "failed"
-                    pending.errorMessage = error.localizedDescription
-                    try? mainContext.save()
+                guard let pending = try? ctx.fetch(descriptor).first,
+                      let url = URL(string: pending.downloadURL) else {
+                    self.markDownloadFailed(bookId: bookId, error: error)
+                    return
                 }
+                pending.status = "downloading"
+                pending.errorMessage = nil
+                try? ctx.save()
+                self.activeDownloads[bookId]?.state = .downloading
+                self.startDownloadTask(url: url, bookId: bookId)
             }
-
-            self.activeDownloads[bookId]?.state = .failed(error)
-            HapticFeedback.error()
+            return
         }
+
+        // Update PendingDownload status on main thread to avoid detaching
+        // objects from the context while @Query still holds references
+        DispatchQueue.main.async {
+            self.markDownloadFailed(bookId: bookId, error: error)
+        }
+    }
+
+    /// Mark a download as failed and surface the error to the UI. Must be called
+    /// on the main thread.
+    private func markDownloadFailed(bookId: String, error: Error) {
+        if let container = self.modelContainer {
+            let mainContext = ModelContext(container)
+            let descriptor = FetchDescriptor<PendingDownload>(
+                predicate: #Predicate { $0.id == bookId }
+            )
+            if let pending = try? mainContext.fetch(descriptor).first {
+                pending.status = "failed"
+                pending.errorMessage = error.localizedDescription
+                try? mainContext.save()
+            }
+        }
+
+        self.activeDownloads[bookId]?.state = .failed(error)
+        HapticFeedback.error()
     }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

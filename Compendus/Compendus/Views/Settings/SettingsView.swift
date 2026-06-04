@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct SettingsView: View {
     @Environment(ServerConfig.self) private var serverConfig
@@ -28,6 +28,7 @@ struct SettingsView: View {
     @State private var showingDisconnectConfirmation = false
     @State private var showingSwitchProfileConfirmation = false
     @State private var showingStorageChart = false
+    @State private var editedDeviceName = DeviceIdentity.deviceName
 
     // P2.2 — user-configurable audiobook skip intervals
     @AppStorage("compendus.audiobook.skipBackward") private var skipBackwardSeconds: Double = 15
@@ -80,6 +81,27 @@ struct SettingsView: View {
                     Text("Server")
                 } footer: {
                     Text("Enter the IP address or hostname of your Compendus server (e.g., 192.168.1.100:3000)")
+                }
+
+                // This device — name used when showing per-device reading position
+                Section {
+                    HStack {
+                        Image(systemName: DeviceIdentity.icon(for: DeviceIdentity.deviceType))
+                            .foregroundStyle(.secondary)
+                        TextField("Device Name", text: $editedDeviceName)
+                            .autocorrectionDisabled()
+                        if editedDeviceName != DeviceIdentity.deviceName {
+                            Button("Save") {
+                                DeviceIdentity.setDeviceNameOverride(editedDeviceName)
+                                editedDeviceName = DeviceIdentity.deviceName
+                            }
+                            .disabled(editedDeviceName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                } header: {
+                    Text("This Device")
+                } footer: {
+                    Text("How this device appears when you view reading progress across your devices.")
                 }
 
                 // Appearance section
@@ -339,9 +361,9 @@ struct SettingsView: View {
                 // Developer section
                 Section {
                     NavigationLink {
-                        SampleEPUBListView()
+                        SampleCCDListView()
                     } label: {
-                        Label("Sample EPUBs", systemImage: "books.vertical")
+                        Label("Sample CCDs", systemImage: "books.vertical")
                     }
                 } header: {
                     Text("Developer")

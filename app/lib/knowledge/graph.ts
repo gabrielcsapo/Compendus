@@ -163,31 +163,50 @@ export interface EntityDetail extends EntitySummary {
   relationships: RelationshipView[];
 }
 
-/** Approx book length from stored passages — avoids re-parsing to get a position. */
-function bookMaxChar(bookId: string): number {
-  const row = rawDb
-    .prepare("SELECT MAX(char_end) AS m FROM passages WHERE book_id = ?")
-    .get(bookId) as { m: number | null };
-  return row?.m && row.m > 0 ? row.m : 0;
+/**
+ * Approx book length from stored passages — avoids re-parsing to get a position.
+ * Batched across books so an entity spanning many books costs one query, not one per book.
+ */
+function bookMaxChars(bookIds: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (bookIds.length === 0) return out;
+  const placeholders = bookIds.map(() => "?").join(", ");
+  const rows = rawDb
+    .prepare(
+      `SELECT book_id AS b, MAX(char_end) AS m FROM passages WHERE book_id IN (${placeholders}) GROUP BY book_id`,
+    )
+    .all(...bookIds) as Array<{ b: string; m: number | null }>;
+  for (const r of rows) out.set(r.b, r.m && r.m > 0 ? r.m : 0);
+  return out;
 }
 
 /**
- * Per-spine [lo, hi] clean-text char range for a book, so a passage's offset can
+ * Per-spine [lo, hi] clean-text char range per book, so a passage's offset can
  * be expressed as progress *within its chapter*. Anchoring at the spine boundary
  * (the one structure the reader shares with the pipeline) is what makes the
  * deep-link land on the right page despite the two text spaces differing.
+ * Batched across books — one query for the whole set.
  */
-function bookSpineRanges(bookId: string): Map<number, { lo: number; hi: number }> {
+function bookSpineRanges(bookIds: string[]): Map<string, Map<number, { lo: number; hi: number }>> {
+  const out = new Map<string, Map<number, { lo: number; hi: number }>>();
+  if (bookIds.length === 0) return out;
+  const placeholders = bookIds.map(() => "?").join(", ");
   const rows = rawDb
     .prepare(
-      `SELECT spine_index AS s, MIN(char_start) AS lo, MAX(char_end) AS hi
-       FROM passages WHERE book_id = ? AND spine_index IS NOT NULL
-       GROUP BY spine_index`,
+      `SELECT book_id AS b, spine_index AS s, MIN(char_start) AS lo, MAX(char_end) AS hi
+       FROM passages WHERE book_id IN (${placeholders}) AND spine_index IS NOT NULL
+       GROUP BY book_id, spine_index`,
     )
-    .all(bookId) as Array<{ s: number; lo: number; hi: number }>;
-  const m = new Map<number, { lo: number; hi: number }>();
-  for (const r of rows) m.set(r.s, { lo: r.lo, hi: r.hi });
-  return m;
+    .all(...bookIds) as Array<{ b: string; s: number; lo: number; hi: number }>;
+  for (const r of rows) {
+    let inner = out.get(r.b);
+    if (!inner) {
+      inner = new Map();
+      out.set(r.b, inner);
+    }
+    inner.set(r.s, { lo: r.lo, hi: r.hi });
+  }
+  return out;
 }
 
 export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | null {
@@ -218,15 +237,13 @@ export function getEntityDetail(id: string, mentionLimit = 50): EntityDetail | n
     bookTitle: string;
   }>;
 
-  const maxCharByBook = new Map<string, number>();
-  const spineRangesByBook = new Map<string, Map<number, { lo: number; hi: number }>>();
+  const distinctBookIds = [...new Set(mentionRows.map((r) => r.bookId))];
+  const maxCharByBook = bookMaxChars(distinctBookIds);
+  const spineRangesByBook = bookSpineRanges(distinctBookIds);
   const mentions: MentionView[] = mentionRows.map((r) => {
-    if (!maxCharByBook.has(r.bookId)) maxCharByBook.set(r.bookId, bookMaxChar(r.bookId));
-    if (!spineRangesByBook.has(r.bookId))
-      spineRangesByBook.set(r.bookId, bookSpineRanges(r.bookId));
-    const total = maxCharByBook.get(r.bookId)!;
+    const total = maxCharByBook.get(r.bookId) ?? 0;
     const range =
-      r.spineIndex != null ? spineRangesByBook.get(r.bookId)!.get(r.spineIndex) : undefined;
+      r.spineIndex != null ? spineRangesByBook.get(r.bookId)?.get(r.spineIndex) : undefined;
     const chapterProgress =
       range && r.charStart != null && range.hi > range.lo
         ? Math.max(0, Math.min(1, (r.charStart - range.lo) / (range.hi - range.lo)))

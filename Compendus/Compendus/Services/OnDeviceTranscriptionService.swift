@@ -14,7 +14,7 @@ import Foundation
 import AVFoundation
 import BackgroundTasks
 import UIKit
-import EPUBReader
+import CCReader
 
 @MainActor
 @Observable

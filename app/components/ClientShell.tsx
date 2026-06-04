@@ -235,10 +235,16 @@ function NavLink({
   to,
   children,
   exact = false,
+  icon = false,
+  ariaLabel,
+  title,
 }: {
   to: string;
   children: React.ReactNode;
   exact?: boolean;
+  icon?: boolean;
+  ariaLabel?: string;
+  title?: string;
 }) {
   const location = useLocation();
   const isActive = exact
@@ -247,10 +253,17 @@ function NavLink({
       location.pathname.startsWith(to + "/") ||
       location.pathname.startsWith(to + "?");
 
+  // Icon links are square buttons (match the Wander button); text links keep padding.
+  const layout = icon
+    ? "flex items-center justify-center w-9 h-9 rounded-lg transition-colors"
+    : "px-3 py-2 rounded-lg font-medium transition-colors";
+
   return (
     <Link
       to={to}
-      className={`px-3 py-2 rounded-lg font-medium transition-colors ${
+      aria-label={ariaLabel}
+      title={title}
+      className={`${layout} ${
         isActive
           ? "bg-surface-elevated text-foreground"
           : "text-foreground-muted hover:text-foreground hover:bg-surface-elevated"
@@ -335,18 +348,21 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
               </Link>
             </li>
             <li>
-              <NavLink to="/" exact>
-                Library
+              <NavLink to="/" exact icon ariaLabel="Library" title="Library">
+                <svg
+                  className="w-5 h-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
               </NavLink>
             </li>
-            <li className="flex-1 min-w-[12rem]">
-              <SearchInput />
-            </li>
-            {profileLoaded && profile && (
-              <li>
-                <ProfileDropdown profile={profile} />
-              </li>
-            )}
             <li>
               <Link
                 to="/wander"
@@ -370,6 +386,14 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
                 </svg>
               </Link>
             </li>
+            <li className="flex-1 min-w-[12rem]">
+              <SearchInput />
+            </li>
+            {profileLoaded && profile && (
+              <li>
+                <ProfileDropdown profile={profile} />
+              </li>
+            )}
             <li>
               <DarkModeToggle />
             </li>

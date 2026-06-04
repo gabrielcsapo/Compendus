@@ -43,5 +43,17 @@ xcuserdata/
 tests/output/
 tests/temp/
 
+# Playwright e2e: seeded data root + run artifacts (all regenerable)
+tests/e2e/.data/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 # Large GLiNER model — downloaded at runtime into data/, not committed
 models/onnx-community/gliner_small-v2/onnx/
+
+# Generated CCD packs for the iOS dev "Sample CCD" screen — regenerable via
+# `pnpm ccd:fixtures`, large/churny, and kept out of release builds (a clean
+# checkout has none, so the synchronized group won't bundle them).
+/Compendus/Compendus/Reader/Samples/*.ccd

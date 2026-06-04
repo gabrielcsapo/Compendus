@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ReaderSearchView: View {
     let engine: any ReaderEngine

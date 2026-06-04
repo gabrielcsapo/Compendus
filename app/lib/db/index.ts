@@ -5,8 +5,10 @@ import { existsSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import * as schema from "./schema";
 
-// Database path - relative to project root
-const DB_PATH = resolve(process.cwd(), "data", "compendus.db");
+// Database path. COMPENDUS_DATA_DIR overrides the data root (used by tests to
+// point at a throwaway dir); defaults to <cwd>/data in dev/prod.
+const DATA_ROOT = process.env.COMPENDUS_DATA_DIR || resolve(process.cwd(), "data");
+const DB_PATH = resolve(DATA_ROOT, "compendus.db");
 
 // Ensure data directory exists
 mkdirSync(dirname(DB_PATH), { recursive: true });

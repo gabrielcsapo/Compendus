@@ -26,6 +26,17 @@
 	<string>Compendus uses speech recognition to generate transcripts for audiobook lyrics display.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>Launch Screen</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.gabrielcsapo.Compendus</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>compendus</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

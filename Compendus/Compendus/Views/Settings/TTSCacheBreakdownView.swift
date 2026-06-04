@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct TTSCacheBreakdownView: View {
     @Environment(StorageManager.self) private var storageManager

@@ -19,7 +19,8 @@ async function main() {
   // Mount flight router for all page requests (RSC, SSR, actions, static assets)
   app.all("*", (c) => flightApp.fetch(c.req.raw));
 
-  const server = serve({ fetch: app.fetch, port: 3000 }, (info) => {
+  const port = Number(process.env.PORT) || 3000;
+  const server = serve({ fetch: app.fetch, port }, (info) => {
     console.log(`[Compendus] Server running at http://localhost:${info.port}`);
   });
 

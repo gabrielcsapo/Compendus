@@ -10,9 +10,7 @@ import type { NormalizedContent } from "./types";
 import type { BookFormat } from "../types";
 
 // Static imports so esbuild can bundle them
-import { parseEpub } from "./parsers/epub";
 import { parsePdf } from "./parsers/pdf";
-import { parseMobi } from "./parsers/mobi";
 import { parseComic } from "./parsers/comic";
 
 interface ParseRequest {
@@ -33,17 +31,8 @@ async function parseBook(request: ParseRequest): Promise<NormalizedContent> {
   let result: NormalizedContent;
 
   switch (format) {
-    case "epub": {
-      result = await parseEpub(buffer, bookId);
-      break;
-    }
     case "pdf": {
       result = await parsePdf(buffer, bookId);
-      break;
-    }
-    case "mobi":
-    case "azw3": {
-      result = await parseMobi(buffer, bookId, format);
       break;
     }
     case "cbr":

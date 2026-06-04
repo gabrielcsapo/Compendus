@@ -59,7 +59,7 @@ async function getConvertCbrToCbz() {
   return _convertCbrToCbz;
 }
 
-export type WorkerTaskType = "extractMetadata" | "extractCover" | "convertCbrToCbz";
+export type WorkerTaskType = "extractMetadata" | "extractCover" | "convertCbrToCbz" | "buildCcd";
 
 export interface WorkerTask {
   id: string;
@@ -122,6 +122,15 @@ async function handleTask(task: WorkerTask): Promise<unknown> {
       const cbzBuffer = await convert(buffer);
       // Return as Uint8Array for transfer
       return new Uint8Array(cbzBuffer);
+    }
+
+    case "buildCcd": {
+      // Heavy CCD conversion off the main event loop. The bookId is patched in
+      // by the caller; image resource handles use in-package hrefs, not bookId.
+      const { buildBundleFromEpub, buildBundleFromPdf } = await import("../content-ast/bundle");
+      return task.format === "pdf"
+        ? await buildBundleFromPdf(new Uint8Array(buffer), "")
+        : await buildBundleFromEpub(new Uint8Array(buffer), "", task.format as "epub");
     }
 
     default:

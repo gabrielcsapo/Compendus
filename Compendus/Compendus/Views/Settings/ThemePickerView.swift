@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ThemePickerView: View {
     @Environment(ThemeManager.self) private var themeManager

@@ -10,7 +10,7 @@ import Foundation
 import SwiftData
 import BackgroundTasks
 import UIKit
-import EPUBReader
+import CCReader
 
 @Observable
 @MainActor
@@ -186,10 +186,17 @@ class SyncService {
         let response: SyncDataResponse<ServerReadingProgress> = try await fetchJSON(url: url)
         print("[Sync:Pull:Progress] Received \(response.data.count) records from server")
 
+        let ownDeviceId = DeviceIdentity.deviceId
         var merged = 0, skipped = 0, notFound = 0
         var remoteBooks: [Book] = []
         for record in response.data {
             let bookId = record.bookId
+
+            // Store other devices' positions for this book (powers the cross-device
+            // status UI and the "jump ahead?" prompt). Independent of whether the
+            // book is downloaded locally.
+            upsertDevicePositions(for: record, profileId: profileId, ownDeviceId: ownDeviceId, modelContext: modelContext)
+
             let descriptor = FetchDescriptor<DownloadedBook>(
                 predicate: #Predicate { $0.id == bookId }
             )
@@ -232,6 +239,44 @@ class SyncService {
 
         print("[Sync:Pull:Progress] Merged: \(merged), Skipped (local newer): \(skipped), Not downloaded: \(notFound), Remote: \(remoteBooks.count)")
         try? modelContext.save()
+    }
+
+    /// Upsert the positions reported by OTHER devices for a book into local
+    /// SwiftData. The current device is excluded — its own position lives on
+    /// DownloadedBook.
+    private func upsertDevicePositions(
+        for record: ServerReadingProgress,
+        profileId: String,
+        ownDeviceId: String,
+        modelContext: ModelContext
+    ) {
+        guard let devices = record.devices else { return }
+        let bookId = record.bookId
+        for dev in devices where dev.deviceId != ownDeviceId {
+            let compositeId = DeviceReadingPosition.compositeId(bookId: bookId, deviceId: dev.deviceId)
+            let descriptor = FetchDescriptor<DeviceReadingPosition>(
+                predicate: #Predicate { $0.id == compositeId }
+            )
+            if let existing = try? modelContext.fetch(descriptor).first {
+                existing.deviceName = dev.deviceName
+                existing.deviceType = dev.deviceType
+                existing.readingProgress = dev.readingProgress ?? 0
+                existing.lastPosition = dev.lastPosition
+                existing.lastReadAt = dev.lastReadAt
+                existing.profileId = profileId
+            } else {
+                modelContext.insert(DeviceReadingPosition(
+                    bookId: bookId,
+                    deviceId: dev.deviceId,
+                    deviceName: dev.deviceName,
+                    deviceType: dev.deviceType,
+                    readingProgress: dev.readingProgress ?? 0,
+                    lastPosition: dev.lastPosition,
+                    lastReadAt: dev.lastReadAt,
+                    profileId: profileId
+                ))
+            }
+        }
     }
 
     // MARK: - Pull: Highlighted Books
@@ -458,22 +503,27 @@ class SyncService {
             return
         }
 
+        // A book is "dirty" (has local changes to push) when this device updated
+        // its progress since the last sync. Gate on `localProgressUpdatedAt` —
+        // NOT `lastReadAt`, which the pull overwrites and downloads seed from
+        // server metadata, so it can be stale/older than `since` even right after
+        // reading. Fall back to `lastReadAt` for books last read before this
+        // field existed (so legacy unsynced progress still pushes once).
+        func dirtyMarker(_ book: DownloadedBook) -> Date? {
+            book.localProgressUpdatedAt ?? book.lastReadAt
+        }
+
         print("[Sync:Push:Progress] Total downloaded books for profile: \(books.count)")
         for book in books {
-            let hasLastRead = book.lastReadAt != nil
-            let progress = book.readingProgress
-            print("[Sync:Push:Progress]   Book '\(book.title ?? book.id)' — progress=\(progress), lastReadAt=\(book.lastReadAt?.description ?? "nil"), profileId='\(book.profileId)'")
-            if let since, let lastReadAt = book.lastReadAt {
-                print("[Sync:Push:Progress]     since=\(since), lastReadAt=\(lastReadAt), willPush=\(lastReadAt > since)")
-            } else if !hasLastRead {
-                print("[Sync:Push:Progress]     No lastReadAt — will NOT push")
-            }
+            let marker = dirtyMarker(book)
+            let willPush = marker.map { since == nil || $0 > since! } ?? false
+            print("[Sync:Push:Progress]   Book '\(book.title ?? book.id)' — progress=\(book.readingProgress), marker=\(marker?.description ?? "nil"), lastReadAt=\(book.lastReadAt?.description ?? "nil"), willPush=\(willPush)")
         }
 
         // Filter to books modified since last sync
         let modifiedBooks = books.filter { book in
-            guard let lastReadAt = book.lastReadAt else { return false }
-            if let since { return lastReadAt > since }
+            guard let marker = dirtyMarker(book) else { return false }
+            if let since { return marker > since }
             return true
         }
 
@@ -492,9 +542,10 @@ class SyncService {
         // Skip books that don't exist on the server (404)
         var pushed = 0, skippedFK = 0, errors = 0
         for book in modifiedBooks {
-            // Use Date() (now) for updatedAt so the push always wins the server's
-            // conflict check. Using lastReadAt would lose to the server's migration-time
-            // updatedAt, causing the update to be silently rejected (conflict: true).
+            // Stamp updatedAt at send time. The server records this device's own
+            // per-device row (keyed by deviceId), so a device never clobbers
+            // another device's position; updatedAt only orders this device's own
+            // writes and gates book-level fields (isRead/rating/review).
             let body = ServerReadingProgress(
                 bookId: book.id,
                 readingProgress: book.readingProgress,
@@ -503,7 +554,10 @@ class SyncService {
                 isRead: book.isRead,
                 rating: book.rating,
                 review: book.review,
-                updatedAt: Date()
+                updatedAt: Date(),
+                deviceId: DeviceIdentity.deviceId,
+                deviceName: DeviceIdentity.deviceName,
+                deviceType: DeviceIdentity.deviceType
             )
             do {
                 print("[Sync:Push:Progress]   PUT book=\(book.id) progress=\(book.readingProgress) isRead=\(book.isRead) rating=\(book.rating ?? -1)")
@@ -819,8 +873,26 @@ private struct ServerReadingProgress: Codable {
     let rating: Int?
     let review: String?
     let updatedAt: Date
+    /// Device identity (sent in PUT requests so the server records this device's
+    /// own position without clobbering other devices).
+    var deviceId: String? = nil
+    var deviceName: String? = nil
+    var deviceType: String? = nil
+    /// Per-device positions for this book (present in GET responses).
+    var devices: [ServerDevicePosition]? = nil
     /// Full book metadata (only present in GET responses, not in PUT requests)
     var book: Book? = nil
+}
+
+/// One device's reading position for a book (GET responses only).
+private struct ServerDevicePosition: Codable {
+    let deviceId: String
+    let deviceName: String
+    let deviceType: String
+    let readingProgress: Double?
+    let lastPosition: String?
+    let lastReadAt: Date?
+    var updatedAt: Date? = nil
 }
 
 // MARK: - Server DTOs: Highlights

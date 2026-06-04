@@ -8,7 +8,7 @@
 
 import UIKit
 import PDFKit
-import EPUBReader
+import CCReader
 
 @Observable
 @MainActor

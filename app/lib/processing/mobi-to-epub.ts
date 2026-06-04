@@ -157,6 +157,24 @@ export async function convertMobiToEpub(
  * AZW3 files are KF8 format; many MOBIs are dual-format.
  */
 async function initBestParser(data: Uint8Array, resourceSaveDir: string): Promise<MobiParser> {
+  // Detect MOBI version (record 0 MOBI header, offset 36) to decide the path.
+  // version >= 8 (or a combo file with a KF8 boundary) → use the KF8 parser,
+  // which produces a far cleaner reconstruction than the MOBI7 fallback.
+  let isKf8 = false;
+  try {
+    isKf8 = detectKf8(data);
+  } catch {
+    isKf8 = false;
+  }
+
+  if (isKf8) {
+    try {
+      return await initKf8File(data, resourceSaveDir);
+    } catch {
+      // Genuine KF8 parse failure — fall back to MOBI7 path below.
+    }
+  }
+
   let mobiParser: MobiParser | null = null;
   let kf8Parser: MobiParser | null = null;
 
@@ -190,6 +208,44 @@ async function initBestParser(data: Uint8Array, resourceSaveDir: string): Promis
     kf8Parser.destroy();
     return mobiParser;
   }
+}
+
+/**
+ * Inspect a MOBI/AZW3 buffer to determine whether the KF8 path should be used:
+ * either the record-0 MOBI header is version >= 8, or it is a combo MOBI7+KF8
+ * file (EXTH type 121 "boundary" present and < 0xffffffff).
+ */
+function detectKf8(data: Uint8Array): boolean {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  // PDB: numRecords at offset 76 (uint16); first record offset table at 78.
+  const numRecords = view.getUint16(76);
+  if (numRecords < 1) return false;
+  const rec0Offset = view.getUint32(78);
+  // MOBI header magic at rec0+16, version at rec0+36.
+  const magic = String.fromCharCode(...data.subarray(rec0Offset + 16, rec0Offset + 20));
+  if (magic !== "MOBI") return false;
+  const version = view.getUint32(rec0Offset + 36);
+  if (version >= 8) return true;
+
+  // Combo file: check EXTH type 121 (boundary).
+  const exthFlag = view.getUint32(rec0Offset + 128);
+  if (!(exthFlag & 0x40)) return false;
+  const mobiLength = view.getUint32(rec0Offset + 20);
+  let off = rec0Offset + 16 + mobiLength;
+  const exthMagic = String.fromCharCode(...data.subarray(off, off + 4));
+  if (exthMagic !== "EXTH") return false;
+  const count = view.getUint32(off + 8);
+  let p = off + 12;
+  for (let i = 0; i < count; i++) {
+    const type = view.getUint32(p);
+    const len = view.getUint32(p + 4);
+    if (type === 121) {
+      const boundary = view.getUint32(p + 8);
+      return boundary < 0xffffffff;
+    }
+    p += len;
+  }
+  return false;
 }
 
 /**

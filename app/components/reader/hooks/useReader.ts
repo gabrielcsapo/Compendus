@@ -28,6 +28,7 @@ import {
   createReadingSession,
   endReadingSession,
 } from "@/actions/reader";
+import { getWebDevice } from "@/lib/web-device";
 
 interface UseReaderOptions {
   bookId: string;
@@ -739,6 +740,7 @@ export function useReader({
         currentPage,
         getClientProfileId(),
         positionJSON,
+        getWebDevice(),
       );
     } catch (err) {
       console.error("Failed to save progress:", err);

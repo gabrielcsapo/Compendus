@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 enum LibraryViewMode: String, CaseIterable {
     case books = "Books"

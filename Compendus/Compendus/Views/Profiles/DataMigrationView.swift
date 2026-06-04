@@ -9,7 +9,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct DataMigrationView: View {
     @Environment(ServerConfig.self) private var serverConfig

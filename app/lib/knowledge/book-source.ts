@@ -21,6 +21,8 @@ import { tmpdir } from "os";
 import { createHash } from "crypto";
 import { parse, type HTMLElement } from "node-html-parser";
 import { initEpubFile } from "../epub-parser";
+import { blocksToPlainText } from "../content-ast/bundle";
+import type { ContentBundle } from "../content-ast/types";
 
 export interface ExtractedImage {
   /** Relative path (under the book's figures dir) where the binary was copied. */
@@ -191,4 +193,22 @@ function copyImage(tempPath: string, imagesDir: string): string | null {
   const dest = resolve(imagesDir, name);
   if (!existsSync(dest)) writeFileSync(dest, data);
   return name;
+}
+
+/**
+ * Build a knowledge-pipeline BookSource directly from a CCD bundle — the
+ * canonical, already-clean text (block-separated, entities decoded at conversion
+ * time). This is the inference-quality win: one structured substrate for every
+ * format, with correct reading order (incl. de-interleaved PDF columns). Images
+ * are not re-extracted here (figures are handled separately); text is the
+ * entity/relationship substrate.
+ */
+export function bookSourceFromCcd(bundle: ContentBundle): BookSource {
+  const sections: BookSection[] = bundle.chapters.map((ch) => ({
+    title: bundle.readingOrder.find((r) => r.spineIndex === ch.spineIndex)?.title ?? null,
+    spineIndex: ch.spineIndex,
+    text: blocksToPlainText(ch.blocks),
+    images: [],
+  }));
+  return { sections, totalCharacters: sections.reduce((n, s) => n + s.text.length, 0) };
 }

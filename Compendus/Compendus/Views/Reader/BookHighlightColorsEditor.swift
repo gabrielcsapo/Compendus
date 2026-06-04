@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct BookHighlightColorsEditor: View {
     let bookId: String

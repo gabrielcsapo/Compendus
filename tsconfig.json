@@ -1,5 +1,8 @@
 {
   "compilerOptions": {
+    // `baseUrl` is deprecated in TS 6.x (hard error otherwise); paths still resolve
+    // relative to this file under moduleResolution "Bundler".
+    "ignoreDeprecations": "6.0",
     "allowImportingTsExtensions": true,
     "strict": true,
     "noUnusedLocals": true,

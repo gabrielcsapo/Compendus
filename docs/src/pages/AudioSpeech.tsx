@@ -40,7 +40,7 @@ export default function AudioSpeech() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-foreground mb-2">Audio & Speech</h1>
         <p className="text-foreground-muted">
-          Compendus can transcribe audiobooks to text, read EPUBs aloud with text-to-speech, and
+          Compendus can transcribe audiobooks to text, read books aloud with text-to-speech, and
           play audiobooks with synchronized karaoke-style lyrics.
         </p>
       </div>
@@ -58,7 +58,7 @@ export default function AudioSpeech() {
           <tbody className="text-foreground">
             {[
               ["Audiobook Transcription", "whisper.cpp (server-side)", "whisper.cpp (on-device)"],
-              ["Text-to-Speech", "Web Speech API", "PocketTTS (Rust engine)"],
+              ["Text-to-Speech", "Web Speech API", "Kokoro (on-device neural TTS)"],
               ["Audiobook Playback", "HTML5 audio", "AVAudioPlayer"],
               ["Karaoke Lyrics", "DOM highlighting", "Native text view"],
               ["Background Processing", "Server job queue", "BGProcessingTask"],
@@ -321,9 +321,10 @@ interface TranscriptWord {
           <section>
             <h2 className="text-xl font-semibold text-foreground mb-3">Text-to-Speech</h2>
             <p className="text-foreground-muted mb-4">
-              Compendus can read EPUB content aloud using text-to-speech. The web app uses the
-              browser's built-in Web Speech API while the iOS app uses PocketTTS, a Rust-based
-              neural TTS engine bundled as an xcframework.
+              Compendus can read book content aloud using text-to-speech. The text comes from the
+              server-generated CCD (Compendus Content Document), so any reflowable book reads aloud.
+              The web app uses the browser's built-in Web Speech API while the iOS app uses Kokoro,
+              an on-device neural TTS model.
             </p>
           </section>
 
@@ -371,29 +372,29 @@ interface TranscriptWord {
           </section>
 
           <section>
-            <SectionHeading platform="ios">iOS PocketTTS Engine</SectionHeading>
+            <SectionHeading platform="ios">iOS Kokoro TTS Engine</SectionHeading>
             <p className="text-foreground-muted mb-3">
-              The iOS app uses PocketTTS, a Rust-based neural text-to-speech engine compiled as an
-              xcframework. It generates high-quality speech entirely on-device with no network
-              requests.
+              The iOS app uses Kokoro, an on-device neural text-to-speech model. It generates
+              high-quality speech entirely on-device with no network requests, and emits real
+              per-word timestamps that drive precise read-along highlighting.
             </p>
             <div className="space-y-3 mb-4">
               {[
                 {
                   label: "Voices",
-                  value: "8 built-in voices (selectable by index)",
+                  value: "Multiple built-in voices (selectable)",
                 },
                 {
                   label: "Output",
-                  value: "24 kHz mono Float32 PCM audio",
+                  value: "24 kHz mono PCM audio",
                 },
                 {
                   label: "Streaming",
                   value: "Audio is generated and played in real time with streaming playback",
                 },
                 {
-                  label: "Parameters",
-                  value: "Configurable speed, temperature, and top-P for voice quality tuning",
+                  label: "Timestamps",
+                  value: "Per-word timings emitted during synthesis for accurate text sync",
                 },
               ].map(({ label, value }) => (
                 <div key={label} className="flex gap-3 text-sm">
@@ -458,7 +459,7 @@ interface TranscriptWord {
                 {
                   label: "Read-Along",
                   value:
-                    "ReadAlongService coordinates PocketTTS playback with page-level text highlighting",
+                    "ReadAlongService coordinates Kokoro playback with text highlighting, mapping the CCD plain text to on-screen ranges",
                 },
                 {
                   label: "Transcript",

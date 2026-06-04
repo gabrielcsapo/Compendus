@@ -9,7 +9,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct UnifiedReaderView: View {
     let book: DownloadedBook
@@ -56,10 +56,6 @@ struct UnifiedReaderView: View {
     @State private var scrubberThumbnailTask: Task<Void, Never>? = nil
     @State private var showingHighlightSetup = false
     @State private var showingBookColorEditor = false
-
-    // Carousel state
-    @State private var carouselSnapshots: [UIImage?] = [nil, nil, nil] // [prev, current, next]
-    @State private var carouselDragOffset: CGFloat = 0
 
     // Highlighting
     @State private var highlights: [ReadingMark] = []
@@ -217,12 +213,15 @@ struct UnifiedReaderView: View {
             .statusBarHidden(!showingOverlay)
             .task { await initializeEngine() }
             .onChange(of: currentProgression) { _, _ in updateReadingSession() }
+            .onChange(of: readAlongService.activeSentenceRange) { _, _ in updateNarrationHighlight() }
+            .onChange(of: readAlongService.activeWordRange) { _, _ in updateNarrationHighlight() }
+            .onChange(of: readAlongService.isActive) { _, _ in updateNarrationHighlight() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in saveProgress() }
             .onDisappear {
                 saveProgress()
                 readerModeActive = false
                 readAlongService.deactivate()
-                if let nativeEPUB = engine as? NativeEPUBEngine { nativeEPUB.cleanup() }
+                if let nativeEPUB = engine as? NativeReaderEngine { nativeEPUB.cleanup() }
             }
         #if targetEnvironment(macCatalyst)
             .focusable()
@@ -499,7 +498,7 @@ struct UnifiedReaderView: View {
     @ViewBuilder
     private var pageJumpSheet: some View {
         if let engine = engine {
-            let nativeEngine = engine as? NativeEPUBEngine
+            let nativeEngine = engine as? NativeReaderEngine
             let total = max(1, engine.totalPositions)
             let current: Int = {
                 if engine.isPDF {
@@ -528,7 +527,7 @@ struct UnifiedReaderView: View {
     private func jumpToProgression(_ progression: Double, engine: any ReaderEngine) {
         let total = max(1, engine.totalPositions)
         let pageIndex = Int(round(progression * Double(total - 1)))
-        if let nativeEngine = engine as? NativeEPUBEngine {
+        if let nativeEngine = engine as? NativeReaderEngine {
             Task { await nativeEngine.go(toProgression: progression) }
         } else {
             Task {
@@ -552,7 +551,7 @@ struct UnifiedReaderView: View {
                 Button("Cancel", role: .cancel) { pendingLinkURL = nil }
                 Button(pendingLinkIsExternal ? "Open" : "Go") {
                     if let url = pendingLinkURL,
-                       let nativeEngine = engine as? NativeEPUBEngine {
+                       let nativeEngine = engine as? NativeReaderEngine {
                         nativeEngine.performLinkNavigation(url)
                     }
                     pendingLinkURL = nil
@@ -600,34 +599,23 @@ struct UnifiedReaderView: View {
     private func readerContent(engine: any ReaderEngine) -> some View {
         GeometryReader { geometry in
             ZStack {
-                // Layer 0: Primary reading content
-                // Engine view always in tree for UIKit stability; hidden in reader mode.
-                // The opacity flip to hidden is intentionally NOT animated — if it
-                // crossfades, the engine view and the carousel snapshot are both
-                // partially visible mid-transition, producing a ghosted-text artifact.
-                // Instant hide eliminates the double-render; the carousel handles
-                // its own fade-in cleanly.
+                // Layer 0: Primary reading content. The live engine page stays
+                // visible while the chrome bars overlay it — no snapshot carousel.
+                // Only Reader Mode replaces the page.
+                //
+                // Tap zones (left/right page, center toggles chrome) are handled
+                // INSIDE the engine's own UITapGestureRecognizer (see
+                // NativePageViewController.handleTap → onTapZone, wired in
+                // configureEngineCallbacks). That recognizer is built to coexist
+                // with text selection (it stands down while a selection is active),
+                // which a SwiftUI tap overlay can't — an overlay steals the
+                // long-press and breaks highlighting. So we mount NO tap overlay
+                // here and just keep the engine hit-testable (even while chrome is
+                // up, so a center tap dismisses the bars).
                 EngineViewWrapper(engine: engine)
                     .ignoresSafeArea()
-                    .opacity(showingOverlay || readerModeActive ? 0 : 1)
-                    .animation(.none, value: showingOverlay)
-                    .allowsHitTesting(!showingOverlay && !readAlongService.isActive && !readerModeActive)
-
-                // Edge-tap zones (P1.3) — for EPUB only. Comic + PDF engines
-                // have their own gesture handling. Left/right thirds advance
-                // pages; center third toggles the overlay (existing behavior).
-                if tapZonesEnabled
-                    && !engine.isComic
-                    && !engine.isPDF
-                    && !showingOverlay
-                    && !readAlongService.isActive
-                    && !readerModeActive {
-                    EPUBEdgeTapZones(
-                        onPrevious: { Task { await engine.goBackward() } },
-                        onNext: { Task { await engine.goForward() } },
-                        onCenterTap: { toggleOverlay() }
-                    )
-                }
+                    .opacity(readerModeActive ? 0 : 1)
+                    .allowsHitTesting(!readAlongService.isActive && !readerModeActive)
 
                 // (Removed) Invisible corner-tap bookmark hot zone — the
                 // top-bar bookmark button already covers this when chrome is
@@ -667,26 +655,30 @@ struct UnifiedReaderView: View {
                     .transition(.opacity)
                 }
 
-                // Read-along karaoke overlay (audiobook or TTS mode)
-                // Always in the view tree; controlled via opacity.
-                ReadAlongLyricsOverlay(
-                    transcript: readAlongService.isActive ? readAlongService.currentTranscript : nil,
-                    currentTime: readAlongService.currentPlaybackTime,
-                    bookTitle: book.title,
-                    chapterTitle: engine.currentLocation?.title,
-                    isLoading: readAlongService.isActive && readAlongService.currentTranscript == nil,
-                    scrollDriven: false,
-                    onSeek: { time in readAlongService.seek(to: time) },
-                    onTapBackground: { toggleOverlay() }
-                )
-                .opacity(readAlongService.isActive ? 1 : 0)
-                .allowsHitTesting(readAlongService.isActive)
-                .animation(.easeInOut(duration: 0.3), value: readAlongService.isActive)
+                // Read-along (audiobook or TTS): keep the real typeset page
+                // visible and highlight the spoken sentence/word in place rather
+                // than covering the page with a plain karaoke block. A transparent
+                // layer captures taps to toggle chrome (the engine view's hit
+                // testing is disabled while read-along is active).
+                if readAlongService.isActive && !showingOverlay && !readerModeActive {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { toggleOverlay() }
 
-                // Layer 1: Page carousel (visible when overlay is showing, not in reader mode)
-                if showingOverlay && !readerModeActive {
-                    pageCarousel(engine: engine, geometry: geometry)
-                        .transition(reduceMotion ? .opacity : .opacity)
+                    // Lightweight "preparing" HUD while the first audio/transcript
+                    // is generated — does not replace the page underneath.
+                    if readAlongService.state == .loading || readAlongService.state == .buffering {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                            Text("Preparing\u{2026}")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(20)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                    }
                 }
 
                 // Layer 1b: Mac Catalyst hover zones (invisible hit areas at edges)
@@ -722,8 +714,9 @@ struct UnifiedReaderView: View {
 
                     Spacer()
 
-                    // Hide bottom bar in reader mode (has its own page info)
-                    if showingOverlay && !readerModeActive {
+                    // Hide the page-scrubber bar in reader mode (own page info)
+                    // and during read-aloud (the docked player owns the bottom).
+                    if showingOverlay && !readerModeActive && !readAlongService.isActive {
                         readerBottomBar(engine: engine)
                             .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                             .simultaneousGesture(TapGesture().onEnded { scheduleOverlayHide() })
@@ -821,42 +814,25 @@ struct UnifiedReaderView: View {
                     .zIndex(2)
                 }
 
-                // Layer 4: Read-along / TTS pill (bottom)
-                // Show the Read Aloud pill only the FIRST time it's available
-                // for a user (gated by hasSeenReadAloudHint AppStorage). After
-                // that, Read Aloud lives in the ⋯ menu. The pill also returns
-                // whenever read-along is actively playing so users see the
-                // playback affordances.
-                if ((showReadAlongPill && !readAlongPillDismissed && !hasSeenReadAloudHint)
-                    || readAlongService.isActive) {
-                    VStack {
+                // Layer 4: Read-along / TTS playback pill (bottom).
+                // Read Aloud is started from the ⋯ menu ("Read Aloud") — we no
+                // longer float an "available" hint when a book opens. The pill
+                // appears ONLY while read-along is actively playing, to surface
+                // the playback controls.
+                if readAlongService.isActive {
+                    VStack(spacing: 0) {
                         Spacer()
-                        ReadAlongPill(
-                            availableSources: readAlongPillSources,
-                            bookId: book.id,
-                            audiobookHasTranscript: matchingAudiobook?.hasTranscript ?? true,
-                            onStartAudiobook: {
-                                hasSeenReadAloudHint = true
-                                activateReadAlong()
-                            },
-                            onStartTTS: {
-                                hasSeenReadAloudHint = true
-                                activateTTSReadAloud()
-                            },
-                            onDismiss: {
-                                hasSeenReadAloudHint = true
-                                withAnimation { readAlongPillDismissed = true }
-                            },
-                            onChangeVoice: { _ in restartTTSWithNewVoice() },
-                            onDownloadForLater: {
-                                hasSeenReadAloudHint = true
-                                queueTTSPreGeneration()
-                            }
+                        // Docked, music-player-style bar (shared PlaybackDockBar,
+                        // the same component the audiobook player can use). Full
+                        // width, flush to the bottom edge — not a floating pill.
+                        PlaybackDockBar(
+                            controller: readAlongService,
+                            bottomInset: bottomSafeAreaInset,
+                            onOptions: { showReadAloudOptions = true }
                         )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, showingOverlay ? 140 : 16)
                     }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.move(edge: .bottom))
+                    .zIndex(3)
                 }
 
                 // Layer 5: Full-screen loading overlay while engine initializes content
@@ -865,7 +841,7 @@ struct UnifiedReaderView: View {
                         Color(uiColor: readerSettings.theme.backgroundColor)
                             .ignoresSafeArea()
                         VStack(spacing: 16) {
-                            if let epub = engine as? NativeEPUBEngine, epub.totalChapterCount > 0 {
+                            if let epub = engine as? NativeReaderEngine, epub.totalChapterCount > 0 {
                                 ProgressView(value: epub.paginationProgress)
                                     .progressViewStyle(.linear)
                                     .frame(width: 200)
@@ -948,153 +924,7 @@ struct UnifiedReaderView: View {
             }
             .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.85), value: showingOverlay)
             .animation(.easeInOut(duration: 0.3), value: engine.isReady)
-            .onChange(of: showingOverlay) { _, isShowing in
-                if isShowing {
-                    captureCarouselSnapshots(engine: engine)
-                } else {
-                    carouselSnapshots = [nil, nil, nil]
-                    carouselDragOffset = 0
-                }
-            }
         }
-    }
-
-    // MARK: - Page Carousel
-
-    /// Card dimensions for carousel layout (computed from geometry).
-    private func carouselMetrics(for geometry: GeometryProxy) -> (cardWidth: CGFloat, cardHeight: CGFloat, cardStride: CGFloat, verticalCenter: CGFloat) {
-        let topBarHeight = topSafeAreaInset + 62
-        let bottomBarHeight = max(12, bottomSafeAreaInset + 4) + 90
-        let availableHeight = geometry.size.height - topBarHeight - bottomBarHeight
-        let verticalCenter = topBarHeight + availableHeight / 2
-
-        let cardWidth = geometry.size.width * 0.75
-        let cardAspect = geometry.size.height / max(1, geometry.size.width)
-        let cardHeight = min(cardWidth * cardAspect, availableHeight - 32)
-        let cardSpacing: CGFloat = 16
-        let cardStride = cardWidth + cardSpacing
-
-        return (cardWidth, cardHeight, cardStride, verticalCenter)
-    }
-
-    @ViewBuilder
-    private func pageCarousel(engine: any ReaderEngine, geometry: GeometryProxy) -> some View {
-        let metrics = carouselMetrics(for: geometry)
-
-        ZStack {
-            // Dimmed background — tap to dismiss overlay
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    toggleOverlay()
-                }
-
-            // Three cards: prev (-1), current (0), next (+1)
-            ForEach(-1...1, id: \.self) { offset in
-                let index = offset + 1 // 0=prev, 1=current, 2=next
-                let xOffset = CGFloat(offset) * metrics.cardStride + carouselDragOffset
-
-                carouselCard(image: carouselSnapshots[index], width: metrics.cardWidth, height: metrics.cardHeight)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if offset == 0 {
-                            // Tap on current card dismisses the overlay
-                            toggleOverlay()
-                        } else {
-                            // Tap on prev/next card navigates to that page
-                            let navigateForward = offset == 1
-                            withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                                carouselDragOffset = navigateForward ? -metrics.cardStride : metrics.cardStride
-                            }
-                            Task {
-                                try? await Task.sleep(for: .milliseconds(250))
-                                if navigateForward {
-                                    await engine.goForward()
-                                } else {
-                                    await engine.goBackward()
-                                }
-                                carouselDragOffset = 0
-                                captureCarouselSnapshots(engine: engine)
-                                scheduleOverlayHide()
-                            }
-                        }
-                    }
-                    .offset(x: xOffset)
-                    .zIndex(offset == 0 ? 1 : 0)
-            }
-            .position(x: geometry.size.width / 2, y: metrics.verticalCenter)
-        }
-        .contentShape(Rectangle())
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 15)
-                .onChanged { value in
-                    // Cancel auto-hide while user is interacting with carousel
-                    overlayHideTask?.cancel()
-                    overlayHideTask = nil
-                    carouselDragOffset = value.translation.width
-                }
-                .onEnded { value in
-                    let threshold = metrics.cardWidth * 0.25
-                    let predicted = value.predictedEndTranslation.width
-                    if value.translation.width < -threshold || predicted < -threshold * 2 {
-                        // Swiped left → animate card off to the left, then update
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                            carouselDragOffset = -metrics.cardStride
-                        }
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(250))
-                            await engine.goForward()
-                            carouselDragOffset = 0
-                            captureCarouselSnapshots(engine: engine)
-                            scheduleOverlayHide()
-                        }
-                    } else if value.translation.width > threshold || predicted > threshold * 2 {
-                        // Swiped right → animate card off to the right, then update
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
-                            carouselDragOffset = metrics.cardStride
-                        }
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(250))
-                            await engine.goBackward()
-                            carouselDragOffset = 0
-                            captureCarouselSnapshots(engine: engine)
-                            scheduleOverlayHide()
-                        }
-                    } else {
-                        // Snap back — not enough to trigger navigation
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                            carouselDragOffset = 0
-                        }
-                        scheduleOverlayHide()
-                    }
-                }
-        )
-    }
-
-    @ViewBuilder
-    private func carouselCard(image: UIImage?, width: CGFloat, height: CGFloat) -> some View {
-        Group {
-            if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Color(uiColor: readerSettings.theme.backgroundColor)
-            }
-        }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 24))
-        .shadow(color: .black.opacity(0.4), radius: 20, x: 0, y: 8)
-    }
-
-    private func captureCarouselSnapshots(engine: any ReaderEngine) {
-        // The engine renders snapshots at its own viewport size so text layout
-        // matches exactly. SwiftUI scales the images down for the carousel card.
-        carouselSnapshots = [
-            engine.snapshotPage(at: -1),
-            engine.snapshotPage(at: 0),
-            engine.snapshotPage(at: 1)
-        ]
     }
 
     // MARK: - Top Bar
@@ -1171,6 +1001,29 @@ struct UnifiedReaderView: View {
                     }
                 }
 
+                // One-tap Listen: starts read-along immediately with the saved
+                // voice/speed (prefers a matching audiobook, else on-device TTS).
+                // When already listening it toggles play/pause. Voice/speed/download
+                // stay one level deeper in the ⋯ → Read Aloud options sheet. EPUB only.
+                if !engine.isPDF && !engine.isComic
+                    && (matchingAudiobook != nil || kokoroModelManager.isModelAvailable || readAlongService.isActive) {
+                    Button {
+                        if readAlongService.isActive {
+                            readAlongService.togglePlayPause()
+                        } else if matchingAudiobook != nil {
+                            activateReadAlong()
+                        } else {
+                            activateTTSReadAloud()
+                        }
+                    } label: {
+                        Image(systemName: listenButtonIcon)
+                            .foregroundStyle(readAlongService.isActive ? Color.accentColor : themeTextColor)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(readAlongService.isActive ? "Play or pause read aloud" : "Listen")
+                }
+
                 // Bookmark button: solid when bookmarked, outline when not
                 Button {
                     bookmarkCurrentPage()
@@ -1212,7 +1065,10 @@ struct UnifiedReaderView: View {
                     }
                 }
 
-                if !engine.isPDF && !engine.isComic {
+                // Reader Mode (continuous scroll) is hidden during read-aloud —
+                // read-aloud always presents on the paginated page with in-place
+                // highlighting, so the two view modes don't conflict.
+                if !engine.isPDF && !engine.isComic && !readAlongService.isActive {
                     Button {
                         // Defer toggle so the context menu fully dismisses first
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -1247,6 +1103,17 @@ struct UnifiedReaderView: View {
         .padding(.top, topSafeAreaInset + 12)
         .background(.ultraThinMaterial)
         .environment(\.colorScheme, readerSettings.theme.colorScheme)
+    }
+
+    /// SF Symbol for the top-bar one-tap Listen control. Headphones when idle;
+    /// play/pause glyph that reflects playback state while a session is active.
+    private var listenButtonIcon: String {
+        guard readAlongService.isActive else { return "headphones" }
+        switch readAlongService.state {
+        case .paused: return "play.fill"
+        case .loading, .buffering: return "headphones"
+        default: return "pause.fill"
+        }
     }
 
     private var topSafeAreaInset: CGFloat {
@@ -1389,7 +1256,7 @@ struct UnifiedReaderView: View {
     private func pageInfoLabel(engine: any ReaderEngine) -> some View {
         // When actively scrubbing, preview the destination page/chapter so the
         // user can see where they're about to land.
-        let nativeEngine = engine as? NativeEPUBEngine
+        let nativeEngine = engine as? NativeReaderEngine
         let scrubPage: Int? = isScrubbing ? Int(scrubberValue) : nil
         let chapterTitle: String? = {
             if let scrubPage, let nativeEngine {
@@ -1476,7 +1343,7 @@ struct UnifiedReaderView: View {
     /// reading speed varies too much) and audiobooks have their own readout.
     private func readingTimeLeftLabel(engine: any ReaderEngine) -> String? {
         guard !engine.isComic, !engine.isPDF else { return nil }
-        guard let nativeEngine = engine as? NativeEPUBEngine else { return nil }
+        guard let nativeEngine = engine as? NativeReaderEngine else { return nil }
         let totalPages = nativeEngine.totalPositions
         let currentPage = nativeEngine.globalPageIndex + 1
         let pagesLeft = totalPages - currentPage
@@ -1547,7 +1414,7 @@ struct UnifiedReaderView: View {
             .overlay(alignment: .top) {
                 scrubberPreviewOverlay()
             }
-        } else if let nativeEngine = engine as? NativeEPUBEngine,
+        } else if let nativeEngine = engine as? NativeReaderEngine,
                   nativeEngine.totalPositions > 1 {
             Slider(
                 value: Binding(
@@ -1644,6 +1511,15 @@ struct UnifiedReaderView: View {
 
     // MARK: - Toggle Overlay
 
+    /// Read-aloud always presents on the paginated page with in-place
+    /// highlighting, so if Reader Mode (the continuous dimmed scroll) is on,
+    /// exit it first — restoring the paginated position from the active segment.
+    private func exitReaderModeIfActive() {
+        guard readerModeActive, let engine else { return }
+        restoreEPUBPosition(engine: engine)
+        withAnimation(.easeInOut(duration: 0.3)) { readerModeActive = false }
+    }
+
     private func toggleOverlay() {
         withAnimation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.85)) {
             showingOverlay.toggle()
@@ -1688,9 +1564,10 @@ struct UnifiedReaderView: View {
     // MARK: - Engine Initialization
 
     private func initializeEngine() async {
-        // When preferEpub is true and the book has a downloaded EPUB version, use it
-        if preferEpub, let epubURL = book.epubFileURL, book.hasEpubVersion {
-            await initializeEPUBEngine(fileURL: epubURL)
+        // Reflowable formats (epub/mobi/azw3) are read entirely from the CCD pack —
+        // no raw .epub on device. preferEpub no longer changes the source.
+        if isReflowableFormat {
+            await initializeReaderEngine()
             return
         }
 
@@ -1711,8 +1588,6 @@ struct UnifiedReaderView: View {
         }
 
         switch book.format.lowercased() {
-        case "epub":
-            await initializeEPUBEngine(fileURL: fileURL)
         case "pdf":
             initializePDFEngine(fileURL: fileURL)
         default:
@@ -1720,8 +1595,52 @@ struct UnifiedReaderView: View {
         }
     }
 
-    private func initializeEPUBEngine(fileURL: URL) async {
-        let nativeEngine = NativeEPUBEngine(bookURL: fileURL)
+    /// Whether this book is a reflowable ebook served via the CCD pack.
+    private var isReflowableFormat: Bool {
+        ["epub", "mobi", "azw", "azw3"].contains(book.format.lowercased())
+    }
+
+    /// Ensure the CCD pack is unpacked on-device (download + unzip on first open),
+    /// returning the unpacked manifest URL. Idempotent: if the manifest already
+    /// exists locally, skip the download (offline-capable). Returns nil if
+    /// unavailable — the reader then has no content (book needs CCD backfill).
+    private func ensureCcdPack() async -> URL? {
+        guard let packDir = book.ccdPackDir,
+              let manifestURL = book.ccdManifestURL else { return nil }
+        if FileManager.default.fileExists(atPath: manifestURL.path) { return manifestURL }
+        do {
+            let data = try await apiService.fetchCcdPack(bookId: book.id)
+            return try CCDPack.unpack(zipData: data, into: packDir)
+        } catch {
+            return nil
+        }
+    }
+
+    /// The error message shown when the CCD pack can't be loaded. The primary
+    /// signal is the book's server-reported `ccdStatus`: a not-yet-converted or
+    /// unconvertable book is a content-readiness problem, not a connectivity
+    /// one, so don't mislead the user with "try again when online".
+    private var ccdUnavailableMessage: String {
+        if book.isCcdFailed {
+            return "This book couldn't be prepared for reading."
+        }
+        // "processing", or a nil-status reflowable book that simply has no pack
+        // yet (backfill in flight) — both mean "not ready, check back later".
+        if book.isCcdProcessing || (book.ccdStatus == nil && book.isReflowable) {
+            return "This book is still being prepared for reading. Check back in a bit."
+        }
+        // ccdStatus is "ready" (or otherwise marked available) but the pack
+        // fetch genuinely failed — most likely offline / a transient error.
+        return "Could not load book content. Try again when online."
+    }
+
+    private func initializeReaderEngine() async {
+        guard let manifestURL = await ensureCcdPack(),
+              let resourcesRoot = book.ccdResourcesDir else {
+            readerState = .error(ccdUnavailableMessage)
+            return
+        }
+        let nativeEngine = NativeReaderEngine(ccdManifestURL: manifestURL, resourcesRoot: resourcesRoot)
         configureEngineCallbacks(nativeEngine)
         await nativeEngine.load(initialPosition: initialPosition ?? book.lastPosition)
 
@@ -1881,7 +1800,7 @@ struct UnifiedReaderView: View {
         }
 
         // EPUB: tap zones for page navigation + center tap to toggle overlay
-        if let nativeEngine = engine as? NativeEPUBEngine {
+        if let nativeEngine = engine as? NativeReaderEngine {
             nativeEngine.onTapZone = { [self] zone in
                 pauseReadAlongIfActive()
                 switch zone {
@@ -1942,22 +1861,35 @@ struct UnifiedReaderView: View {
         // currently read sentence so the bookmark is accurate.
         if readAlongService.isActive,
            let range = readAlongService.activeSentenceRange,
-           let nativeEngine = engine as? NativeEPUBEngine {
+           let nativeEngine = engine as? NativeReaderEngine {
             nativeEngine.showPage(containingRange: range)
         }
 
+        var changedPositionOrProgress = false
         if let serialized = engine.serializeLocation() {
             book.lastPosition = serialized
+            changedPositionOrProgress = true
         }
 
         if let progression = engine.currentLocation?.totalProgression {
             book.readingProgress = progression
+            changedPositionOrProgress = true
+        }
+
+        // Stamp local reading so sync pushes it. `lastReadAt` is bumped too so the
+        // server roll-up reflects when this device actually read (not a stale
+        // server-seeded value); `localProgressUpdatedAt` is the push gate and is
+        // never overwritten by pulls.
+        if changedPositionOrProgress {
+            let now = Date()
+            book.lastReadAt = now
+            book.localProgressUpdatedAt = now
         }
 
         // Finalize reading session
         if let session = currentSession {
             session.endedAt = Date()
-            if let nativeEngine = engine as? NativeEPUBEngine {
+            if let nativeEngine = engine as? NativeReaderEngine {
                 session.endPage = nativeEngine.globalPageIndex
                 session.endCharacterOffset = nativeEngine.currentPagePlainTextOffset
             } else if let pdfEngine = engine as? PDFEngine {
@@ -1982,7 +1914,7 @@ struct UnifiedReaderView: View {
         let page: Int
         let charOffset: Int?
 
-        if let nativeEngine = engine as? NativeEPUBEngine {
+        if let nativeEngine = engine as? NativeReaderEngine {
             page = nativeEngine.globalPageIndex
             charOffset = nativeEngine.currentPagePlainTextOffset
         } else if let pdfEngine = engine as? PDFEngine {
@@ -2016,12 +1948,48 @@ struct UnifiedReaderView: View {
         currentSession = session
     }
 
+    /// Push the read-along narration highlight (spoken sentence + word) onto the
+    /// live typeset page so listening highlights in place instead of covering the
+    /// page. Cleared when read-along is inactive.
+    private func updateNarrationHighlight() {
+        guard let nativeEngine = engine as? NativeReaderEngine else { return }
+        if readAlongService.isActive {
+            nativeEngine.setNarrationHighlight(
+                sentence: readAlongService.activeSentenceRange,
+                word: readAlongService.activeWordRange
+            )
+        } else {
+            nativeEngine.setNarrationHighlight(sentence: nil, word: nil)
+        }
+    }
+
     private func updateReadingSession() {
-        guard let session = currentSession, let engine = engine else { return }
+        guard let engine = engine else { return }
+
+        // Durably persist the book-level reading position on every page turn —
+        // manual OR read-along auto-advance — so a crash or force-quit can never
+        // lose more than the current page. Previously book.lastPosition /
+        // readingProgress were only written in saveProgress() (disappear/resign),
+        // so a mid-listen crash reset the book's progress to 0%.
+        if let serialized = engine.serializeLocation() {
+            book.lastPosition = serialized
+        }
+        if let progression = engine.currentLocation?.totalProgression {
+            book.readingProgress = progression
+        }
+        // Mark local progress so sync pushes it (see saveProgress for rationale).
+        let now = Date()
+        book.lastReadAt = now
+        book.localProgressUpdatedAt = now
+
+        guard let session = currentSession else {
+            do { try modelContext.save() } catch { print("[UnifiedReaderView] updateReadingSession (position only) save failed: \(error)") }
+            return
+        }
 
         session.endedAt = Date()
 
-        if let nativeEngine = engine as? NativeEPUBEngine {
+        if let nativeEngine = engine as? NativeReaderEngine {
             let page = nativeEngine.globalPageIndex
             let charOffset = nativeEngine.currentPagePlainTextOffset
             session.endPage = page
@@ -2048,7 +2016,7 @@ struct UnifiedReaderView: View {
             return comicEngine.currentPage
         } else if let pdfEngine = engine as? PDFEngine {
             return pdfEngine.currentPage
-        } else if let nativeEngine = engine as? NativeEPUBEngine {
+        } else if let nativeEngine = engine as? NativeReaderEngine {
             return nativeEngine.globalPageIndex
         }
         return nil
@@ -2130,7 +2098,9 @@ struct UnifiedReaderView: View {
 
     private func activateReadAlong() {
         guard let audiobook = matchingAudiobook,
-              let nativeEngine = engine as? NativeEPUBEngine else { return }
+              let nativeEngine = engine as? NativeReaderEngine else { return }
+
+        exitReaderModeIfActive()
 
         if audiobook.hasTranscript {
             // Transcript already exists — start immediately
@@ -2198,10 +2168,12 @@ struct UnifiedReaderView: View {
     }
 
     private func activateTTSReadAloud() {
-        guard let nativeEngine = engine as? NativeEPUBEngine else {
-            print("[TTS] Cannot start: engine is not NativeEPUBEngine (engine=\(String(describing: engine)))")
+        guard let nativeEngine = engine as? NativeReaderEngine else {
+            print("[TTS] Cannot start: engine is not NativeReaderEngine (engine=\(String(describing: engine)))")
             return
         }
+
+        exitReaderModeIfActive()
 
         print("[TTS] Activating read aloud, voice=\(kokoroModelManager.selectedVoiceIndex)")
 
@@ -2287,7 +2259,7 @@ struct UnifiedReaderView: View {
     /// Eagerly build the segment mapping from all parsed chapters.
     /// Called from the toggle button handler so the mapping is ready before the view renders.
     private func buildReaderModeMapping(forEngine engine: any ReaderEngine) {
-        guard let nativeEngine = engine as? NativeEPUBEngine else { return }
+        guard let nativeEngine = engine as? NativeReaderEngine else { return }
         let chapters = nativeEngine.allChaptersPlainText
         guard !chapters.isEmpty else { return }
 
@@ -2307,7 +2279,7 @@ struct UnifiedReaderView: View {
     /// Build segments from all parsed chapters for reader mode infinite scroll.
     /// The mapping is built eagerly by `buildReaderModeMapping` in the button handler.
     private func readerModeSegments(engine: any ReaderEngine) -> [ReaderModeScrollView.Segment]? {
-        guard let nativeEngine = engine as? NativeEPUBEngine else { return nil }
+        guard let nativeEngine = engine as? NativeReaderEngine else { return nil }
         let chapters = nativeEngine.allChaptersPlainText
         guard !chapters.isEmpty else { return nil }
 
@@ -2343,7 +2315,7 @@ struct UnifiedReaderView: View {
 
     /// Find the segment index corresponding to the current EPUB page position.
     /// Uses a pre-built mapping array (called from `readerModeSegments` during view updates).
-    private func startSegmentForCurrentPage(engine: NativeEPUBEngine, mapping: [ReaderModeSegmentMapping]) -> Int {
+    private func startSegmentForCurrentPage(engine: NativeReaderEngine, mapping: [ReaderModeSegmentMapping]) -> Int {
         let currentSpine = engine.activeSpineIndex
         let pageOffset = engine.currentPagePlainTextOffset ?? 0
 
@@ -2361,7 +2333,7 @@ struct UnifiedReaderView: View {
     /// the full mapping array. Called from the toggle button handler so the value
     /// is ready before `readerModeActive` triggers the first render.
     private func computeStartSegment(forEngine engine: any ReaderEngine) -> Int {
-        guard let nativeEngine = engine as? NativeEPUBEngine else { return 0 }
+        guard let nativeEngine = engine as? NativeReaderEngine else { return 0 }
         let currentSpine = nativeEngine.activeSpineIndex
         let pageOffset = nativeEngine.currentPagePlainTextOffset ?? 0
         let chapters = nativeEngine.allChaptersPlainText
@@ -2392,7 +2364,7 @@ struct UnifiedReaderView: View {
         guard !readerModeActiveSegmentText.isEmpty,
               readerModeActiveSegment >= 0,
               readerModeActiveSegment < readerModeSegmentMap.count,
-              let nativeEngine = engine as? NativeEPUBEngine else { return }
+              let nativeEngine = engine as? NativeReaderEngine else { return }
 
         let mapping = readerModeSegmentMap[readerModeActiveSegment]
         let spineIndex = mapping.spineIndex
@@ -2560,37 +2532,11 @@ private struct JumpBackPill: View {
     }
 }
 
-// MARK: - Edge-Tap Zones (P1.3)
-
-/// Three invisible tap zones laid over the reading surface for EPUB:
-/// left-third → previous page, right-third → next page, center → toggle
-/// overlay. Kindle / Apple Books convention. Comic and PDF readers have
-/// their own gesture systems so this view is only mounted for EPUB.
-private struct EPUBEdgeTapZones: View {
-    let onPrevious: () -> Void
-    let onNext: () -> Void
-    let onCenterTap: () -> Void
-
-    var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 0) {
-                Color.clear
-                    .frame(width: geo.size.width / 3)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onPrevious() }
-                Color.clear
-                    .frame(width: geo.size.width / 3)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onCenterTap() }
-                Color.clear
-                    .frame(width: geo.size.width / 3)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onNext() }
-            }
-        }
-        .ignoresSafeArea()
-    }
-}
+// NOTE: Tap-zone navigation (left/right page, center toggle) is handled inside
+// the engine's own UITapGestureRecognizer (NativePageViewController.handleTap →
+// onTapZone), which coexists with text selection. The earlier SwiftUI
+// `EPUBEdgeTapZones` overlay was removed because a full-screen tap overlay stole
+// the long-press and broke highlighting.
 
 // MARK: - Tap-Zones Coach Mark (P1.3)
 

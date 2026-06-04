@@ -27,13 +27,13 @@ The dev server is configured with `host: true` so the iOS simulator can connect 
 
 - **Library Browsing** — Browse your full library with search, filtering by format/type, and sorting options.
 - **Offline Reading** — Download books for offline reading with background download support and progress tracking.
-- **Custom EPUB Reader** — Native CoreText + UITextView-based EPUB renderer with pagination, highlights, and bookmarks.
+- **Native Reader** — Renders the server-generated CCD (Compendus Content Document) with CoreText + UITextView: pagination, highlights, and bookmarks. No on-device EPUB parsing.
 - **PDF Reader** — PDFKit-based PDF viewer with annotation support and highlight persistence.
 - **Audiobook Player** — Audio playback with chapter navigation, speed control, and sleep timer.
 - **Highlights & Notes** — Create color-coded text highlights with notes. Synced to the server via REST API.
 - **Reading Sessions** — Automatic reading time tracking with pages-read statistics.
 - **On-Device Transcription** — Transcribe audiobooks locally using Whisper.cpp without sending audio to external services.
-- **Text-to-Speech** — Built-in TTS with pre-generation and audio caching for read-along functionality.
+- **Text-to-Speech** — On-device Kokoro neural TTS with pre-generation, audio caching, and read-along synced to the CCD text.
 - **Home Screen Widget** — WidgetKit widget showing currently reading books on the iOS home screen.
 - **Deep Linking** — Open books directly via `compendus://book/{bookId}` URL scheme.
 - **Dark Mode** — Full dark mode support with customizable reading themes (font, size, line height).
@@ -43,55 +43,64 @@ The dev server is configured with `host: true` so the iOS simulator can connect 
 ```text
 Compendus/
 ├── Models/               # SwiftData models
-│   ├── DownloadedBook    # Local book storage
-│   ├── BookHighlight     # Highlight with XPath/position
+│   ├── DownloadedBook    # Local book storage (+ CCD pack location)
+│   ├── ReadingMark       # Unified highlight/bookmark (block + offset locator)
 │   ├── ReadingSession    # Reading statistics
 │   ├── ReaderSettings    # Theme, font, size preferences
 │   └── ...
 ├── Services/             # Business logic
 │   ├── APIService        # REST API client
-│   ├── DownloadManager   # Background URLSession downloads
-│   ├── BookEditSyncService   # Edit sync to server
-│   ├── AudiobookPlayerService # Audio playback
+│   ├── DownloadManager   # Background URLSession downloads (CCD pack)
 │   ├── OnDeviceTranscriptionService  # Whisper
-│   ├── ReadAlongService  # Text-audio sync
+│   ├── KokoroTTSContext / TTSPreGenerationService  # On-device TTS
+│   ├── ReadAlongService  # Text-audio sync (over CCD text)
 │   └── ...
-├── Reader/               # Reader engine
-│   ├── Engine/
-│   │   ├── ReaderEngine.swift       # Protocol
-│   │   ├── PDFEngine.swift          # PDFKit
-│   │   └── Native/                  # Custom EPUB
-│   └── Parser/
-│       ├── EPUBParser.swift         # ZIP + XML
-│       └── EPUBManifest.swift       # OPF models
-└── Views/                # SwiftUI views
-    ├── Library/          # Book grid/list
-    ├── Reader/           # Reading interface
-    ├── Highlights/       # Highlight management
-    ├── Downloads/        # Download progress
-    ├── Settings/         # App preferences
-    └── Components/       # Reusable UI
+├── Views/                # SwiftUI views
+│   ├── Library/          # Book grid/list
+│   ├── Reader/           # Reading interface (UnifiedReaderView)
+│   ├── Highlights/       # Highlight management
+│   ├── Downloads/        # Download progress
+│   ├── Settings/         # App preferences
+│   └── Components/       # Reusable UI
+└── (reader engine lives in the CCReader Swift package — see below)
+```
+
+The reader engine is a separate Swift package, **CCReader**
+(`Compendus/CCReader/Sources/CCReader/`):
+
+```text
+Engine/
+├── ReaderEngine.swift            # Protocol
+├── PDFEngine.swift               # PDFKit
+└── Native/
+    ├── CCDPack.swift             # Unpacks the downloaded CCD pack (ZIP)
+    ├── CCDModels.swift           # Codable CCD bundle (blocks/inlines)
+    ├── CCDContentMapper.swift    # CCD blocks → ContentNode AST
+    └── NativeReaderEngine.swift  # CCD-driven reader (single content path)
 ```
 
 ## Reader Engine
 
-The iOS app uses a custom-built reader engine with native iOS rendering.
+The iOS app renders the server-generated CCD (Compendus Content Document)
+natively — there is no on-device EPUB/MOBI parsing. On first open it downloads
+and unpacks a CCD pack, then reads entirely offline.
 
-### EPUB Rendering Pipeline
+### CCD Rendering Pipeline
 
-1. **EPUBParser** — Extracts ZIP, parses OPF metadata and spine order
-2. **XHTMLContentParser** — Parses XHTML into ContentNode AST (headings, paragraphs, images, lists)
-3. **AttributedStringBuilder** — Converts ContentNode AST into NSAttributedString with styles
-4. **NativePaginationEngine** — Uses CoreText CTFramesetter to paginate text
-5. **NativePageViewController** — Hosts UITextView for each page with gesture handling
+1. **CCDPack** — Downloads + unpacks the CCD pack (a ZIP of `manifest.ccd.json` + `resources/`)
+2. **CCDModels** — Decodes the CCD bundle (blocks/inlines) from the manifest
+3. **CCDContentMapper** — Maps CCD blocks → `ContentNode` AST (headings, paragraphs, images, lists, tables)
+4. **AttributedStringBuilder** — Converts `ContentNode` AST into NSAttributedString with styles
+5. **NativePaginationEngine** — Uses CoreText CTFramesetter to paginate text
+6. **NativePageViewController** — Hosts UITextView for each page with gesture handling
 
 ### Reader Features
 
-- Text highlights with XPath-based range serialization
-- epub:type footnote detection with popover presentation
-- Fixed-layout (FXL) rendering with rendition:spread blank page detection
-- SVG cover detection and rendering
-- Background chapter parsing with async image pre-loading
+- Text highlights with block + character-offset locators
+- Footnote popovers (carried through the CCD as note references)
+- Fixed-layout (FXL) rendering — one full-page image block per spine page
+- SVG pages rasterized to PNG in the CCD pack (server-side)
+- Background chapter mapping with async image pre-loading
 - Session-scoped NSCache-based image caching
 
 ## Server Communication
@@ -103,8 +112,8 @@ The iOS app communicates with the Compendus server through the REST API. Key int
 | Browse library       | `GET /api/library`               |
 | Search books         | `GET /api/search?q=...`          |
 | Get book details     | `GET /api/books/:id`             |
-| Download book file   | `GET /books/:id.:format`         |
+| Download CCD pack    | `GET /api/reader/:id/ccd/pack`   |
 | Download cover       | `GET /covers/:id.jpg`            |
 | Update book metadata | `PUT /api/books/:id`             |
 | Upload transcript    | `PUT /api/books/:id/transcript`  |
-| Get EPUB resources   | `GET /api/reader/:id/resource/*` |
+| Get reader resources | `GET /api/reader/:id/resource/*` |

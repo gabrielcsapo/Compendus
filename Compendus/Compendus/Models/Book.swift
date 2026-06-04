@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import EPUBReader
+import CCReader
 
 /// Book model matching the server's ApiBook format
 struct Book: Codable, Identifiable, Hashable {
@@ -43,6 +43,7 @@ struct Book: Codable, Identifiable, Hashable {
     var readingProgress: Double?    // 0-1 from server user_book_state
     var lastReadAt: String?         // ISO8601 timestamp of last read
     var lastPosition: String?       // JSON position from server user_book_state
+    var ccdStatus: String?          // CCD readiness: "ready" | "processing" | "failed" | nil (native, not CCD-gated)
 
     var hasEpubVersion: Bool {
         convertedEpubPath != nil
@@ -116,6 +117,17 @@ struct Book: Codable, Identifiable, Hashable {
         return Double(num)
     }
 
+    /// CCD conversion errored (corrupt / DRM / unsupported / no content).
+    var isCcdFailed: Bool { ccdStatus == "failed" }
+
+    /// CCD not yet ready (backfill in flight). Reflowable/PDF only.
+    var isCcdProcessing: Bool { ccdStatus == "processing" }
+
+    /// Reflowable ebook (epub/mobi/azw3) — read entirely from the CCD pack.
+    var isReflowable: Bool {
+        ["epub", "mobi", "azw", "azw3"].contains(format.lowercased())
+    }
+
     // Custom coding keys to handle optional fields not in API response
     enum CodingKeys: String, CodingKey {
         case id, title, subtitle, authors, publisher, publishedDate
@@ -125,6 +137,7 @@ struct Book: Codable, Identifiable, Hashable {
         case convertedEpubPath, convertedEpubSize, hasTranscript
         case isRead, rating, review
         case readingProgress, lastReadAt, lastPosition
+        case ccdStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -159,6 +172,7 @@ struct Book: Codable, Identifiable, Hashable {
         readingProgress = try container.decodeIfPresent(Double.self, forKey: .readingProgress)
         lastReadAt = try container.decodeIfPresent(String.self, forKey: .lastReadAt)
         lastPosition = try container.decodeIfPresent(String.self, forKey: .lastPosition)
+        ccdStatus = try container.decodeIfPresent(String.self, forKey: .ccdStatus)
     }
 
     init(

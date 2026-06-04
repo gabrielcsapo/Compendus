@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 enum DownloadFilter: String, CaseIterable {
     case all = "All"
@@ -162,15 +162,28 @@ struct DownloadsView: View {
         let localIds = Set(recentlyReadBooks.map(\.id))
         let progressIds = Set(syncService.remoteBooksWithProgress.map(\.id))
 
+        // All downloaded books for this profile, keyed by id. A book that has been
+        // downloaded (even if not yet read) must NOT show the remote "needs
+        // download" badge — surface it as a downloaded, tappable item instead.
+        let downloadedById = Dictionary(books.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
         let localItems = recentlyReadBooks.map { ContinueReadingItem.downloaded($0) }
+
+        // A remote book that's since been downloaded becomes a downloaded item.
+        func item(for book: Book) -> ContinueReadingItem {
+            if let downloaded = downloadedById[book.id] {
+                return .downloaded(downloaded)
+            }
+            return .remote(book)
+        }
 
         let progressRemoteItems = syncService.remoteBooksWithProgress
             .filter { !localIds.contains($0.id) }
-            .map { ContinueReadingItem.remote($0) }
+            .map(item(for:))
 
         let highlightOnlyRemoteItems = syncService.remoteBooksWithHighlights
             .filter { !localIds.contains($0.id) && !progressIds.contains($0.id) }
-            .map { ContinueReadingItem.remote($0) }
+            .map(item(for:))
 
         return (localItems + progressRemoteItems + highlightOnlyRemoteItems)
             .sorted { ($0.lastReadAt ?? .distantPast) > ($1.lastReadAt ?? .distantPast) }

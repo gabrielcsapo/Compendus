@@ -791,9 +791,12 @@ class EpubFileParser implements EpubParser {
       if (srcMatch) {
         const src = srcMatch[1];
         if (!src.startsWith("http") && !src.startsWith("data:")) {
-          const resolved = joinPosix(htmlDir, src).replace(/\//g, "_");
-          const newSrc = resolve(this.resourceSaveDir, resolved);
-          attrs = attrs.replace(srcMatch[0], `src="${newSrc}"`);
+          // Portable in-EPUB resource path (resolvable by getResource on web and by
+          // the iOS EPUBParser) — preserved alongside the rewritten temp-dir src so
+          // the CCD bundle stores a durable handle instead of a server temp path.
+          const inEpubHref = joinPosix(htmlDir, src);
+          const newSrc = resolve(this.resourceSaveDir, inEpubHref.replace(/\//g, "_"));
+          attrs = attrs.replace(srcMatch[0], `src="${newSrc}" data-ccd-src="${inEpubHref}"`);
         }
       }
       const posterMatch = attrs.match(/poster\s*=\s*["']([^"']+)["']/i);
@@ -814,9 +817,15 @@ class EpubFileParser implements EpubParser {
       if (hrefMatch) {
         const href = hrefMatch[1];
         if (!href.startsWith("http") && !href.startsWith("data:")) {
-          const resolved = joinPosix(htmlDir, href).replace(/\//g, "_");
-          const newHref = resolve(this.resourceSaveDir, resolved);
-          attrs = attrs.replace(hrefMatch[0], hrefMatch[0].replace(href, newHref));
+          // Portable in-EPUB resource path emitted as data-ccd-src so the CCD bundle
+          // keeps a durable handle (mirrors the <img> branch); the rewritten temp-dir
+          // href is preserved for other consumers.
+          const inEpubHref = joinPosix(htmlDir, href);
+          const newHref = resolve(this.resourceSaveDir, inEpubHref.replace(/\//g, "_"));
+          attrs = attrs.replace(
+            hrefMatch[0],
+            `${hrefMatch[0].replace(href, newHref)} data-ccd-src="${inEpubHref}"`,
+          );
         }
       }
       return `<image${attrs}>`;

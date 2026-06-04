@@ -7,26 +7,26 @@ const formatDetails = [
       {
         ext: "EPUB",
         description:
-          "Standard ebook format. Full reading support with native rendering, highlights, and bookmarks.",
-        conversion: "Target format for MOBI/AZW3/PDF conversion",
+          "Standard ebook format. Converted on the server to a Compendus Content Document (CCD) that both the web and iOS readers render natively, with highlights and bookmarks.",
+        conversion: "Converted to CCD on the server",
       },
       {
         ext: "PDF",
         description:
-          "Portable Document Format. Rendered as page images with zoom. Can be converted to EPUB.",
-        conversion: "Can convert to EPUB",
+          "Portable Document Format. Rendered natively (page images with zoom); also converted to CCD so it can be read reflowably.",
+        conversion: "Converted to CCD on the server",
       },
       {
         ext: "MOBI",
         description:
-          "Amazon Kindle format. Auto-converted to EPUB on first access for full reader support.",
-        conversion: "Auto-converts to EPUB",
+          "Amazon Kindle format. Converted to CCD on the server for native reading — no on-device EPUB conversion.",
+        conversion: "Converted to CCD on the server",
       },
       {
         ext: "AZW3",
         description:
-          "Amazon KF8 format. Auto-converted to EPUB on first access for full reader support.",
-        conversion: "Auto-converts to EPUB",
+          "Amazon KF8 format. Converted to CCD on the server for native reading — no on-device EPUB conversion.",
+        conversion: "Converted to CCD on the server",
       },
     ],
   },
@@ -146,6 +146,12 @@ export default function Formats() {
       {/* Conversion Matrix */}
       <section>
         <h2 className="text-xl font-semibold text-foreground mb-3">Conversion Support</h2>
+        <p className="text-sm text-foreground-muted mb-3">
+          Reflowable books are converted on the server to a Compendus Content Document (CCD) — a
+          canonical block/inline JSON document that the web and iOS readers render natively. The
+          clients no longer parse EPUB/MOBI on-device. Comics convert RAR archives to ZIP for
+          extraction.
+        </p>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -157,9 +163,10 @@ export default function Formats() {
             </thead>
             <tbody className="text-foreground">
               {[
-                ["PDF", "EPUB", "Background job via API (POST /api/books/:id/convert-to-epub)"],
-                ["MOBI", "EPUB", "Automatic on first access"],
-                ["AZW3", "EPUB", "Automatic on first access"],
+                ["EPUB", "CCD", "Server-side CCD generation (background job)"],
+                ["PDF", "CCD", "Server-side CCD generation (background job)"],
+                ["MOBI", "CCD", "Server-side CCD generation (background job)"],
+                ["AZW3", "CCD", "Server-side CCD generation (background job)"],
                 ["CBR", "CBZ", "Automatic on first access"],
               ].map(([source, target, method]) => (
                 <tr key={source} className="border-b border-border/50">

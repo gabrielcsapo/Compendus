@@ -9,7 +9,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct WanderView: View {
     @Environment(APIService.self) private var apiService

@@ -1,9 +1,18 @@
 import { Hono } from "hono";
 import { eq, and, sql, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { db, userBookState, highlights, bookmarks, readingSessions, books } from "../../app/lib/db";
+import {
+  db,
+  userBookState,
+  deviceBookProgress,
+  highlights,
+  bookmarks,
+  readingSessions,
+  books,
+} from "../../app/lib/db";
 import { requireProfile } from "../middleware/profile";
 import { toApiBook } from "../../app/lib/api/search";
+import { upsertDeviceReadingProgress } from "../../app/lib/reading-progress";
 
 const app = new Hono();
 
@@ -56,6 +65,27 @@ app.get("/api/sync/reading-progress", (c) => {
     .offset(offset)
     .all();
 
+  // Per-device positions for the books in this page, grouped by book.
+  const bookIds = results.map(({ state }) => state.bookId);
+  const deviceRows = bookIds.length
+    ? db
+        .select()
+        .from(deviceBookProgress)
+        .where(
+          and(
+            eq(deviceBookProgress.profileId, profileId),
+            inArray(deviceBookProgress.bookId, bookIds),
+          ),
+        )
+        .all()
+    : [];
+  const devicesByBook = new Map<string, typeof deviceRows>();
+  for (const d of deviceRows) {
+    const list = devicesByBook.get(d.bookId) ?? [];
+    list.push(d);
+    devicesByBook.set(d.bookId, list);
+  }
+
   return c.json({
     success: true,
     data: results.map(({ state: row, book }) => ({
@@ -67,6 +97,15 @@ app.get("/api/sync/reading-progress", (c) => {
       rating: row.rating,
       review: row.review,
       updatedAt: tsToISO(row.updatedAt),
+      devices: (devicesByBook.get(row.bookId) ?? []).map((d) => ({
+        deviceId: d.deviceId,
+        deviceName: d.deviceName,
+        deviceType: d.deviceType,
+        readingProgress: d.readingProgress,
+        lastPosition: d.lastPosition,
+        lastReadAt: tsToISOOrNull(d.lastReadAt),
+        updatedAt: tsToISO(d.updatedAt),
+      })),
       book: toApiBook(book, baseUrl, {
         isRead: row.isRead,
         rating: row.rating,
@@ -79,7 +118,11 @@ app.get("/api/sync/reading-progress", (c) => {
   });
 });
 
-// PUT /api/sync/reading-progress — Upsert reading progress for a book
+// PUT /api/sync/reading-progress — Upsert reading progress for a book.
+// When the client supplies a deviceId, the position is recorded in a per-device
+// row (each device owns its own position, never clobbering others) and rolled up
+// into userBookState. Book-level fields (isRead/rating/review) remain last-write-
+// wins. Clients without a deviceId fall back to the legacy whole-record path.
 app.put("/api/sync/reading-progress", async (c) => {
   const profileId = c.get("profileId");
   const body = await c.req.json<{
@@ -91,11 +134,17 @@ app.put("/api/sync/reading-progress", async (c) => {
     rating?: number | null;
     review?: string | null;
     updatedAt?: string;
+    deviceId?: string;
+    deviceName?: string;
+    deviceType?: string;
   }>();
 
   if (!body.bookId) {
     return c.json({ success: false, error: "bookId is required", code: "VALIDATION" }, 400);
   }
+
+  const now = new Date();
+  const clientTs = body.updatedAt ? Math.floor(new Date(body.updatedAt).getTime() / 1000) : null;
 
   const existing = db
     .select()
@@ -103,30 +152,64 @@ app.put("/api/sync/reading-progress", async (c) => {
     .where(and(eq(userBookState.profileId, profileId), eq(userBookState.bookId, body.bookId)))
     .get();
 
-  // Conflict resolution: if client sends updatedAt, check if server is newer
-  if (existing && body.updatedAt) {
-    const clientTs = Math.floor(new Date(body.updatedAt).getTime() / 1000);
-    const serverTs = tsToUnixSeconds(existing.updatedAt);
-    if (serverTs > clientTs) {
-      // Server is newer, return server state
-      return c.json({
-        success: true,
-        conflict: true,
-        data: {
-          bookId: existing.bookId,
-          readingProgress: existing.readingProgress,
-          lastPosition: existing.lastPosition,
-          isRead: existing.isRead ?? false,
-          rating: existing.rating,
-          review: existing.review,
-        },
-      });
-    }
-  }
-
-  const now = new Date();
-
   try {
+    if (body.deviceId) {
+      // --- Per-device path --- record this device's own position + roll up.
+      upsertDeviceReadingProgress({
+        profileId,
+        bookId: body.bookId,
+        deviceId: body.deviceId,
+        deviceName: body.deviceName,
+        deviceType: body.deviceType,
+        readingProgress: body.readingProgress,
+        lastPosition: body.lastPosition,
+        lastReadAt: body.lastReadAt ? new Date(body.lastReadAt) : undefined,
+        updatedAt: body.updatedAt ? new Date(body.updatedAt) : undefined,
+        now,
+      });
+
+      // Book-level fields (isRead/rating/review) remain last-write-wins against
+      // the userBookState updatedAt. The row now exists (created by the roll-up).
+      const refreshed = db
+        .select()
+        .from(userBookState)
+        .where(and(eq(userBookState.profileId, profileId), eq(userBookState.bookId, body.bookId)))
+        .get();
+      const bookLevelWins =
+        !existing || clientTs === null || clientTs >= tsToUnixSeconds(existing.updatedAt);
+      if (refreshed && bookLevelWins) {
+        const updates: Record<string, unknown> = {};
+        if (body.isRead !== undefined) updates.isRead = body.isRead;
+        if (body.rating !== undefined) updates.rating = body.rating;
+        if (body.review !== undefined) updates.review = body.review;
+        if (Object.keys(updates).length > 0) {
+          updates.updatedAt = now;
+          db.update(userBookState).set(updates).where(eq(userBookState.id, refreshed.id)).run();
+        }
+      }
+
+      return c.json({ success: true });
+    }
+
+    // --- Legacy whole-record path (no deviceId) ---
+    if (existing && clientTs !== null) {
+      const serverTs = tsToUnixSeconds(existing.updatedAt);
+      if (serverTs > clientTs) {
+        return c.json({
+          success: true,
+          conflict: true,
+          data: {
+            bookId: existing.bookId,
+            readingProgress: existing.readingProgress,
+            lastPosition: existing.lastPosition,
+            isRead: existing.isRead ?? false,
+            rating: existing.rating,
+            review: existing.review,
+          },
+        });
+      }
+    }
+
     if (existing) {
       const updates: Record<string, unknown> = { updatedAt: now };
       if (body.readingProgress !== undefined) updates.readingProgress = body.readingProgress;
@@ -191,10 +274,7 @@ app.get("/api/sync/highlighted-books", (c) => {
       .select()
       .from(userBookState)
       .where(
-        and(
-          eq(userBookState.profileId, profileId),
-          inArray(userBookState.bookId, distinctBookIds),
-        ),
+        and(eq(userBookState.profileId, profileId), inArray(userBookState.bookId, distinctBookIds)),
       )
       .all()
       .map((s) => [s.bookId, s]),

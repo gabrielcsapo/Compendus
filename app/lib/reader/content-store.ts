@@ -5,9 +5,10 @@ import { Worker } from "worker_threads";
 import { join } from "path";
 
 import { db, books } from "../db";
-import { resolveStoragePath } from "../storage";
-import { suppressConsole } from "../processing/utils";
+import { resolveStoragePath, readCcdBundle } from "../storage";
+import { bundleToTextContent } from "../content-ast/to-html";
 import type { NormalizedContent } from "./types";
+import type { ContentBundle } from "../content-ast/types";
 import type { BookFormat } from "../types";
 
 // In-memory cache for parsed content
@@ -86,8 +87,9 @@ async function parseInWorker(
 
 /**
  * Get normalized content for a book, parsing if not cached.
- * When formatOverride is "epub" and the book has a convertedEpubPath,
- * the converted EPUB is loaded instead of the original file.
+ * For reflowable formats (epub/mobi/azw3) and for PDF "read as text"
+ * (formatOverride === "epub"), content is rendered from the canonical CCD bundle.
+ * PDF without an override keeps its native pdf.js page rendering.
  */
 export async function getContent(
   bookId: string,
@@ -109,15 +111,49 @@ export async function getContent(
     return null;
   }
 
-  // Determine which file and format to use
-  let format = book.format as BookFormat;
-  let filePath = resolveStoragePath(book.filePath);
-
-  // If requesting EPUB format and book has a converted EPUB, use it
-  if (formatOverride === "epub" && book.convertedEpubPath) {
-    format = "epub";
-    filePath = resolveStoragePath(book.convertedEpubPath);
+  // Reflowable formats (incl. mobi/azw3, which get a CCD via convert→epub→CCD at
+  // ingest) render ONLY from the canonical CCD bundle — the single path. The old
+  // `?format=epub` override is ignored here: the CCD already IS the canonical
+  // content, so there is no separate "read as epub" parse. PDF keeps its native
+  // (pdf.js) page rendering; comics/audio keep theirs.
+  if (book.format === "epub" || book.format === "mobi" || book.format === "azw3") {
+    if (book.ccdPath) {
+      const bundle = readCcdBundle<ContentBundle>(book.ccdPath);
+      if (bundle) {
+        const content = bundleToTextContent(bundle, bookId);
+        cacheContent(cacheKey, content);
+        return content;
+      }
+      console.error(`[Content Store] CCD bundle missing on disk for ${bookId} (${book.ccdPath})`);
+      return null;
+    }
+    console.error(`[Content Store] No CCD bundle for ${bookId} (${book.format}); run CCD backfill`);
+    return null;
   }
+
+  // PDF reflow ("read as text"): render from the PDF's OWN canonical CCD bundle,
+  // which reflows the PDF correctly. No more "read PDF as EPUB" via the converted
+  // EPUB parser. PDF WITHOUT a format override keeps its native pdf.js page view.
+  if (book.format === "pdf" && formatOverride === "epub") {
+    if (book.ccdPath) {
+      const bundle = readCcdBundle<ContentBundle>(book.ccdPath);
+      if (bundle) {
+        const content = bundleToTextContent(bundle, bookId);
+        cacheContent(cacheKey, content);
+        return content;
+      }
+      console.error(
+        `[Content Store] CCD bundle missing on disk for PDF ${bookId} (${book.ccdPath})`,
+      );
+      return null;
+    }
+    console.error(`[Content Store] No CCD bundle for PDF ${bookId}; cannot reflow`);
+    return null;
+  }
+
+  // Determine which file and format to use
+  const format = book.format as BookFormat;
+  const filePath = resolveStoragePath(book.filePath);
 
   if (!existsSync(filePath)) {
     console.error(`[Content Store] Book file not found: ${filePath}`);
@@ -174,20 +210,9 @@ async function parseByFormat(
   let result: NormalizedContent;
 
   switch (format) {
-    case "epub": {
-      const { parseEpub } = await import("./parsers/epub");
-      result = await suppressConsole(() => parseEpub(buffer, bookId));
-      break;
-    }
     case "pdf": {
       const { parsePdf } = await import("./parsers/pdf");
       result = await parsePdf(buffer, bookId);
-      break;
-    }
-    case "mobi":
-    case "azw3": {
-      const { parseMobi } = await import("./parsers/mobi");
-      result = await parseMobi(buffer, bookId, format);
       break;
     }
     case "cbr":

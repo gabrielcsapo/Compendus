@@ -90,6 +90,7 @@ enum AppServices {
             PendingDownload.self,
             PendingBookEdit.self,
             ReadingSession.self,
+            DeviceReadingPosition.self,
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

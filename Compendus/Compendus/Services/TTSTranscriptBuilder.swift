@@ -8,7 +8,7 @@
 //
 
 import Foundation
-import EPUBReader
+import CCReader
 
 enum TTSTranscriptBuilder {
 

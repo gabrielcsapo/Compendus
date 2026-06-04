@@ -8,7 +8,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct HighlightsView: View {
     @Query(filter: #Predicate<ReadingMark> { $0.kindRaw == "highlight" },

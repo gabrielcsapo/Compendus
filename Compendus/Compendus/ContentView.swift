@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 // MARK: - Mac Catalyst Sidebar Navigation
 

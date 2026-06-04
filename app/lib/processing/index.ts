@@ -26,7 +26,8 @@ import {
 import { extractCover, processAndStoreCover } from "./cover";
 import { convertCbrToCbz } from "./comic";
 import { suppressConsole, yieldToEventLoop, scheduleBackground, runInWorker } from "./utils";
-import { createJob, updateJobProgress } from "../queue";
+import { bookSupportsCcd } from "./ccd";
+import { createJob, updateJobProgress, enqueueJob } from "../queue";
 import type {
   BookFormat,
   BookMetadata,
@@ -138,8 +139,15 @@ export async function processBook(
       throw error;
     }
 
-    // Queue heavy processing in background
+    // Queue heavy processing (metadata, cover) in the background.
     queueBackgroundProcessing(bookId, processedBuffer, format);
+
+    // CCD generation is a DURABLE queue job (not the fire-and-forget chain above):
+    // enqueued synchronously here so a restart mid-conversion resumes it and the
+    // book can't get stranded in "processing" with no CCD. Idempotent per book id.
+    if (bookSupportsCcd(format)) {
+      enqueueJob(`ccd-${bookId}`, "generate-ccd", { bookId });
+    }
 
     return {
       success: true,
@@ -396,6 +404,9 @@ function queueBackgroundProcessing(bookId: string, buffer: Buffer, format: BookF
     }
 
     await db.update(books).set(updateData).where(eq(books.id, bookId));
+
+    // CCD generation is handled by a durable `generate-ccd` queue job enqueued at
+    // upload (see processBook) — not here — so it survives restarts.
   });
 }
 

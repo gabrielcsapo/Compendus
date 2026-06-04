@@ -14,9 +14,12 @@
     "lint": "oxfmt --check && oxlint",
     "lint:fix": "oxfmt --write && oxlint",
     "make-admin": "tsx scripts/make-admin.ts",
+    "ccd:fixtures": "tsx scripts/ccd-fixtures.ts",
     "prepare": "husky",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -55,6 +58,7 @@
     "uuid": "^14.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.3.0",
     "@types/adm-zip": "^0.5.8",
@@ -89,6 +93,9 @@
     "*.{json,css,md}": [
       "oxfmt --write"
     ]
+  },
+  "engines": {
+    "node": ">=22 <23"
   },
   "packageManager": "pnpm@10.30.2",
   "pnpm": {

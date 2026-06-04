@@ -390,7 +390,7 @@ function ColumnPaginatedText({
     position: { x: number; y: number };
   } | null>(null);
   const [tapFeedback, setTapFeedback] = useState<"left" | "right" | null>(null);
-  const [epubCss, setEpubCss] = useState("");
+  const [contentCss, setContentCss] = useState("");
 
   // Column layout calculations
   const containerWidth = readingArea.width;
@@ -439,7 +439,7 @@ function ColumnPaginatedText({
     settings.textAlign,
     settings.maxWidth,
     settings.margins,
-    epubCss,
+    contentCss,
   ]);
 
   // Detect current chapter from page position
@@ -455,7 +455,7 @@ function ColumnPaginatedText({
   // Fetch and scope EPUB publisher CSS
   useEffect(() => {
     if (!settings.usePublisherStyles || !fullContent.cssUrls?.length) {
-      setEpubCss("");
+      setContentCss("");
       return;
     }
     let cancelled = false;
@@ -467,7 +467,7 @@ function ColumnPaginatedText({
       ),
     ).then((sheets) => {
       if (!cancelled) {
-        setEpubCss(sheets.map((css) => scopeEpubCss(css, ".epub-content")).join("\n"));
+        setContentCss(sheets.map((css) => scopeEpubCss(css, ".reader-content")).join("\n"));
       }
     });
     return () => {
@@ -724,7 +724,7 @@ function ColumnPaginatedText({
             >
               <div
                 ref={contentRef}
-                className="epub-content prose max-w-none"
+                className="reader-content prose max-w-none"
                 style={textStyles}
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
                 dangerouslySetInnerHTML={{ __html: fullContent.html }}
@@ -747,9 +747,9 @@ function ColumnPaginatedText({
 
       {/* Image constraint CSS for column pagination */}
       <style>{`
-        .epub-content img,
-        .epub-content svg,
-        .epub-content video {
+        .reader-content img,
+        .reader-content svg,
+        .reader-content video {
           max-width: 100%;
           max-height: ${readingArea.height}px;
           height: auto;
@@ -757,14 +757,14 @@ function ColumnPaginatedText({
           break-inside: avoid;
           box-sizing: border-box;
         }
-        .epub-content figure,
-        .epub-content .image-container,
-        .epub-content div:has(> img) {
+        .reader-content figure,
+        .reader-content .image-container,
+        .reader-content div:has(> img) {
           break-inside: avoid;
           max-width: 100%;
           overflow: hidden;
         }
-        .epub-content table {
+        .reader-content table {
           max-width: 100%;
           overflow-x: auto;
           display: block;
@@ -773,9 +773,9 @@ function ColumnPaginatedText({
       `}</style>
 
       {/* EPUB publisher CSS */}
-      {epubCss && (
+      {contentCss && (
         // biome-ignore lint/security/noDangerouslySetInnerHtml: CSS is scoped and sanitized
-        <style dangerouslySetInnerHTML={{ __html: epubCss }} />
+        <style dangerouslySetInnerHTML={{ __html: contentCss }} />
       )}
 
       {/* Tap feedback overlays */}
@@ -979,7 +979,7 @@ function TextContent({
   const [tapFeedback, setTapFeedback] = useState<"left" | "right" | null>(null);
 
   // EPUB publisher CSS injection
-  const [epubCss, setEpubCss] = useState<string>("");
+  const [contentCss, setContentCss] = useState<string>("");
 
   // Page transition state
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -991,7 +991,7 @@ function TextContent({
   // Fetch and scope EPUB publisher CSS when cssUrls change
   useEffect(() => {
     if (!settings.usePublisherStyles || !displayContent.cssUrls?.length) {
-      setEpubCss("");
+      setContentCss("");
       return;
     }
 
@@ -1004,8 +1004,8 @@ function TextContent({
       ),
     ).then((sheets) => {
       if (!cancelled) {
-        const scoped = sheets.map((css) => scopeEpubCss(css, ".epub-content")).join("\n");
-        setEpubCss(scoped);
+        const scoped = sheets.map((css) => scopeEpubCss(css, ".reader-content")).join("\n");
+        setContentCss(scoped);
       }
     });
 
@@ -1359,7 +1359,7 @@ function TextContent({
           <div className="h-full flex items-center justify-center">
             <div
               ref={contentRef}
-              className="epub-content fxl-page"
+              className="reader-content fxl-page"
               style={{
                 width: "100%",
                 height: "100%",
@@ -1380,7 +1380,7 @@ function TextContent({
           >
             <div
               ref={contentRef}
-              className="flex-1 prose max-w-none epub-content"
+              className="flex-1 prose max-w-none reader-content"
               style={textStyles}
               // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
               dangerouslySetInnerHTML={{ __html: displayContent.html || "" }}
@@ -1391,7 +1391,7 @@ function TextContent({
             />
             <div
               ref={rightContentRef}
-              className="flex-1 prose max-w-none epub-content"
+              className="flex-1 prose max-w-none reader-content"
               style={textStyles}
               // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
               dangerouslySetInnerHTML={{ __html: displayRightContent?.html || "" }}
@@ -1401,16 +1401,16 @@ function TextContent({
           // Single column layout
           <div
             ref={contentRef}
-            className="mx-auto prose max-w-none epub-content"
+            className="mx-auto prose max-w-none reader-content"
             style={textStyles}
             // biome-ignore lint/security/noDangerouslySetInnerHtml: Content is sanitized server-side
             dangerouslySetInnerHTML={{ __html: displayContent.html || "" }}
           />
         )}
-        {/* Injected EPUB publisher CSS (scoped under .epub-content) */}
-        {epubCss && (
+        {/* Injected EPUB publisher CSS (scoped under .reader-content) */}
+        {contentCss && (
           // biome-ignore lint/security/noDangerouslySetInnerHtml: CSS is scoped and sanitized
-          <style dangerouslySetInnerHTML={{ __html: epubCss }} />
+          <style dangerouslySetInnerHTML={{ __html: contentCss }} />
         )}
         {/* FXL page scaling */}
         {isFxl && (

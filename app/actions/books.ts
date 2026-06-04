@@ -1,10 +1,21 @@
 "use server";
 
-import { db, books, booksTags, booksCollections, tags, bookEdits, userBookState } from "../lib/db";
+import {
+  db,
+  books,
+  booksTags,
+  booksCollections,
+  tags,
+  bookEdits,
+  userBookState,
+  backgroundJobs,
+} from "../lib/db";
 import { eq, desc, asc, like, inArray, sql, and, or } from "drizzle-orm";
 import {
   deleteBookFile,
   deleteCoverImage,
+  deleteCcdBundle,
+  deleteResourceCache,
   getBookFilePath,
   resolveStoragePath,
 } from "../lib/storage";
@@ -57,6 +68,8 @@ interface GetBooksOptions {
   tagId?: string;
   search?: string;
   series?: string;
+  /** Restrict to a specific set of book ids (ignored when empty). */
+  ids?: string[];
   profileId?: string;
 }
 
@@ -72,6 +85,7 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
     tagId,
     search,
     series,
+    ids,
     profileId: explicitProfileId,
   } = options;
   const profileId = explicitProfileId ?? resolveProfileId();
@@ -122,6 +136,10 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
 
     if (series) {
       conditions.push(eq(books.series, series));
+    }
+
+    if (ids && ids.length > 0) {
+      conditions.push(inArray(books.id, ids));
     }
 
     if (collectionId) {
@@ -212,6 +230,10 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
 
   if (series) {
     conditions.push(eq(books.series, series));
+  }
+
+  if (ids && ids.length > 0) {
+    conditions.push(inArray(books.id, ids));
   }
 
   if (collectionId) {
@@ -507,11 +529,14 @@ export async function deleteBook(id: string): Promise<boolean> {
   const book = await getBook(id);
   if (!book) return false;
 
-  // Delete files
+  // Delete the source file + cover AND every derived artifact, so nothing is left
+  // orphaned on disk: the converted EPUB (mobi/azw3), the CCD bundle, and the
+  // cached resources / CCD pack.
   deleteBookFile(book.filePath);
-  if (book.coverPath) {
-    deleteCoverImage(book.coverPath);
-  }
+  if (book.coverPath) deleteCoverImage(book.coverPath);
+  if (book.convertedEpubPath) deleteBookFile(book.convertedEpubPath);
+  if (book.ccdPath) deleteCcdBundle(book.ccdPath);
+  deleteResourceCache(id);
 
   // Delete from database (cascades to junctions)
   await db.delete(books).where(eq(books.id, id));
@@ -587,6 +612,295 @@ export async function cancelAllBackgroundJobs(): Promise<{
 }> {
   const { cancelAllJobs } = await import("../lib/queue");
   return cancelAllJobs();
+}
+
+// ---------------------------------------------------------------------------
+// Admin Data tab: server-side paginated/searchable file & job listings
+// ---------------------------------------------------------------------------
+
+/** A file found on disk in the books directory. */
+export interface AdminFileInfo {
+  name: string;
+  size: number;
+  path: string;
+  bookId: string | null;
+}
+
+/** A minimal book record as shown on the admin data page. */
+export interface AdminBookRecord {
+  id: string;
+  title: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  format: string;
+}
+
+/** A background job record as shown on the admin data page. */
+export interface AdminJobRecord {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  message: string;
+  logs: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+type AdminMatchedFile = AdminFileInfo & { book: AdminBookRecord };
+
+interface AdminCategorized {
+  files: AdminFileInfo[];
+  totalBooks: number;
+  orphaned: AdminFileInfo[];
+  matched: AdminMatchedFile[];
+  missing: AdminBookRecord[];
+}
+
+/**
+ * Scan the books directory and the books table, then categorize every file
+ * into matched / orphaned (file w/o DB row) / missing (DB row w/o file).
+ * Returns the FULL categorized sets, sorted. Callers slice the page they need.
+ *
+ * Cost (disk scan + full DB load) is acceptable here: the admin data tab is
+ * low-traffic and correctness over the full set matters for accurate totals.
+ */
+async function categorizeAdminData(): Promise<AdminCategorized> {
+  const { BOOKS_DIR, resolveStoragePath } = await import("../lib/storage");
+  const { readdirSync, statSync, existsSync } = await import("fs");
+  const { resolve } = await import("path");
+
+  // Scan every file in BOOKS_DIR — no filename parsing, no per-extension cases.
+  const files: AdminFileInfo[] = [];
+  try {
+    for (const name of readdirSync(BOOKS_DIR)) {
+      const filePath = resolve(BOOKS_DIR, name);
+      try {
+        const stat = statSync(filePath);
+        if (stat.isFile()) files.push({ name, size: stat.size, path: filePath, bookId: null });
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+  } catch {
+    // Directory might not exist
+  }
+
+  const allBooks = (await db
+    .select({
+      id: books.id,
+      title: books.title,
+      fileName: books.fileName,
+      filePath: books.filePath,
+      fileSize: books.fileSize,
+      format: books.format,
+      convertedEpubPath: books.convertedEpubPath,
+      ccdPath: books.ccdPath,
+    })
+    .from(books)) as (AdminBookRecord & {
+    convertedEpubPath: string | null;
+    ccdPath: string | null;
+  })[];
+
+  // Categorize by REFERENCE, not by guessing a bookId from the filename:
+  //  - `sourceByPath`: a book's SOURCE file → the book (what counts as a matched book file)
+  //  - `referenced`: every path the DB owns (source + converted EPUB + CCD bundle),
+  //    so derived artifacts of a LIVE book are never mistaken for orphans.
+  const referenced = new Set<string>();
+  const sourceByPath = new Map<string, AdminBookRecord>();
+  for (const b of allBooks) {
+    const record: AdminBookRecord = {
+      id: b.id,
+      title: b.title,
+      fileName: b.fileName,
+      filePath: b.filePath,
+      fileSize: b.fileSize,
+      format: b.format,
+    };
+    const src = resolveStoragePath(b.filePath);
+    referenced.add(src);
+    sourceByPath.set(src, record);
+    if (b.convertedEpubPath) referenced.add(resolveStoragePath(b.convertedEpubPath));
+    if (b.ccdPath) referenced.add(resolveStoragePath(b.ccdPath));
+  }
+
+  const orphaned: AdminFileInfo[] = [];
+  const matched: AdminMatchedFile[] = [];
+  for (const file of files) {
+    const book = sourceByPath.get(file.path);
+    if (book) {
+      matched.push({ ...file, bookId: book.id, book });
+    } else if (referenced.has(file.path)) {
+      // Derived artifact (CCD bundle / converted EPUB) of a live book — accounted
+      // for, so it's neither orphaned nor listed as a book file.
+    } else {
+      // Referenced by NO book → genuine junk (incl. CCD bundles / converted EPUBs
+      // leaked by a deleted book). Safe to delete from the admin orphaned list.
+      orphaned.push(file);
+    }
+  }
+
+  // Missing = a book whose source file no longer exists on disk.
+  const missing: AdminBookRecord[] = [];
+  for (const b of allBooks) {
+    if (!existsSync(resolveStoragePath(b.filePath))) {
+      missing.push({
+        id: b.id,
+        title: b.title,
+        fileName: b.fileName,
+        filePath: b.filePath,
+        fileSize: b.fileSize,
+        format: b.format,
+      });
+    }
+  }
+
+  orphaned.sort((a, b) => a.name.localeCompare(b.name));
+  matched.sort((a, b) => a.name.localeCompare(b.name));
+  missing.sort((a, b) => a.title.localeCompare(b.title));
+
+  return { files, totalBooks: allBooks.length, orphaned, matched, missing };
+}
+
+/** Mirror of the previous client-side search normalization for matched files. */
+function adminMatchesQuery(
+  q: string,
+  fields: { title?: string; name?: string; format?: string },
+): boolean {
+  const search = q.toLowerCase().replace(/[^\w\s]/g, "");
+  if (!search) return true;
+  const norm = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, "");
+  return (
+    (fields.title != null && norm(fields.title).includes(search)) ||
+    (fields.name != null && norm(fields.name).includes(search)) ||
+    (fields.format != null && fields.format.toLowerCase().includes(search))
+  );
+}
+
+/**
+ * Summary cards + format-filter options for the admin data tab.
+ * Re-scans + categorizes the full set (acceptable for this low-traffic page).
+ */
+export async function adminDataStats(): Promise<{
+  totalFiles: number;
+  totalBooks: number;
+  orphanedCount: number;
+  orphanedSize: number;
+  matchedCount: number;
+  matchedSize: number;
+  missingCount: number;
+  jobCount: number;
+  booksDir: string;
+  matchedFormats: string[];
+}> {
+  const { BOOKS_DIR } = await import("../lib/storage");
+  const { files, totalBooks, orphaned, matched, missing } = await categorizeAdminData();
+
+  const jobCountRow = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(backgroundJobs)
+    .get();
+
+  const matchedFormats = Array.from(
+    new Set(matched.map((f) => f.book.format.toLowerCase())),
+  ).sort();
+
+  return {
+    totalFiles: files.length,
+    totalBooks,
+    orphanedCount: orphaned.length,
+    orphanedSize: orphaned.reduce((sum, f) => sum + f.size, 0),
+    matchedCount: matched.length,
+    matchedSize: matched.reduce((sum, f) => sum + f.size, 0),
+    missingCount: missing.length,
+    jobCount: jobCountRow?.count ?? 0,
+    booksDir: BOOKS_DIR,
+    matchedFormats,
+  };
+}
+
+/**
+ * List one page of files in a given category, with optional search (q) and
+ * format filter (matched only). Returns the page, the filtered total (for
+ * pagination), and the total size summed over the FILTERED set.
+ */
+export async function adminListFiles(opts: {
+  category: "matched" | "orphaned" | "missing";
+  page: number;
+  pageSize: number;
+  q?: string;
+  format?: string;
+}): Promise<{ items: unknown[]; total: number; totalSize: number }> {
+  const { category, page, pageSize, q = "", format } = opts;
+  const { matched, orphaned, missing } = await categorizeAdminData();
+
+  let filtered: (AdminMatchedFile | AdminFileInfo | AdminBookRecord)[];
+  let sizeOf: (item: AdminMatchedFile | AdminFileInfo | AdminBookRecord) => number;
+
+  if (category === "matched") {
+    const fmt = format && format !== "all" ? format.toLowerCase() : null;
+    filtered = matched.filter(
+      (f) =>
+        adminMatchesQuery(q, { title: f.book.title, name: f.name, format: f.book.format }) &&
+        (!fmt || f.book.format.toLowerCase() === fmt),
+    );
+    sizeOf = (item) => (item as AdminMatchedFile).size;
+  } else if (category === "orphaned") {
+    filtered = orphaned.filter((f) => adminMatchesQuery(q, { name: f.name }));
+    sizeOf = (item) => (item as AdminFileInfo).size;
+  } else {
+    filtered = missing.filter((b) =>
+      adminMatchesQuery(q, { title: b.title, name: b.fileName, format: b.format }),
+    );
+    sizeOf = (item) => (item as AdminBookRecord).fileSize;
+  }
+
+  const total = filtered.length;
+  const totalSize = filtered.reduce((sum, item) => sum + sizeOf(item), 0);
+  const start = Math.max(0, (page - 1) * pageSize);
+  const items = filtered.slice(start, start + pageSize);
+
+  return { items, total, totalSize };
+}
+
+/**
+ * List one page of background jobs ordered by updatedAt desc, with optional
+ * search (q) over id + type + status + message.
+ */
+export async function adminListJobs(opts: {
+  page: number;
+  pageSize: number;
+  q?: string;
+}): Promise<{ items: AdminJobRecord[]; total: number }> {
+  const { page, pageSize, q = "" } = opts;
+
+  const all = db
+    .select()
+    .from(backgroundJobs)
+    .orderBy(desc(backgroundJobs.updatedAt))
+    .all()
+    .map((job) => ({
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      progress: job.progress ?? 0,
+      message: job.message ?? "",
+      logs: job.logs ?? "",
+      createdAt: job.createdAt ? job.createdAt.getTime() : 0,
+      updatedAt: job.updatedAt ? job.updatedAt.getTime() : 0,
+    }));
+
+  const search = q.trim().toLowerCase();
+  const filtered = search
+    ? all.filter((j) => `${j.id} ${j.type} ${j.status} ${j.message}`.toLowerCase().includes(search))
+    : all;
+
+  const total = filtered.length;
+  const start = Math.max(0, (page - 1) * pageSize);
+  const items = filtered.slice(start, start + pageSize);
+
+  return { items, total };
 }
 
 export async function getRecentBooks(

@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import { getRequest } from "react-flight-router/server";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
-import { getExploreData } from "../actions/explore";
+import { ExploreSections } from "../components/ExploreSections";
+import { EmptyLibrary } from "../components/EmptyLibrary";
 import { getCoverUrl } from "../lib/cover";
 import type { BookType } from "../lib/book-types";
 import type { SortOption } from "../components/SortDropdown";
@@ -53,25 +54,33 @@ async function LibraryData() {
   const { orderBy, order } = getSortParams(sort);
   const typeFilter = type !== "all" ? type : undefined;
 
-  // Default view (no view param and no series filter) → curated explore view
+  // Default view (no view param and no series filter) → curated explore view.
+  // Only the two cheap counts are awaited here so the header paints immediately;
+  // each curated section streams in via its own Suspense boundary in the slot.
   if (!view && !seriesFilter) {
-    const exploreData = await getExploreData();
+    const [totalCount, unmatchedCount] = await Promise.all([
+      getBooksCount(typeFilter),
+      getUnmatchedBooksCount(),
+    ]);
     return (
       <LibraryClient
         initialData={{
           view: "explore",
-          exploreData,
+          exploreData: undefined,
           seriesList: [],
           seriesFilter: null,
           books: [],
-          totalCount: exploreData.totalCount,
-          unmatchedCount: exploreData.unmatchedCount,
+          totalCount,
+          unmatchedCount,
           currentSort: sort,
           currentType: type,
           currentFormats: format ?? [],
           formatCounts: [],
           otherFormatBooks: [],
         }}
+        exploreSlot={
+          totalCount === 0 ? <EmptyLibrary /> : <ExploreSections typeFilter={typeFilter} />
+        }
         initialSearchParamsKey={searchParams.toString()}
       />
     );

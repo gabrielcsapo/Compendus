@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-flight-router/client";
 import { getCoverUrl } from "../lib/cover";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
@@ -56,9 +56,12 @@ type LibraryData = {
 export default function LibraryPage({
   initialData,
   initialSearchParamsKey,
+  exploreSlot,
 }: {
   initialData?: LibraryData;
   initialSearchParamsKey?: string;
+  /** Server-streamed explore sections, used on initial load before any client-side refetch. */
+  exploreSlot?: ReactNode;
 }) {
   const [searchParams] = useSearchParams();
   const [data, setData] = useState<LibraryData | null>(initialData ?? null);
@@ -386,10 +389,10 @@ export default function LibraryPage({
         )}
       </div>
 
-      {/* Explore view */}
-      {currentView === "explore" && data.exploreData && (
-        <LibraryExploreView data={data.exploreData} />
-      )}
+      {/* Explore view — initial load streams server sections (exploreSlot);
+          a client-side filter refetch populates data.exploreData and renders inline. */}
+      {currentView === "explore" &&
+        (data.exploreData ? <LibraryExploreView data={data.exploreData} /> : exploreSlot)}
 
       {/* Series / Browse grid views */}
       {currentView !== "explore" &&

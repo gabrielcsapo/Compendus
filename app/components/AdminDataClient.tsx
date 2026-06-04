@@ -9,6 +9,9 @@ import {
   deleteBook,
   cancelBackgroundJob,
   cancelAllBackgroundJobs,
+  adminDataStats,
+  adminListFiles,
+  adminListJobs,
 } from "../actions/books";
 
 interface FileInfo {
@@ -27,6 +30,8 @@ interface BookRecord {
   format: string;
 }
 
+type MatchedFile = FileInfo & { book: BookRecord };
+
 interface JobRecord {
   id: string;
   type: string;
@@ -38,16 +43,38 @@ interface JobRecord {
   updatedAt: number;
 }
 
-interface AdminDataClientProps {
-  orphanedFiles: FileInfo[];
-  matchedFiles: (FileInfo & { book: BookRecord })[];
-  missingFiles: BookRecord[];
+interface AdminStats {
   totalFiles: number;
   totalBooks: number;
+  orphanedCount: number;
   orphanedSize: number;
+  matchedCount: number;
   matchedSize: number;
+  missingCount: number;
+  jobCount: number;
   booksDir: string;
-  jobs: JobRecord[];
+  matchedFormats: string[];
+}
+
+interface InitialFilePage {
+  items: unknown[];
+  total: number;
+  totalSize: number;
+  pageSize: number;
+}
+
+interface InitialJobPage {
+  items: JobRecord[];
+  total: number;
+  pageSize: number;
+}
+
+interface AdminDataClientProps {
+  stats: AdminStats;
+  initialMatched: InitialFilePage;
+  initialOrphaned: InitialFilePage;
+  initialMissing: InitialFilePage;
+  initialJobs: InitialJobPage;
 }
 
 function formatBytes(bytes: number): string {
@@ -61,6 +88,8 @@ function formatBytes(bytes: number): string {
 function getFileExtension(name: string): string {
   return (name.split(".").pop() || "").toLowerCase();
 }
+
+const JOBS_REFRESH_INTERVAL = 5000;
 
 function OrphanedFilePreview({ file }: { file: FileInfo }) {
   const ext = getFileExtension(file.name);
@@ -305,82 +334,370 @@ function LivingLibrarySection() {
   );
 }
 
+/** Page numbers with ellipsis around the current page. */
+function buildPageList(totalPages: number, current: number): (number | "ellipsis")[] {
+  return Array.from({ length: totalPages }, (_, i) => i + 1)
+    .filter((p) => p === 1 || p === totalPages || Math.abs(p - current) <= 2)
+    .reduce<(number | "ellipsis")[]>((acc, p, i, arr) => {
+      if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("ellipsis");
+      acc.push(p);
+      return acc;
+    }, []);
+}
+
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => onChange(1)}
+        disabled={page <= 1}
+        className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        First
+      </button>
+      <button
+        onClick={() => onChange(page - 1)}
+        disabled={page <= 1}
+        className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Prev
+      </button>
+      {buildPageList(totalPages, page).map((p, i) =>
+        p === "ellipsis" ? (
+          <span key={`ellipsis-${i}`} className="px-1 text-xs text-foreground-muted">
+            ...
+          </span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onChange(p)}
+            className={`px-2 py-1 text-xs rounded border ${
+              p === page
+                ? "bg-primary text-white border-primary"
+                : "bg-surface-elevated border-border text-foreground hover:bg-surface"
+            }`}
+          >
+            {p}
+          </button>
+        ),
+      )}
+      <button
+        onClick={() => onChange(page + 1)}
+        disabled={page >= totalPages}
+        className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Next
+      </button>
+      <button
+        onClick={() => onChange(totalPages)}
+        disabled={page >= totalPages}
+        className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        Last
+      </button>
+    </div>
+  );
+}
+
+interface FileSectionState<T> {
+  items: T[];
+  total: number;
+  totalSize: number;
+  page: number;
+  q: string;
+  format: string;
+  pageSize: number;
+  loading: boolean;
+}
+
 export function AdminDataClient({
-  orphanedFiles: initialOrphanedFiles,
-  matchedFiles: initialMatchedFiles,
-  missingFiles: initialMissingFiles,
-  totalFiles,
-  totalBooks,
-  orphanedSize: initialOrphanedSize,
-  matchedSize,
-  booksDir,
-  jobs: initialJobs,
+  stats: initialStats,
+  initialMatched,
+  initialOrphaned,
+  initialMissing,
+  initialJobs,
 }: AdminDataClientProps) {
   const { showToast } = useToast();
-  const [orphanedFiles, setOrphanedFiles] = useState(initialOrphanedFiles);
-  const [matchedFiles, setMatchedFiles] = useState(initialMatchedFiles);
-  const [missingFiles, setMissingFiles] = useState(initialMissingFiles);
-  const [orphanedSize, setOrphanedSize] = useState(initialOrphanedSize);
-  const [jobs, setJobs] = useState(initialJobs);
+
+  const [stats, setStats] = useState<AdminStats>(initialStats);
+
+  // --- Per-section state, seeded from the server-rendered first page ---
+  const [matched, setMatched] = useState<FileSectionState<MatchedFile>>({
+    items: initialMatched.items as MatchedFile[],
+    total: initialMatched.total,
+    totalSize: initialMatched.totalSize,
+    page: 1,
+    q: "",
+    format: "all",
+    pageSize: initialMatched.pageSize,
+    loading: false,
+  });
+  const [orphaned, setOrphaned] = useState<FileSectionState<FileInfo>>({
+    items: initialOrphaned.items as FileInfo[],
+    total: initialOrphaned.total,
+    totalSize: initialOrphaned.totalSize,
+    page: 1,
+    q: "",
+    format: "all",
+    pageSize: initialOrphaned.pageSize,
+    loading: false,
+  });
+  const [missing, setMissing] = useState<FileSectionState<BookRecord>>({
+    items: initialMissing.items as BookRecord[],
+    total: initialMissing.total,
+    totalSize: initialMissing.totalSize,
+    page: 1,
+    q: "",
+    format: "all",
+    pageSize: initialMissing.pageSize,
+    loading: false,
+  });
+  const [jobs, setJobs] = useState({
+    items: initialJobs.items,
+    total: initialJobs.total,
+    page: 1,
+    q: "",
+    pageSize: initialJobs.pageSize,
+    loading: false,
+  });
+
+  // Out-of-order response guards: only apply the latest request per section.
+  const matchedReq = useRef(0);
+  const orphanedReq = useRef(0);
+  const missingReq = useRef(0);
+  const jobsReq = useRef(0);
+
   const [deleting, setDeleting] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [cancellingAll, setCancellingAll] = useState(false);
-  const [jobsPage, setJobsPage] = useState(1);
-  const [jobsPageSize, setJobsPageSize] = useState(25);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadBookIdRef = useRef<string | null>(null);
 
-  const jobsTotalPages = Math.max(1, Math.ceil(jobs.length / jobsPageSize));
-  const jobsClampedPage = Math.min(jobsPage, jobsTotalPages);
-  const paginatedJobs = jobs.slice(
-    (jobsClampedPage - 1) * jobsPageSize,
-    jobsClampedPage * jobsPageSize,
+  // --- Fetchers ----------------------------------------------------------
+  const fetchFiles = useCallback(
+    async (
+      category: "matched" | "orphaned" | "missing",
+      reqRef: React.MutableRefObject<number>,
+      setState: React.Dispatch<React.SetStateAction<FileSectionState<never>>>,
+      args: { page: number; q: string; format: string; pageSize: number },
+    ) => {
+      const reqId = ++reqRef.current;
+      setState((s) => ({ ...s, loading: true }));
+      try {
+        const res = await adminListFiles({
+          category,
+          page: args.page,
+          pageSize: args.pageSize,
+          q: args.q,
+          format: args.format,
+        });
+        if (reqId !== reqRef.current) return; // stale response
+        setState((s) => ({
+          ...s,
+          items: res.items as never[],
+          total: res.total,
+          totalSize: res.totalSize,
+          loading: false,
+        }));
+      } catch {
+        if (reqId !== reqRef.current) return;
+        setState((s) => ({ ...s, loading: false }));
+        showToast("Failed to load data", "error");
+      }
+    },
+    [showToast],
   );
-  const activeJobCount = jobs.filter(
+
+  const fetchJobs = useCallback(
+    async (args: { page: number; q: string; pageSize: number }, silent = false) => {
+      const reqId = ++jobsReq.current;
+      if (!silent) setJobs((s) => ({ ...s, loading: true }));
+      try {
+        const res = await adminListJobs({
+          page: args.page,
+          pageSize: args.pageSize,
+          q: args.q,
+        });
+        if (reqId !== jobsReq.current) return;
+        setJobs((s) => ({ ...s, items: res.items, total: res.total, loading: false }));
+      } catch {
+        if (reqId !== jobsReq.current) return;
+        setJobs((s) => ({ ...s, loading: false }));
+      }
+    },
+    [],
+  );
+
+  const refreshStats = useCallback(async () => {
+    try {
+      setStats(await adminDataStats());
+    } catch {
+      // keep prior stats on failure
+    }
+  }, []);
+
+  // --- Debounced search per section -------------------------------------
+  const useDebouncedSearch = (q: string, deps: unknown[], run: () => void, skipFirst: boolean) => {
+    const first = useRef(skipFirst);
+    useEffect(() => {
+      if (first.current) {
+        first.current = false;
+        return;
+      }
+      const t = setTimeout(run, 300);
+      return () => clearTimeout(t);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, deps);
+  };
+
+  // Matched: refetch on search/format change (debounced, resets to page 1).
+  useDebouncedSearch(
+    matched.q,
+    [matched.q, matched.format, matched.pageSize],
+    () => {
+      setMatched((s) => ({ ...s, page: 1 }));
+      fetchFiles("matched", matchedReq, setMatched as never, {
+        page: 1,
+        q: matched.q,
+        format: matched.format,
+        pageSize: matched.pageSize,
+      });
+    },
+    true,
+  );
+  useDebouncedSearch(
+    orphaned.q,
+    [orphaned.q, orphaned.pageSize],
+    () => {
+      setOrphaned((s) => ({ ...s, page: 1 }));
+      fetchFiles("orphaned", orphanedReq, setOrphaned as never, {
+        page: 1,
+        q: orphaned.q,
+        format: "all",
+        pageSize: orphaned.pageSize,
+      });
+    },
+    true,
+  );
+  useDebouncedSearch(
+    missing.q,
+    [missing.q, missing.pageSize],
+    () => {
+      setMissing((s) => ({ ...s, page: 1 }));
+      fetchFiles("missing", missingReq, setMissing as never, {
+        page: 1,
+        q: missing.q,
+        format: "all",
+        pageSize: missing.pageSize,
+      });
+    },
+    true,
+  );
+  useDebouncedSearch(
+    jobs.q,
+    [jobs.q, jobs.pageSize],
+    () => {
+      setJobs((s) => ({ ...s, page: 1 }));
+      fetchJobs({ page: 1, q: jobs.q, pageSize: jobs.pageSize });
+    },
+    true,
+  );
+
+  // --- Page-change handlers ---------------------------------------------
+  const goMatchedPage = (page: number) => {
+    setMatched((s) => ({ ...s, page }));
+    fetchFiles("matched", matchedReq, setMatched as never, {
+      page,
+      q: matched.q,
+      format: matched.format,
+      pageSize: matched.pageSize,
+    });
+  };
+  const goOrphanedPage = (page: number) => {
+    setOrphaned((s) => ({ ...s, page }));
+    fetchFiles("orphaned", orphanedReq, setOrphaned as never, {
+      page,
+      q: orphaned.q,
+      format: "all",
+      pageSize: orphaned.pageSize,
+    });
+  };
+  const goMissingPage = (page: number) => {
+    setMissing((s) => ({ ...s, page }));
+    fetchFiles("missing", missingReq, setMissing as never, {
+      page,
+      q: missing.q,
+      format: "all",
+      pageSize: missing.pageSize,
+    });
+  };
+  const goJobsPage = (page: number) => {
+    setJobs((s) => ({ ...s, page }));
+    fetchJobs({ page, q: jobs.q, pageSize: jobs.pageSize });
+  };
+
+  // Re-fetch the current page of a section (used after mutations).
+  const reloadMatched = useCallback(() => {
+    fetchFiles("matched", matchedReq, setMatched as never, {
+      page: matched.page,
+      q: matched.q,
+      format: matched.format,
+      pageSize: matched.pageSize,
+    });
+  }, [fetchFiles, matched.page, matched.q, matched.format, matched.pageSize]);
+  const reloadOrphaned = useCallback(() => {
+    fetchFiles("orphaned", orphanedReq, setOrphaned as never, {
+      page: orphaned.page,
+      q: orphaned.q,
+      format: "all",
+      pageSize: orphaned.pageSize,
+    });
+  }, [fetchFiles, orphaned.page, orphaned.q, orphaned.pageSize]);
+  const reloadMissing = useCallback(() => {
+    fetchFiles("missing", missingReq, setMissing as never, {
+      page: missing.page,
+      q: missing.q,
+      format: "all",
+      pageSize: missing.pageSize,
+    });
+  }, [fetchFiles, missing.page, missing.q, missing.pageSize]);
+  const reloadJobs = useCallback(
+    (silent = false) => {
+      fetchJobs({ page: jobs.page, q: jobs.q, pageSize: jobs.pageSize }, silent);
+    },
+    [fetchJobs, jobs.page, jobs.q, jobs.pageSize],
+  );
+
+  // --- Jobs auto-refresh: silently re-poll the current page on an interval.
+  useEffect(() => {
+    const id = setInterval(() => reloadJobs(true), JOBS_REFRESH_INTERVAL);
+    return () => clearInterval(id);
+  }, [reloadJobs]);
+
+  const matchedTotalPages = Math.max(1, Math.ceil(matched.total / matched.pageSize));
+  const orphanedTotalPages = Math.max(1, Math.ceil(orphaned.total / orphaned.pageSize));
+  const missingTotalPages = Math.max(1, Math.ceil(missing.total / missing.pageSize));
+  const jobsTotalPages = Math.max(1, Math.ceil(jobs.total / jobs.pageSize));
+  const activeJobCount = jobs.items.filter(
     (j) => j.status === "pending" || j.status === "running",
   ).length;
 
-  // Matched files: search, filter, pagination
-  const [matchedSearch, setMatchedSearch] = useState("");
-  const [matchedFormatFilter, setMatchedFormatFilter] = useState<string>("all");
-  const [matchedPage, setMatchedPage] = useState(1);
-  const [matchedPageSize, setMatchedPageSize] = useState(50);
-
-  const matchedFormats = Array.from(
-    new Set(matchedFiles.map((f) => f.book.format.toLowerCase())),
-  ).sort();
-
-  const filteredMatchedFiles = matchedFiles.filter((file) => {
-    const search = matchedSearch.toLowerCase().replace(/[^\w\s]/g, "");
-    const matchesSearch =
-      !search ||
-      file.book.title
-        .toLowerCase()
-        .replace(/[^\w\s]/g, "")
-        .includes(search) ||
-      file.name
-        .toLowerCase()
-        .replace(/[^\w\s]/g, "")
-        .includes(search) ||
-      file.book.format.toLowerCase().includes(search);
-    const matchesFormat =
-      matchedFormatFilter === "all" || file.book.format.toLowerCase() === matchedFormatFilter;
-    return matchesSearch && matchesFormat;
-  });
-
-  const matchedTotalPages = Math.max(1, Math.ceil(filteredMatchedFiles.length / matchedPageSize));
-  const clampedPage = Math.min(matchedPage, matchedTotalPages);
-  const paginatedMatchedFiles = filteredMatchedFiles.slice(
-    (clampedPage - 1) * matchedPageSize,
-    clampedPage * matchedPageSize,
-  );
-
+  // --- Mutation handlers -------------------------------------------------
   const handleCancelAllJobs = async () => {
     if (
       !confirm(
-        `Cancel all ${jobs.length} jobs? This aborts the running job, drops everything pending, and clears finished jobs. This cannot be undone.`,
+        `Cancel all ${jobs.total} jobs? This aborts the running job, drops everything pending, and clears finished jobs. This cannot be undone.`,
       )
     ) {
       return;
@@ -389,8 +706,9 @@ export function AdminDataClient({
     const result = await cancelAllBackgroundJobs();
     setCancellingAll(false);
     if (result.success) {
-      setJobs([]);
-      setJobsPage(1);
+      setJobs((s) => ({ ...s, page: 1 }));
+      fetchJobs({ page: 1, q: jobs.q, pageSize: jobs.pageSize });
+      refreshStats();
       showToast(result.message, "success");
     } else {
       showToast(result.message, "error");
@@ -398,8 +716,7 @@ export function AdminDataClient({
   };
 
   const handleCancelJob = async (job: JobRecord) => {
-    const action =
-      job.status === "running" ? "Cancel" : job.status === "pending" ? "Cancel" : "Clear";
+    const action = job.status === "running" || job.status === "pending" ? "Cancel" : "Clear";
     if (!confirm(`${action} job "${job.id}"?`)) return;
 
     setDeleting(job.id);
@@ -407,15 +724,8 @@ export function AdminDataClient({
     setDeleting(null);
 
     if (result.success) {
-      if (job.status === "completed" || job.status === "error") {
-        setJobs((prev) => prev.filter((j) => j.id !== job.id));
-      } else {
-        setJobs((prev) =>
-          prev.map((j) =>
-            j.id === job.id ? { ...j, status: "error", message: "Cancelled", progress: 0 } : j,
-          ),
-        );
-      }
+      reloadJobs();
+      refreshStats();
     } else {
       showToast(result.message, "error");
     }
@@ -429,8 +739,8 @@ export function AdminDataClient({
     setDeleting(null);
 
     if (result.success) {
-      setOrphanedFiles((prev) => prev.filter((f) => f.path !== file.path));
-      setOrphanedSize((prev) => prev - file.size);
+      reloadOrphaned();
+      refreshStats();
     } else {
       showToast(result.message, "error");
     }
@@ -462,22 +772,10 @@ export function AdminDataClient({
       const result = await res.json();
 
       if (result.success) {
-        const book = missingFiles.find((b) => b.id === bookId);
-        if (book) {
-          setMissingFiles((prev) => prev.filter((b) => b.id !== bookId));
-          setMatchedFiles((prev) =>
-            [
-              ...prev,
-              {
-                name: `${bookId}.${book.format}`,
-                size: result.book.fileSize,
-                path: `data/books/${bookId}.${book.format}`,
-                bookId,
-                book: { ...book, fileSize: result.book.fileSize },
-              },
-            ].sort((a, b) => a.name.localeCompare(b.name)),
-          );
-        }
+        // The file moved from "missing" to "matched": refresh both + stats.
+        reloadMissing();
+        reloadMatched();
+        refreshStats();
       } else {
         showToast(result.message || result.error || "Upload failed", "error");
       }
@@ -497,13 +795,14 @@ export function AdminDataClient({
     setDeleting(null);
 
     if (result.success) {
-      setMissingFiles((prev) => prev.filter((b) => b.id !== book.id));
+      reloadMissing();
+      refreshStats();
     } else {
       showToast(result.message, "error");
     }
   };
 
-  const handleDeleteMatchedBook = async (file: FileInfo & { book: BookRecord }) => {
+  const handleDeleteMatchedBook = async (file: MatchedFile) => {
     if (!confirm(`Delete "${file.book.title}" and its file? This cannot be undone.`)) return;
 
     setDeleting(file.book.id);
@@ -511,37 +810,42 @@ export function AdminDataClient({
     setDeleting(null);
 
     if (success) {
-      setMatchedFiles((prev) => prev.filter((f) => f.book.id !== file.book.id));
+      reloadMatched();
+      refreshStats();
     } else {
       showToast("Failed to delete book", "error");
     }
   };
 
+  const sectionSpinner = (loading: boolean) =>
+    loading ? <span className="text-xs text-foreground-muted ml-2">Loading…</span> : null;
+
   return (
     <div>
       <input type="file" ref={fileInputRef} onChange={handleFileSelected} className="hidden" />
       <p className="text-foreground-muted text-sm mb-8">
-        Comparing files in <code className="bg-surface-elevated px-1 rounded">{booksDir}</code> with
-        database records
+        Comparing files in{" "}
+        <code className="bg-surface-elevated px-1 rounded">{stats.booksDir}</code> with database
+        records
       </p>
 
       {/* Summary Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-surface-elevated rounded-lg p-4">
-          <div className="text-2xl font-bold text-foreground">{totalFiles}</div>
+          <div className="text-2xl font-bold text-foreground">{stats.totalFiles}</div>
           <div className="text-sm text-foreground-muted">Files on Disk</div>
         </div>
         <div className="bg-surface-elevated rounded-lg p-4">
-          <div className="text-2xl font-bold text-foreground">{totalBooks}</div>
+          <div className="text-2xl font-bold text-foreground">{stats.totalBooks}</div>
           <div className="text-sm text-foreground-muted">Database Records</div>
         </div>
         <div className="bg-surface-elevated rounded-lg p-4">
-          <div className="text-2xl font-bold text-warning">{orphanedFiles.length}</div>
+          <div className="text-2xl font-bold text-warning">{stats.orphanedCount}</div>
           <div className="text-sm text-foreground-muted">Orphaned Files</div>
-          <div className="text-xs text-foreground-muted">{formatBytes(orphanedSize)}</div>
+          <div className="text-xs text-foreground-muted">{formatBytes(stats.orphanedSize)}</div>
         </div>
         <div className="bg-surface-elevated rounded-lg p-4">
-          <div className="text-2xl font-bold text-error">{missingFiles.length}</div>
+          <div className="text-2xl font-bold text-error">{stats.missingCount}</div>
           <div className="text-sm text-foreground-muted">Missing Files</div>
         </div>
       </div>
@@ -554,9 +858,9 @@ export function AdminDataClient({
         <div className="flex items-start justify-between gap-3 mb-2">
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <span className="w-3 h-3 bg-primary rounded-full"></span>
-            Background Jobs ({jobs.length})
+            Background Jobs ({jobs.total}){sectionSpinner(jobs.loading)}
           </h2>
-          {jobs.length > 0 && (
+          {jobs.total > 0 && (
             <button
               onClick={handleCancelAllJobs}
               disabled={cancellingAll}
@@ -570,9 +874,20 @@ export function AdminDataClient({
           Persistent job queue for transcription, conversion, and other long-running tasks.
           {activeJobCount > 0 ? ` ${activeJobCount} active.` : ""}
         </p>
-        {jobs.length === 0 ? (
+
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search jobs by id, type, status, or message..."
+            value={jobs.q}
+            onChange={(e) => setJobs((s) => ({ ...s, q: e.target.value }))}
+            className="w-full sm:max-w-md px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        {jobs.items.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
-            No background jobs found.
+            {jobs.q ? "No jobs match your search." : "No background jobs found."}
           </div>
         ) : (
           <>
@@ -590,7 +905,7 @@ export function AdminDataClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedJobs.map((job) => (
+                  {jobs.items.map((job) => (
                     <React.Fragment key={job.id}>
                       <tr
                         className="border-b border-border last:border-0 hover:bg-surface cursor-pointer"
@@ -598,7 +913,7 @@ export function AdminDataClient({
                       >
                         <td className="p-3 text-foreground font-mono text-xs">
                           <span className="mr-1.5 text-foreground-muted">
-                            {expandedJob === job.id ? "\u25BC" : "\u25B6"}
+                            {expandedJob === job.id ? "▼" : "▶"}
                           </span>
                           {job.id}
                         </td>
@@ -678,15 +993,14 @@ export function AdminDataClient({
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
               <div className="flex items-center gap-3">
                 <p className="text-xs text-foreground-muted">
-                  Showing {(jobsClampedPage - 1) * jobsPageSize + 1}–
-                  {Math.min(jobsClampedPage * jobsPageSize, jobs.length)} of {jobs.length}
+                  Showing {(jobs.page - 1) * jobs.pageSize + 1}–
+                  {Math.min(jobs.page * jobs.pageSize, jobs.total)} of {jobs.total}
                 </p>
                 <select
-                  value={jobsPageSize}
-                  onChange={(e) => {
-                    setJobsPageSize(Number(e.target.value));
-                    setJobsPage(1);
-                  }}
+                  value={jobs.pageSize}
+                  onChange={(e) =>
+                    setJobs((s) => ({ ...s, pageSize: Number(e.target.value), page: 1 }))
+                  }
                   className="px-2 py-1 text-xs bg-surface-elevated border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   <option value={10}>10 per page</option>
@@ -694,41 +1008,7 @@ export function AdminDataClient({
                   <option value={50}>50 per page</option>
                 </select>
               </div>
-              {jobsTotalPages > 1 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setJobsPage(1)}
-                    disabled={jobsClampedPage <= 1}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    First
-                  </button>
-                  <button
-                    onClick={() => setJobsPage(jobsClampedPage - 1)}
-                    disabled={jobsClampedPage <= 1}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Prev
-                  </button>
-                  <span className="px-2 py-1 text-xs text-foreground-muted">
-                    Page {jobsClampedPage} of {jobsTotalPages}
-                  </span>
-                  <button
-                    onClick={() => setJobsPage(jobsClampedPage + 1)}
-                    disabled={jobsClampedPage >= jobsTotalPages}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
-                  <button
-                    onClick={() => setJobsPage(jobsTotalPages)}
-                    disabled={jobsClampedPage >= jobsTotalPages}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Last
-                  </button>
-                </div>
-              )}
+              <Pagination page={jobs.page} totalPages={jobsTotalPages} onChange={goJobsPage} />
             </div>
           </>
         )}
@@ -738,56 +1018,79 @@ export function AdminDataClient({
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
           <span className="w-3 h-3 bg-warning rounded-full"></span>
-          Orphaned Files ({orphanedFiles.length})
+          Orphaned Files ({stats.orphanedCount}){sectionSpinner(orphaned.loading)}
         </h2>
         <p className="text-sm text-foreground-muted mb-4">
           These files exist on disk but have no corresponding database entry. They can potentially
           be deleted.
         </p>
-        {orphanedFiles.length === 0 ? (
+
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search by filename..."
+            value={orphaned.q}
+            onChange={(e) => setOrphaned((s) => ({ ...s, q: e.target.value }))}
+            className="w-full sm:max-w-md px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        {orphaned.items.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
-            No orphaned files found.
+            {orphaned.q ? "No orphaned files match your search." : "No orphaned files found."}
           </div>
         ) : (
-          <div className="bg-surface-elevated rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-3 text-foreground-muted font-medium">Filename</th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">Size</th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orphanedFiles.map((file) => (
-                  <tr
-                    key={file.name}
-                    className="border-b border-border last:border-0 hover:bg-surface"
-                  >
-                    <td className="p-3 text-foreground font-mono text-xs">{file.name}</td>
-                    <td className="p-3 text-foreground-muted text-right">
-                      {formatBytes(file.size)}
-                    </td>
-                    <td className="p-3 text-right flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => setPreviewFile(file)}
-                        className="text-primary hover:text-primary/80 text-xs"
-                      >
-                        View
-                      </button>
-                      <button
-                        onClick={() => handleDeleteOrphanedFile(file)}
-                        disabled={deleting === file.path}
-                        className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
-                      >
-                        {deleting === file.path ? "Deleting..." : "Delete"}
-                      </button>
-                    </td>
+          <>
+            <div className="bg-surface-elevated rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-3 text-foreground-muted font-medium">Filename</th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">Size</th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {orphaned.items.map((file) => (
+                    <tr
+                      key={file.name}
+                      className="border-b border-border last:border-0 hover:bg-surface"
+                    >
+                      <td className="p-3 text-foreground font-mono text-xs">{file.name}</td>
+                      <td className="p-3 text-foreground-muted text-right">
+                        {formatBytes(file.size)}
+                      </td>
+                      <td className="p-3 text-right flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => setPreviewFile(file)}
+                          className="text-primary hover:text-primary/80 text-xs"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOrphanedFile(file)}
+                          disabled={deleting === file.path}
+                          className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                        >
+                          {deleting === file.path ? "Deleting..." : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-foreground-muted">
+                Page {orphaned.page} of {orphanedTotalPages} · {formatBytes(orphaned.totalSize)}
+              </p>
+              <Pagination
+                page={orphaned.page}
+                totalPages={orphanedTotalPages}
+                onChange={goOrphanedPage}
+              />
+            </div>
+          </>
         )}
       </section>
 
@@ -822,67 +1125,90 @@ export function AdminDataClient({
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
           <span className="w-3 h-3 bg-error rounded-full"></span>
-          Missing Files ({missingFiles.length})
+          Missing Files ({stats.missingCount}){sectionSpinner(missing.loading)}
         </h2>
         <p className="text-sm text-foreground-muted mb-4">
           These database entries have no corresponding file on disk. The books may need to be
           re-imported or the records deleted.
         </p>
-        {missingFiles.length === 0 ? (
+
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search by title, filename, or format..."
+            value={missing.q}
+            onChange={(e) => setMissing((s) => ({ ...s, q: e.target.value }))}
+            className="w-full sm:max-w-md px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        {missing.items.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
-            No missing files found.
+            {missing.q ? "No missing files match your search." : "No missing files found."}
           </div>
         ) : (
-          <div className="bg-surface-elevated rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-3 text-foreground-muted font-medium">Title</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">Format</th>
-                  <th className="text-left p-3 text-foreground-muted font-medium">ID</th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">
-                    Expected Size
-                  </th>
-                  <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {missingFiles.map((book) => (
-                  <tr
-                    key={book.id}
-                    className="border-b border-border last:border-0 hover:bg-surface"
-                  >
-                    <td className="p-3 text-foreground">
-                      <Link to={`/book/${book.id}`} className="hover:text-primary">
-                        {book.title}
-                      </Link>
-                    </td>
-                    <td className="p-3 text-foreground-muted uppercase">{book.format}</td>
-                    <td className="p-3 text-foreground-muted font-mono text-xs">{book.id}</td>
-                    <td className="p-3 text-foreground-muted text-right">
-                      {formatBytes(book.fileSize)}
-                    </td>
-                    <td className="p-3 text-right flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleUploadMissingFile(book)}
-                        disabled={uploading === book.id}
-                        className="text-primary hover:text-primary/80 disabled:opacity-50 text-xs"
-                      >
-                        {uploading === book.id ? "Uploading..." : "Upload File"}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteMissingRecord(book)}
-                        disabled={deleting === book.id}
-                        className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
-                      >
-                        {deleting === book.id ? "Deleting..." : "Delete Record"}
-                      </button>
-                    </td>
+          <>
+            <div className="bg-surface-elevated rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left p-3 text-foreground-muted font-medium">Title</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">Format</th>
+                    <th className="text-left p-3 text-foreground-muted font-medium">ID</th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">
+                      Expected Size
+                    </th>
+                    <th className="text-right p-3 text-foreground-muted font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {missing.items.map((book) => (
+                    <tr
+                      key={book.id}
+                      className="border-b border-border last:border-0 hover:bg-surface"
+                    >
+                      <td className="p-3 text-foreground">
+                        <Link to={`/book/${book.id}`} className="hover:text-primary">
+                          {book.title}
+                        </Link>
+                      </td>
+                      <td className="p-3 text-foreground-muted uppercase">{book.format}</td>
+                      <td className="p-3 text-foreground-muted font-mono text-xs">{book.id}</td>
+                      <td className="p-3 text-foreground-muted text-right">
+                        {formatBytes(book.fileSize)}
+                      </td>
+                      <td className="p-3 text-right flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleUploadMissingFile(book)}
+                          disabled={uploading === book.id}
+                          className="text-primary hover:text-primary/80 disabled:opacity-50 text-xs"
+                        >
+                          {uploading === book.id ? "Uploading..." : "Upload File"}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMissingRecord(book)}
+                          disabled={deleting === book.id}
+                          className="text-error hover:text-error/80 disabled:opacity-50 text-xs"
+                        >
+                          {deleting === book.id ? "Deleting..." : "Delete Record"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-foreground-muted">
+                Page {missing.page} of {missingTotalPages}
+              </p>
+              <Pagination
+                page={missing.page}
+                totalPages={missingTotalPages}
+                onChange={goMissingPage}
+              />
+            </div>
+          </>
         )}
       </section>
 
@@ -890,11 +1216,11 @@ export function AdminDataClient({
       <section>
         <h2 className="text-lg font-semibold text-foreground mb-2 flex items-center gap-2">
           <span className="w-3 h-3 bg-success rounded-full"></span>
-          Matched Files ({matchedFiles.length})
+          Matched Files ({stats.matchedCount}){sectionSpinner(matched.loading)}
         </h2>
         <p className="text-sm text-foreground-muted mb-4">
           These files are properly linked to database records. Total size:{" "}
-          {formatBytes(matchedSize)}
+          {formatBytes(stats.matchedSize)}
         </p>
 
         {/* Search and Filter Controls */}
@@ -902,34 +1228,27 @@ export function AdminDataClient({
           <input
             type="text"
             placeholder="Search by title, filename, or format..."
-            value={matchedSearch}
-            onChange={(e) => {
-              setMatchedSearch(e.target.value);
-              setMatchedPage(1);
-            }}
+            value={matched.q}
+            onChange={(e) => setMatched((s) => ({ ...s, q: e.target.value }))}
             className="flex-1 px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary"
           />
           <select
-            value={matchedFormatFilter}
-            onChange={(e) => {
-              setMatchedFormatFilter(e.target.value);
-              setMatchedPage(1);
-            }}
+            value={matched.format}
+            onChange={(e) => setMatched((s) => ({ ...s, format: e.target.value }))}
             className="px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value="all">All Formats</option>
-            {matchedFormats.map((fmt) => (
+            {stats.matchedFormats.map((fmt) => (
               <option key={fmt} value={fmt}>
                 {fmt.toUpperCase()}
               </option>
             ))}
           </select>
           <select
-            value={matchedPageSize}
-            onChange={(e) => {
-              setMatchedPageSize(Number(e.target.value));
-              setMatchedPage(1);
-            }}
+            value={matched.pageSize}
+            onChange={(e) =>
+              setMatched((s) => ({ ...s, pageSize: Number(e.target.value), page: 1 }))
+            }
             className="px-3 py-2 text-sm bg-surface-elevated border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option value={25}>25 per page</option>
@@ -938,17 +1257,17 @@ export function AdminDataClient({
           </select>
         </div>
 
-        {(matchedSearch || matchedFormatFilter !== "all") && (
+        {(matched.q || matched.format !== "all") && (
           <p className="text-xs text-foreground-muted mb-3">
-            Showing {filteredMatchedFiles.length} of {matchedFiles.length} files
+            Showing {matched.total} of {stats.matchedCount} files · {formatBytes(matched.totalSize)}
           </p>
         )}
 
-        {matchedFiles.length === 0 ? (
+        {stats.matchedCount === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
             No matched files found.
           </div>
-        ) : filteredMatchedFiles.length === 0 ? (
+        ) : matched.items.length === 0 ? (
           <div className="bg-surface-elevated rounded-lg p-4 text-foreground-muted">
             No files match your search criteria.
           </div>
@@ -966,7 +1285,7 @@ export function AdminDataClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedMatchedFiles.map((file) => (
+                  {matched.items.map((file) => (
                     <tr
                       key={file.name}
                       className="border-b border-border last:border-0 hover:bg-surface"
@@ -997,71 +1316,16 @@ export function AdminDataClient({
             </div>
 
             {/* Pagination Controls */}
-            {matchedTotalPages > 1 && (
-              <div className="flex items-center justify-between mt-4">
-                <p className="text-xs text-foreground-muted">
-                  Page {clampedPage} of {matchedTotalPages}
-                </p>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setMatchedPage(1)}
-                    disabled={clampedPage <= 1}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    First
-                  </button>
-                  <button
-                    onClick={() => setMatchedPage(clampedPage - 1)}
-                    disabled={clampedPage <= 1}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Prev
-                  </button>
-                  {Array.from({ length: matchedTotalPages }, (_, i) => i + 1)
-                    .filter(
-                      (p) => p === 1 || p === matchedTotalPages || Math.abs(p - clampedPage) <= 2,
-                    )
-                    .reduce<(number | "ellipsis")[]>((acc, p, i, arr) => {
-                      if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("ellipsis");
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((p, i) =>
-                      p === "ellipsis" ? (
-                        <span key={`ellipsis-${i}`} className="px-1 text-xs text-foreground-muted">
-                          ...
-                        </span>
-                      ) : (
-                        <button
-                          key={p}
-                          onClick={() => setMatchedPage(p)}
-                          className={`px-2 py-1 text-xs rounded border ${
-                            p === clampedPage
-                              ? "bg-primary text-white border-primary"
-                              : "bg-surface-elevated border-border text-foreground hover:bg-surface"
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ),
-                    )}
-                  <button
-                    onClick={() => setMatchedPage(clampedPage + 1)}
-                    disabled={clampedPage >= matchedTotalPages}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
-                  <button
-                    onClick={() => setMatchedPage(matchedTotalPages)}
-                    disabled={clampedPage >= matchedTotalPages}
-                    className="px-2 py-1 text-xs rounded bg-surface-elevated border border-border text-foreground hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Last
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-foreground-muted">
+                Page {matched.page} of {matchedTotalPages}
+              </p>
+              <Pagination
+                page={matched.page}
+                totalPages={matchedTotalPages}
+                onChange={goMatchedPage}
+              />
+            </div>
           </>
         )}
       </section>

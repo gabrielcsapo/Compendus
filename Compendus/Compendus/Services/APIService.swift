@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import EPUBReader
+import CCReader
 
 enum APIError: LocalizedError {
     case serverNotConfigured
@@ -195,6 +195,31 @@ class APIService {
             throw APIError.invalidURL
         }
 
+        return try await fetchData(url)
+    }
+
+    /// Download the canonical CCD bundle (decompressed JSON) for a book. The
+    /// reader consumes this instead of parsing the EPUB on-device.
+    func fetchCcdBundle(bookId: String) async throws -> Data {
+        guard config.isConfigured else {
+            throw APIError.serverNotConfigured
+        }
+        guard let url = config.apiURL("/api/reader/\(bookId)/ccd/bundle") else {
+            throw APIError.invalidURL
+        }
+        return try await fetchData(url)
+    }
+
+    /// Download the self-contained CCD "pack" (ZIP) for a book: the full
+    /// `manifest.ccd.json` plus `resources/<handle>` for every referenced image.
+    /// The reader unpacks this and reads entirely from it — no raw .epub on device.
+    func fetchCcdPack(bookId: String) async throws -> Data {
+        guard config.isConfigured else {
+            throw APIError.serverNotConfigured
+        }
+        guard let url = config.apiURL("/api/reader/\(bookId)/ccd/pack") else {
+            throw APIError.invalidURL
+        }
         return try await fetchData(url)
     }
 

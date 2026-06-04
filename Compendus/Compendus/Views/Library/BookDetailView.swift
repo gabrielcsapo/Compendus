@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct BookDetailView: View {
     let book: Book
@@ -207,6 +207,10 @@ struct BookDetailView: View {
 
             progressSection
                 .padding(.top, 12)
+
+            CrossDeviceProgressView(bookId: book.id)
+                .padding(.top, 12)
+                .padding(.horizontal, 20)
 
             actionButtonGroup
                 .padding(.top, 20)
@@ -540,8 +544,41 @@ struct BookDetailView: View {
 
     // MARK: - Action Button
 
+    /// Reflowable ebooks read from the CCD pack; if it isn't ready, gate the
+    /// Read/Download action behind a clear state instead of an active button.
+    /// Comics/audio/PDF aren't CCD-gated (ccdStatus is nil for them on the
+    /// server), so this only fires for epub/mobi/azw3.
+    private var ccdGateMessage: (text: String, icon: String)? {
+        guard displayBook.isReflowable else { return nil }
+        if displayBook.isCcdFailed {
+            return ("Couldn't be prepared", "exclamationmark.triangle")
+        }
+        if displayBook.isCcdProcessing {
+            return ("Preparing…", "clock")
+        }
+        return nil
+    }
+
     @ViewBuilder
     private var actionButton: some View {
+        if let gate = ccdGateMessage {
+            Label(gate.text, systemImage: gate.icon)
+                .font(.body.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .foregroundStyle(.secondary)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.separator, lineWidth: 0.5)
+                }
+        } else {
+            downloadActionButton
+        }
+    }
+
+    @ViewBuilder
+    private var downloadActionButton: some View {
         AnimatedDownloadButton(
             state: downloadButtonState,
             isAudiobook: book.isAudiobook,

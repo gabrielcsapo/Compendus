@@ -8,7 +8,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ReadAlongLyricsOverlay: View {
     let transcript: Transcript?

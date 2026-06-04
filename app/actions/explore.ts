@@ -23,7 +23,7 @@ export type ExploreData = {
  * Find the next unread book in each in-progress series.
  * A series is "in-progress" if the profile has read at least one book but not all.
  */
-async function getReadNextInSeries(
+export async function getReadNextInSeries(
   profileId?: string,
 ): Promise<Array<{ seriesName: string; book: BookWithState }>> {
   const pid = profileId ?? resolveProfileId();
@@ -97,7 +97,7 @@ async function getReadNextInSeries(
 /**
  * Find books with 10%+ progress not touched in 30+ days.
  */
-async function getStaleReads(profileId?: string): Promise<BookWithState[]> {
+export async function getStaleReads(profileId?: string): Promise<BookWithState[]> {
   const pid = profileId ?? resolveProfileId();
   if (!pid) return [];
 
@@ -139,7 +139,7 @@ async function getStaleReads(profileId?: string): Promise<BookWithState[]> {
 /**
  * Surface unread books by authors the user has read 2+ books from.
  */
-async function getMoreByAuthor(
+export async function getMoreByAuthor(
   profileId?: string,
 ): Promise<Array<{ author: string; books: BookWithState[] }>> {
   const pid = profileId ?? resolveProfileId();
@@ -213,7 +213,7 @@ async function getMoreByAuthor(
  * Create genre-based sections from bookSubjects data.
  * Shows top subjects by book count, with unread books prioritized.
  */
-async function getGenreSections(
+export async function getGenreSections(
   profileId?: string,
 ): Promise<Array<{ subject: string; books: BookWithState[] }>> {
   const pid = profileId ?? resolveProfileId();
@@ -234,27 +234,34 @@ async function getGenreSections(
 
   if (topSubjects.length === 0) return [];
 
-  const results: Array<{ subject: string; books: BookWithState[] }> = [];
-
+  // Collect up to 12 book ids per subject, then fetch every needed book in a
+  // single query (previously this loaded 500 books per subject in a loop, which
+  // also silently dropped any subject book outside the first 500 by date).
+  const subjectBookIds = new Map<string, string[]>();
+  const allIds = new Set<string>();
   for (const { subject } of topSubjects) {
-    // Get book IDs for this subject
-    const subjectBookIds = rawDb
-      .prepare(
-        `
-      SELECT bs.book_id
-      FROM book_subjects bs
-      WHERE bs.subject = ?
-      LIMIT 12
-    `,
-      )
+    const rows = rawDb
+      .prepare(`SELECT bs.book_id FROM book_subjects bs WHERE bs.subject = ? LIMIT 12`)
       .all(subject) as Array<{ book_id: string }>;
+    if (rows.length === 0) continue;
+    const ids = rows.map((r) => r.book_id);
+    subjectBookIds.set(subject, ids);
+    for (const id of ids) allIds.add(id);
+  }
 
-    if (subjectBookIds.length === 0) continue;
+  if (allIds.size === 0) return [];
 
-    // Fetch full book objects — load a large batch and filter
-    const allBooks = await getBooks({ limit: 500, profileId: pid });
-    const bookIdSet = new Set(subjectBookIds.map((r) => r.book_id));
-    const genreBooks = allBooks.filter((b) => bookIdSet.has(b.id));
+  const books = await getBooks({ ids: [...allIds], limit: allIds.size, profileId: pid });
+  const booksById = new Map(books.map((b) => [b.id, b]));
+
+  const results: Array<{ subject: string; books: BookWithState[] }> = [];
+  for (const { subject } of topSubjects) {
+    const ids = subjectBookIds.get(subject);
+    if (!ids) continue;
+
+    const genreBooks = ids
+      .map((id) => booksById.get(id))
+      .filter((b): b is BookWithState => b != null);
 
     // Sort: unread first, then by title
     genreBooks.sort((a, b) => {
@@ -272,62 +279,101 @@ async function getGenreSections(
   return results;
 }
 
-export async function getExploreData(
+/**
+ * "Continue Reading" — recently-touched books with reading progress.
+ */
+export async function getInProgressBooks(
   profileId?: string,
   typeFilter?: import("../lib/book-types").BookType,
-): Promise<ExploreData> {
-  const [
-    lastReadBooks,
-    recentlyAdded,
-    totalCount,
-    unmatchedCount,
-    rawSeriesList,
-    rawTags,
-    readNextInSeries,
-    staleReads,
-    moreByAuthor,
-    genreSections,
-  ] = await Promise.all([
-    getBooks({ orderBy: "lastReadAt", order: "desc", limit: 30, profileId, type: typeFilter }),
-    getBooks({ orderBy: "createdAt", order: "desc", limit: 16, profileId, type: typeFilter }),
-    getBooksCount(typeFilter),
-    getUnmatchedBooksCount(),
-    getSeriesWithCovers(typeFilter),
-    getTagsWithCounts(),
-    getReadNextInSeries(profileId),
-    getStaleReads(profileId),
-    getMoreByAuthor(profileId),
-    getGenreSections(profileId),
-  ]);
+): Promise<BookWithState[]> {
+  const lastReadBooks = await getBooks({
+    orderBy: "lastReadAt",
+    order: "desc",
+    limit: 30,
+    profileId,
+    type: typeFilter,
+  });
+  return lastReadBooks.filter((b) => (b.readingProgress || 0) > 0);
+}
 
-  const inProgress = lastReadBooks.filter((b) => (b.readingProgress || 0) > 0);
+/**
+ * "Recently Added" — newest books by creation time.
+ */
+export async function getRecentlyAddedBooks(
+  profileId?: string,
+  typeFilter?: import("../lib/book-types").BookType,
+): Promise<BookWithState[]> {
+  return getBooks({ orderBy: "createdAt", order: "desc", limit: 16, profileId, type: typeFilter });
+}
 
-  // Top series with 3+ books (up to 5)
+/**
+ * Top series with 3+ books (up to 5), each with its first 12 books.
+ */
+export async function getTopSeriesSections(
+  profileId?: string,
+  typeFilter?: import("../lib/book-types").BookType,
+): Promise<Array<{ name: string; bookCount: number; books: BookWithState[] }>> {
+  const rawSeriesList = await getSeriesWithCovers(typeFilter);
   const topSeriesInfo = rawSeriesList.filter((s) => s.bookCount >= 3).slice(0, 5);
-
-  // Top tags with 3+ books by count (up to 5)
-  const topTagsInfo = rawTags
-    .filter((t) => t.count >= 3)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
-  const [seriesBooksArrays, tagsBooksArrays] = await Promise.all([
-    Promise.all(topSeriesInfo.map((s) => getBooks({ series: s.name, limit: 12, profileId }))),
-    Promise.all(topTagsInfo.map((t) => getBooks({ tagId: t.id, limit: 12, profileId }))),
-  ]);
-
-  const topSeries = topSeriesInfo.map((s, i) => ({
+  const seriesBooksArrays = await Promise.all(
+    topSeriesInfo.map((s) => getBooks({ series: s.name, limit: 12, profileId })),
+  );
+  return topSeriesInfo.map((s, i) => ({
     name: s.name,
     bookCount: s.bookCount,
     books: seriesBooksArrays[i],
   }));
+}
 
-  const topTags = topTagsInfo.map((t, i) => ({
+/**
+ * Top tags with 3+ books by count (up to 5), each with its first 12 books.
+ */
+export async function getTopTagsSections(
+  profileId?: string,
+): Promise<Array<{ id: string; name: string; color: string | null; books: BookWithState[] }>> {
+  const rawTags = await getTagsWithCounts();
+  const topTagsInfo = rawTags
+    .filter((t) => t.count >= 3)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  const tagsBooksArrays = await Promise.all(
+    topTagsInfo.map((t) => getBooks({ tagId: t.id, limit: 12, profileId })),
+  );
+  return topTagsInfo.map((t, i) => ({
     id: t.id,
     name: t.name,
     color: t.color ?? null,
     books: tagsBooksArrays[i],
   }));
+}
+
+export async function getExploreData(
+  profileId?: string,
+  typeFilter?: import("../lib/book-types").BookType,
+): Promise<ExploreData> {
+  const [
+    inProgress,
+    recentlyAdded,
+    totalCount,
+    unmatchedCount,
+    topSeries,
+    topTags,
+    readNextInSeries,
+    staleReads,
+    moreByAuthor,
+    genreSections,
+  ] = await Promise.all([
+    getInProgressBooks(profileId, typeFilter),
+    getRecentlyAddedBooks(profileId, typeFilter),
+    getBooksCount(typeFilter),
+    getUnmatchedBooksCount(),
+    getTopSeriesSections(profileId, typeFilter),
+    getTopTagsSections(profileId),
+    getReadNextInSeries(profileId),
+    getStaleReads(profileId),
+    getMoreByAuthor(profileId),
+    getGenreSections(profileId),
+  ]);
 
   return {
     inProgress,

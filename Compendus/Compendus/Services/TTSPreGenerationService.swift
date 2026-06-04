@@ -12,7 +12,7 @@
 import Foundation
 import SwiftData
 import os.log
-import EPUBReader
+import CCReader
 
 private let logger = Logger(subsystem: "com.compendus.tts", category: "PreGeneration")
 
@@ -84,11 +84,6 @@ class TTSPreGenerationService {
             return
         }
 
-        guard let fileURL = book.fileURL else {
-            state = .error("Book file not found")
-            return
-        }
-
         activeBookId = book.id
         activeBookTitle = book.title
         state = .generating(progress: 0, message: "Preparing...")
@@ -102,7 +97,6 @@ class TTSPreGenerationService {
             await self?.performGeneration(
                 bookId: book.id,
                 bookLocalPath: book.localPath,
-                fileURL: fileURL,
                 voiceId: voiceId,
                 ttsContext: ttsContext,
                 cache: cache,
@@ -127,20 +121,35 @@ class TTSPreGenerationService {
     nonisolated private func performGeneration(
         bookId: String,
         bookLocalPath: String,
-        fileURL: URL,
         voiceId: Int,
         ttsContext: KokoroTTSContext,
         cache: TTSAudioCache,
         modelContainer: ModelContainer
     ) async {
         do {
-            // Parse the EPUB
-            await MainActor.run { state = .generating(progress: 0, message: "Parsing EPUB...") }
-            let parser = try await EPUBParser.parse(epubURL: fileURL)
-            let spineCount = parser.package.spine.count
+            // Canonical content (CCD): chapter text comes from the unpacked CCD pack
+            // the reader uses — no on-device EPUB parsing.
+            await MainActor.run { state = .generating(progress: 0, message: "Preparing chapters...") }
+            let ccdBundle: CCDBundle? = {
+                guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                else { return nil }
+                let manifestURL = docs
+                    .appendingPathComponent("ccd-packs", isDirectory: true)
+                    .appendingPathComponent(bookId, isDirectory: true)
+                    .appendingPathComponent("manifest.ccd.json")
+                guard let data = try? Data(contentsOf: manifestURL) else { return nil }
+                return try? CCDBundle.decode(from: data)
+            }()
 
+            guard let bundle = ccdBundle else {
+                await MainActor.run { state = .error("Book content not available offline") }
+                return
+            }
+
+            // Spine count = highest spine index + 1 (chapters are keyed by spine index).
+            let spineCount = (bundle.chapters.map { $0.spineIndex }.max() ?? -1) + 1
             guard spineCount > 0 else {
-                await MainActor.run { state = .error("No content in EPUB") }
+                await MainActor.run { state = .error("No content in book") }
                 return
             }
 
@@ -214,17 +223,15 @@ class TTSPreGenerationService {
                     continue
                 }
 
-                // Load and parse chapter content
-                guard let chapterURL = parser.resolveSpineItemURL(at: spineIndex),
-                      let chapterData = try? Data(contentsOf: chapterURL) else {
-                    logger.warning("Could not load content for spine \(spineIndex), skipping")
+                // Chapter text from the canonical CCD bundle (no on-device XHTML
+                // parsing). Images are irrelevant to TTS text, so no resolver.
+                guard let chapter = ccdBundle?.chapters.first(where: { $0.spineIndex == spineIndex }) else {
+                    logger.info("No CCD content for spine \(spineIndex), skipping")
                     await MainActor.run { resumableState?.completedSpineIndex = spineIndex }
                     continue
                 }
-
-                let contentParser = XHTMLContentParser(data: chapterData, baseURL: chapterURL)
-                let nodes = contentParser.parse()
-                let plainText = await MainActor.run { NativeEPUBEngine.extractPlainText(from: nodes) }
+                let nodes = CCDContentMapper.nodes(for: chapter) { _ in nil }
+                let plainText = await MainActor.run { NativeReaderEngine.extractPlainText(from: nodes) }
 
                 guard !plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     logger.info("Empty chapter at spine \(spineIndex), skipping")

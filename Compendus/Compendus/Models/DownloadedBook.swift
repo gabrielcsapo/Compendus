@@ -7,7 +7,7 @@
 
 import Foundation
 import SwiftData
-import EPUBReader
+import CCReader
 
 @Model
 final class DownloadedBook {
@@ -40,6 +40,16 @@ final class DownloadedBook {
     var ttsTranscriptData: Data?      // JSON encoded transcript from TTS generation
     var ttsVoiceId: Int?              // Voice index used for TTS generation (cache invalidation key)
     var profileId: String = ""        // Profile that owns this download (empty = legacy/unassigned)
+    /// CCD readiness from the server: "ready" | "processing" | "failed" | nil
+    /// (comics/audio are native and not CCD-gated). Backward-compatible: older
+    /// downloads default to nil, treated as ready unless the server says otherwise.
+    var ccdStatus: String?
+    /// Local-only dirty marker: set whenever THIS device changes reading
+    /// progress/position locally. The push uses it as the "modified since last
+    /// sync" gate. Unlike `lastReadAt` (a cross-device value the pull overwrites
+    /// and downloads seed from server metadata), this is never written by sync,
+    /// so local reading always pushes even if `lastReadAt` is stale.
+    var localProgressUpdatedAt: Date?
 
     init(
         id: String,
@@ -125,6 +135,17 @@ final class DownloadedBook {
         ["epub", "pdf", "mobi", "azw", "azw3"].contains(format.lowercased())
     }
 
+    /// Reflowable ebook (epub/mobi/azw3) — read entirely from the CCD pack.
+    var isReflowable: Bool {
+        ["epub", "mobi", "azw", "azw3"].contains(format.lowercased())
+    }
+
+    /// CCD conversion errored (corrupt / DRM / unsupported / no content).
+    var isCcdFailed: Bool { ccdStatus == "failed" }
+
+    /// CCD not yet ready (backfill in flight).
+    var isCcdProcessing: Bool { ccdStatus == "processing" }
+
     var chapters: [Chapter]? {
         guard let data = chaptersData else { return nil }
         return try? JSONDecoder().decode([Chapter].self, from: data)
@@ -154,6 +175,27 @@ final class DownloadedBook {
             return nil
         }
         return documentsURL.appendingPathComponent(localPath)
+    }
+
+    /// Stable per-book directory holding the unpacked CCD pack:
+    /// `<documents>/ccd-packs/<bookId>/` with `manifest.ccd.json` + `resources/…`.
+    var ccdPackDir: URL? {
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documentsURL
+            .appendingPathComponent("ccd-packs", isDirectory: true)
+            .appendingPathComponent(id, isDirectory: true)
+    }
+
+    /// The unpacked CCD manifest (`manifest.ccd.json`). The reader loads this.
+    var ccdManifestURL: URL? {
+        ccdPackDir?.appendingPathComponent("manifest.ccd.json")
+    }
+
+    /// The unpacked CCD resources root (image handles resolve against this).
+    var ccdResourcesDir: URL? {
+        ccdPackDir?.appendingPathComponent("resources", isDirectory: true)
     }
 
     /// Get the full file URL for the converted EPUB version
@@ -186,6 +228,13 @@ final class DownloadedBook {
         narrator = book.narrator
         duration = book.duration
         pageCount = book.pageCount
+
+        // Carry CCD readiness so the reader/library can gate on it offline.
+        // Only overwrite when the server actually reports a status — a payload
+        // that omits ccdStatus shouldn't clobber a known-good local value.
+        if let serverCcdStatus = book.ccdStatus {
+            ccdStatus = serverCcdStatus
+        }
 
         if let numStr = book.seriesNumber {
             seriesNumber = Double(numStr)
@@ -249,6 +298,7 @@ final class DownloadedBook {
         downloaded.isRead = book.isRead ?? false
         downloaded.rating = book.rating
         downloaded.review = book.review
+        downloaded.ccdStatus = book.ccdStatus
         return downloaded
     }
 }

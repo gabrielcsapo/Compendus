@@ -59,6 +59,40 @@ export const userBookState = sqliteTable(
   ],
 );
 
+// Per-device reading position for a book. Each device owns its own row, so
+// devices never overwrite each other's position — one device can be on page 50
+// while another is on page 80 of the same book. The furthest/most-recent values
+// are rolled up into userBookState so existing book-level UI keeps working.
+export const deviceBookProgress = sqliteTable(
+  "device_book_progress",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    bookId: text("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    /** Stable per-install identifier supplied by the client. */
+    deviceId: text("device_id").notNull(),
+    /** Friendly name, e.g. "Gabriel's iPhone" (user-overridable on the client). */
+    deviceName: text("device_name").notNull().default(""),
+    /** iPhone | iPad | Mac | other */
+    deviceType: text("device_type").notNull().default("other"),
+    readingProgress: real("reading_progress").default(0),
+    lastPosition: text("last_position"), // same JSON shape as userBookState.lastPosition
+    lastReadAt: integer("last_read_at", { mode: "timestamp" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    uniqueIndex("idx_dbp_profile_book_device").on(table.profileId, table.bookId, table.deviceId),
+    index("idx_dbp_profile_book").on(table.profileId, table.bookId),
+    index("idx_dbp_profile").on(table.profileId),
+  ],
+);
+
 // Books table
 export const books = sqliteTable(
   "books",
@@ -123,6 +157,13 @@ export const books = sqliteTable(
     // Converted EPUB (for PDF → EPUB conversion)
     convertedEpubPath: text("converted_epub_path"),
     convertedEpubSize: integer("converted_epub_size"),
+
+    // Canonical Content Document (CCD) bundle — the format both readers consume.
+    ccdPath: text("ccd_path"),
+    ccdVersion: text("ccd_version"),
+    // Last CCD conversion error (cleared on success). Drives book.ccdStatus =
+    // ready (path+current version) / failed (error set) / processing (neither).
+    ccdError: text("ccd_error"),
 
     // Audiobook transcript (from Whisper transcription)
     transcriptPath: text("transcript_path"),

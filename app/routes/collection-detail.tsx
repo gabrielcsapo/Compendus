@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Link } from "react-flight-router/client";
 import { getCollection, getBooksInCollection } from "../actions/collections";
 import { BookGrid } from "../components/BookGrid";
+import { BookGridSkeleton } from "../components/BookGridSkeleton";
 import { CollectionActions } from "../components/CollectionActions";
 
 export default async function CollectionDetail({ params }: { params?: Record<string, string> }) {
@@ -57,21 +58,5 @@ async function CollectionBooks({ collectionId }: { collectionId: string }) {
       </p>
       <BookGrid books={books} emptyMessage="No books in this collection yet" />
     </>
-  );
-}
-
-function BookGridSkeleton() {
-  return (
-    <div className="animate-pulse">
-      <div className="h-4 bg-surface-elevated rounded w-24 mb-4" />
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="space-y-2">
-            <div className="aspect-[2/3] bg-surface-elevated rounded-lg" />
-            <div className="h-3 bg-surface-elevated rounded w-3/4" />
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }

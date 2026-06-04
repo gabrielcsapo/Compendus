@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { getRequest } from "react-flight-router/server";
 import { getTagsWithCounts, getBooksWithTag } from "../actions/tags";
+import { BookGrid } from "../components/BookGrid";
+import { BookGridSkeleton } from "../components/BookGridSkeleton";
 import TagsClient from "./tags.client";
 
 export default function Tags() {
@@ -16,16 +18,29 @@ async function TagsData() {
   const url = new URL(request.url);
   const selectedTagId = url.searchParams.get("tag");
 
+  // Only the tag list blocks the shell (it's needed for the cloud + count).
+  // The books grid for the selected tag streams in via its own boundary.
   const tags = await getTagsWithCounts();
-
-  let books: Awaited<ReturnType<typeof getBooksWithTag>> = [];
-  if (selectedTagId) {
-    books = await getBooksWithTag(selectedTagId);
-  }
+  const selectedTag = selectedTagId ? (tags.find((t) => t.id === selectedTagId) ?? null) : null;
 
   return (
-    <TagsClient initialTags={tags} initialBooks={books} initialSelectedTagId={selectedTagId} />
+    <TagsClient
+      initialTags={tags}
+      initialSelectedTagId={selectedTagId}
+      booksSlot={
+        selectedTag ? (
+          <Suspense fallback={<BookGridSkeleton showCountLine={false} />}>
+            <TagBooks tagId={selectedTag.id} tagName={selectedTag.name} />
+          </Suspense>
+        ) : null
+      }
+    />
   );
+}
+
+async function TagBooks({ tagId, tagName }: { tagId: string; tagName: string }) {
+  const books = await getBooksWithTag(tagId);
+  return <BookGrid books={books} emptyMessage={`No books tagged "${tagName}"`} />;
 }
 
 function TagsSkeleton() {

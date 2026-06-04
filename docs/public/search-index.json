@@ -16,7 +16,7 @@
       "Database Schema",
       "Background Processing"
     ],
-    "content": "Architecture\nCompendus is a full-stack application with a web frontend, server API,\nand native iOS app. The web and iOS clients communicate with the server\nthrough a shared REST API.\nSystem Overview\nWeb Application\nThe web app uses React Server Components via react-flight-router with\nVite as the build tool and Hono as the server framework.\nKey Technologies\n- React 19 + RSC — Server Components for data fetching, Client Components for interactivity\n- react-flight-router — File-based routing with React Server Components support\n- Vite 8 — Dev server with HMR, production bundler\n- Hono — Lightweight HTTP server framework for API routes\n- Drizzle ORM — Type-safe SQL query builder for SQLite\n- Tailwind CSS 4 — Utility-first CSS with design token system\nProject Structure\nData Flow\n1. Server components in app/routes/ fetch data directly from the database\n2. Data is passed to client components via props (RSC serialization)\n3. Client components use useSearchParams() for URL state and server actions for mutations\n4. API routes in server/ handle REST requests from the iOS app and external clients\niOS Application\nThe iOS app is a native SwiftUI application with SwiftData for local\npersistence. It communicates with the server via REST API for library\nsyncing and book downloads.\nKey Technologies\n- SwiftUI — Declarative UI framework for all views\n- SwiftData — Local persistence for downloaded books and settings\n- Custom Reader Engine — Native EPUB (CoreText + UITextView) and PDF (PDFKit) rendering\n- ZIPFoundation — EPUB extraction from ZIP archives\n- Whisper.cpp — On-device audiobook transcription\n- TTS Engine — Text-to-speech with pre-generation and caching\nReader Engine\nDatabase Schema\nCompendus uses SQLite with Drizzle ORM. The schema is defined in app/lib/db/schema.ts.\n Description |\n|\n Core book collection with metadata, file info, and reading state |\n User-created groupings with hierarchical support |\n Junction table linking books to collections |\n Color-coded tags for catego"
+    "content": "Architecture\nCompendus is a full-stack application with a web frontend, server API,\nand native iOS app. The web and iOS clients communicate with the server\nthrough a shared REST API.\nSystem Overview\nWeb Application\nThe web app uses React Server Components via react-flight-router with\nVite as the build tool and Hono as the server framework.\nKey Technologies\n- React 19 + RSC — Server Components for data fetching, Client Components for interactivity\n- react-flight-router — File-based routing with React Server Components support\n- Vite 8 — Dev server with HMR, production bundler\n- Hono — Lightweight HTTP server framework for API routes\n- Drizzle ORM — Type-safe SQL query builder for SQLite\n- Tailwind CSS 4 — Utility-first CSS with design token system\nProject Structure\nData Flow\n1. Server components in app/routes/ fetch data directly from the database\n2. Data is passed to client components via props (RSC serialization)\n3. Client components use useSearchParams() for URL state and server actions for mutations\n4. API routes in server/ handle REST requests from the iOS app and external clients\niOS Application\nThe iOS app is a native SwiftUI application with SwiftData for local\npersistence. It communicates with the server via REST API for library\nsyncing and book downloads.\nKey Technologies\n- SwiftUI — Declarative UI framework for all views\n- SwiftData — Local persistence for downloaded books and settings\n- CCReader (Swift package) — Native reader that renders the server-generated CCD via CoreText + UITextView; PDF via PDFKit\n- ZIPFoundation — Unpacks the downloaded CCD pack (ZIP of manifest + resources)\n- Whisper.cpp — On-device audiobook transcription\n- Kokoro TTS — On-device neural text-to-speech with pre-generation and caching\nReader Engine\nThe reader lives in the CCReader Swift package (Compendus/CCReader/). It\nconsumes the server-generated CCD — there is no on-device EPUB parsing.\nDatabase Schema\nCompendus uses SQLite with Drizzle ORM. The schema is defined in app/lib/d"
   },
   {
     "title": "System Overview",
@@ -72,7 +72,7 @@
     "path": "/docs/architecture#key-technologies",
     "section": "Overview · Architecture",
     "headings": [],
-    "content": "- SwiftUI — Declarative UI framework for all views\n- SwiftData — Local persistence for downloaded books and settings\n- Custom Reader Engine — Native EPUB (CoreText + UITextView) and PDF (PDFKit) rendering\n- ZIPFoundation — EPUB extraction from ZIP archives\n- Whisper.cpp — On-device audiobook transcription\n- TTS Engine — Text-to-speech with pre-generation and caching"
+    "content": "- SwiftUI — Declarative UI framework for all views\n- SwiftData — Local persistence for downloaded books and settings\n- CCReader (Swift package) — Native reader that renders the server-generated CCD via CoreText + UITextView; PDF via PDFKit\n- ZIPFoundation — Unpacks the downloaded CCD pack (ZIP of manifest + resources)\n- Whisper.cpp — On-device audiobook transcription\n- Kokoro TTS — On-device neural text-to-speech with pre-generation and caching"
   },
   {
     "title": "Reader Engine",
@@ -80,7 +80,7 @@
     "path": "/docs/architecture#reader-engine",
     "section": "Overview · Architecture",
     "headings": [],
-    "content": ""
+    "content": "The reader lives in the CCReader Swift package (Compendus/CCReader/). It\nconsumes the server-generated CCD — there is no on-device EPUB parsing."
   },
   {
     "title": "Database Schema",
@@ -88,7 +88,7 @@
     "path": "/docs/architecture#database-schema",
     "section": "Overview · Architecture",
     "headings": [],
-    "content": "Compendus uses SQLite with Drizzle ORM. The schema is defined in app/lib/db/schema.ts.\n Description |\n|\n Core book collection with metadata, file info, and reading state |\n User-created groupings with hierarchical support |\n Junction table linking books to collections |\n Color-coded tags for categorization |\n Junction table linking books to tags |\n Position-based bookmarks within books |\n Text highlights with notes and colors |\n Reading time tracking (start/end, pages read) |\n Wishlist items with metadata from external sources |"
+    "content": "Compendus uses SQLite with Drizzle ORM. The schema is defined in app/lib/db/schema.ts.\n Description                                                      |\n  |\n Core book collection with metadata, file info, and reading state |\n User-created groupings with hierarchical support                 |\n Junction table linking books to collections                      |\n Color-coded tags for categorization                              |\n Junction table linking books to tags                             |\n Position-based bookmarks within books                            |\n Text highlights with notes and colors                            |\n Reading time tracking (start/end, pages read)                    |\n Wishlist items with metadata from external sources               |"
   },
   {
     "title": "Background Processing",
@@ -96,7 +96,7 @@
     "path": "/docs/architecture#background-processing",
     "section": "Overview · Architecture",
     "headings": [],
-    "content": "Long-running operations are handled by a background job queue with\nreal-time progress tracking via Server-Sent Events (SSE).\n- Format conversion — PDF/MOBI/AZW3 to EPUB\n- Audiobook transcription — Whisper-based speech to text\n- TTS pre-generation — Text-to-speech audio caching\n- Multi-file audio merge — Combining audio tracks into single audiobook\nJob progress can be polled via GET /api/jobs/:id or streamed via GET /api/jobs/:id/progress (SSE)."
+    "content": "Long-running operations are handled by a background job queue with\nreal-time progress tracking via Server-Sent Events (SSE).\n- CCD generation — reflowable formats (EPUB/PDF/MOBI/AZW3) → Compendus Content Document\n- Audiobook transcription — Whisper-based speech to text\n- TTS pre-generation — Text-to-speech audio caching\n- Multi-file audio merge — Combining audio tracks into single audiobook\nJob progress can be polled via GET /api/jobs/:id or streamed via GET /api/jobs/:id/progress (SSE)."
   },
   {
     "title": "Getting Started",
@@ -113,7 +113,7 @@
       "Docker Deployment",
       "Available Scripts"
     ],
-    "content": "Getting Started\nSet up Compendus on your local machine or deploy with Docker.\nPrerequisites\n- Node.js 20+ — Required runtime\n- pnpm — Package manager (npm install -g pnpm)\n- Git LFS — Required for cloning (large binary tracking)\nInstallation\nClone the repository and install dependencies:\nDatabase Setup\nCompendus uses SQLite with Drizzle ORM. Initialize the database:\nThe database file is stored at data/compendus.db. Book files are stored in data/books/ and covers in data/covers/.\nEnvironment Variables\nCreate a .env file in the project root:\nThe Google Books API key is optional but recommended for automatic metadata fetching. Without it, metadata must be entered manually.\nDevelopment Server\nStart the development server:\nThe app will be available at http://localhost:3000. The dev server includes hot module reloading, API routes, and React Server Components support.\nProduction Build\nThe build process compiles worker threads, bundles React Server Components, and copies database migrations.\nDocker Deployment\nCompendus includes Docker support for easy deployment:\nMount the data/ directory as a volume to persist your library across container restarts.\nAvailable Scripts\n Description |\n|\n Start development server with HMR |\n Build for production |\n Start production server |\n Generate database schema |\n Run database migrations |\n Open Drizzle Studio (DB browser) |\n Run test suite |\n Run tests in watch mode |\n Run linter (oxfmt + oxlint) |"
+    "content": "Getting Started\nSet up Compendus on your local machine or deploy with Docker.\nPrerequisites\n- Node.js 20+ — Required runtime\n- pnpm — Package manager (npm install -g pnpm)\n- Git LFS — Required for cloning (large binary tracking)\nInstallation\nClone the repository and install dependencies:\nDatabase Setup\nCompendus uses SQLite with Drizzle ORM. Initialize the database:\nThe database file is stored at data/compendus.db. Book files are stored in data/books/ and covers in data/covers/.\nEnvironment Variables\nCreate a .env file in the project root:\nThe Google Books API key is optional but recommended for automatic metadata fetching. Without it, metadata must be entered manually.\nDevelopment Server\nStart the development server:\nThe app will be available at http://localhost:3000. The dev server includes hot module reloading, API routes, and React Server Components support.\nProduction Build\nThe build process compiles worker threads, bundles React Server Components, and copies database migrations.\nDocker Deployment\nCompendus includes Docker support for easy deployment:\nMount the data/ directory as a volume to persist your library across container restarts.\nAvailable Scripts\n Description                       |\n  |\n Start development server with HMR |\n Build for production              |\n Start production server           |\n Generate database schema          |\n Run database migrations           |\n Open Drizzle Studio (DB browser)  |\n Run test suite                    |\n Run tests in watch mode           |\n Run linter (oxfmt + oxlint)       |"
   },
   {
     "title": "Prerequisites",
@@ -177,7 +177,7 @@
     "path": "/docs/getting-started#available-scripts",
     "section": "Overview · Getting Started",
     "headings": [],
-    "content": "Description |\n|\n Start development server with HMR |\n Build for production |\n Start production server |\n Generate database schema |\n Run database migrations |\n Open Drizzle Studio (DB browser) |\n Run test suite |\n Run tests in watch mode |\n Run linter (oxfmt + oxlint) |"
+    "content": "Description                       |\n  |\n Start development server with HMR |\n Build for production              |\n Start production server           |\n Generate database schema          |\n Run database migrations           |\n Open Drizzle Studio (DB browser)  |\n Run test suite                    |\n Run tests in watch mode           |\n Run linter (oxfmt + oxlint)       |"
   },
   {
     "title": "Compendus Documentation",
@@ -222,11 +222,11 @@
       "Features",
       "Project Structure",
       "Reader Engine",
-      "EPUB Rendering Pipeline",
+      "CCD Rendering Pipeline",
       "Reader Features",
       "Server Communication"
     ],
-    "content": "iOS App\nCompendus includes a native iOS app built with SwiftUI and SwiftData\nthat connects to the server for library management and book downloads.\nPrerequisites\n- Xcode 15+ — Required for building the iOS app\n- iOS 17+ — Minimum deployment target\n- Compendus server — Running locally or on the network for the iOS app to connect to\nSetup\n1. Open the Xcode project at Compendus/Compendus.xcodeproj\n2. Swift Package Manager dependencies (ZIPFoundation, SwiftSoup) will resolve automatically\n3. Configure the server URL in the app's settings screen to point to your Compendus server\n4. Build and run on a device or simulator\nThe dev server is configured with host: true so the iOS simulator can connect via the local network.\nFeatures\n- Library Browsing — Browse your full library with search, filtering by format/type, and sorting options.\n- Offline Reading — Download books for offline reading with background download support and progress tracking.\n- Custom EPUB Reader — Native CoreText + UITextView-based EPUB renderer with pagination, highlights, and bookmarks.\n- PDF Reader — PDFKit-based PDF viewer with annotation support and highlight persistence.\n- Audiobook Player — Audio playback with chapter navigation, speed control, and sleep timer.\n- Highlights & Notes — Create color-coded text highlights with notes. Synced to the server via REST API.\n- Reading Sessions — Automatic reading time tracking with pages-read statistics.\n- On-Device Transcription — Transcribe audiobooks locally using Whisper.cpp without sending audio to external services.\n- Text-to-Speech — Built-in TTS with pre-generation and audio caching for read-along functionality.\n- Home Screen Widget — WidgetKit widget showing currently reading books on the iOS home screen.\n- Deep Linking — Open books directly via compendus://book/{bookId} URL scheme.\n- Dark Mode — Full dark mode support with customizable reading themes (font, size, line height).\nProject Structure\nReader Engine\nThe iOS app uses a custom-built reader en"
+    "content": "iOS App\nCompendus includes a native iOS app built with SwiftUI and SwiftData\nthat connects to the server for library management and book downloads.\nPrerequisites\n- Xcode 15+ — Required for building the iOS app\n- iOS 17+ — Minimum deployment target\n- Compendus server — Running locally or on the network for the iOS app to connect to\nSetup\n1. Open the Xcode project at Compendus/Compendus.xcodeproj\n2. Swift Package Manager dependencies (ZIPFoundation, SwiftSoup) will resolve automatically\n3. Configure the server URL in the app's settings screen to point to your Compendus server\n4. Build and run on a device or simulator\nThe dev server is configured with host: true so the iOS simulator can connect via the local network.\nFeatures\n- Library Browsing — Browse your full library with search, filtering by format/type, and sorting options.\n- Offline Reading — Download books for offline reading with background download support and progress tracking.\n- Native Reader — Renders the server-generated CCD (Compendus Content Document) with CoreText + UITextView: pagination, highlights, and bookmarks. No on-device EPUB parsing.\n- PDF Reader — PDFKit-based PDF viewer with annotation support and highlight persistence.\n- Audiobook Player — Audio playback with chapter navigation, speed control, and sleep timer.\n- Highlights & Notes — Create color-coded text highlights with notes. Synced to the server via REST API.\n- Reading Sessions — Automatic reading time tracking with pages-read statistics.\n- On-Device Transcription — Transcribe audiobooks locally using Whisper.cpp without sending audio to external services.\n- Text-to-Speech — On-device Kokoro neural TTS with pre-generation, audio caching, and read-along synced to the CCD text.\n- Home Screen Widget — WidgetKit widget showing currently reading books on the iOS home screen.\n- Deep Linking — Open books directly via compendus://book/{bookId} URL scheme.\n- Dark Mode — Full dark mode support with customizable reading themes (font, size, line he"
   },
   {
     "title": "Prerequisites",
@@ -250,7 +250,7 @@
     "path": "/docs/ios#features",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": "- Library Browsing — Browse your full library with search, filtering by format/type, and sorting options.\n- Offline Reading — Download books for offline reading with background download support and progress tracking.\n- Custom EPUB Reader — Native CoreText + UITextView-based EPUB renderer with pagination, highlights, and bookmarks.\n- PDF Reader — PDFKit-based PDF viewer with annotation support and highlight persistence.\n- Audiobook Player — Audio playback with chapter navigation, speed control, and sleep timer.\n- Highlights & Notes — Create color-coded text highlights with notes. Synced to the server via REST API.\n- Reading Sessions — Automatic reading time tracking with pages-read statistics.\n- On-Device Transcription — Transcribe audiobooks locally using Whisper.cpp without sending audio to external services.\n- Text-to-Speech — Built-in TTS with pre-generation and audio caching for read-along functionality.\n- Home Screen Widget — WidgetKit widget showing currently reading books on the"
+    "content": "- Library Browsing — Browse your full library with search, filtering by format/type, and sorting options.\n- Offline Reading — Download books for offline reading with background download support and progress tracking.\n- Native Reader — Renders the server-generated CCD (Compendus Content Document) with CoreText + UITextView: pagination, highlights, and bookmarks. No on-device EPUB parsing.\n- PDF Reader — PDFKit-based PDF viewer with annotation support and highlight persistence.\n- Audiobook Player — Audio playback with chapter navigation, speed control, and sleep timer.\n- Highlights & Notes — Create color-coded text highlights with notes. Synced to the server via REST API.\n- Reading Sessions — Automatic reading time tracking with pages-read statistics.\n- On-Device Transcription — Transcribe audiobooks locally using Whisper.cpp without sending audio to external services.\n- Text-to-Speech — On-device Kokoro neural TTS with pre-generation, audio caching, and read-along synced to the CCD text"
   },
   {
     "title": "Project Structure",
@@ -258,7 +258,7 @@
     "path": "/docs/ios#project-structure",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": ""
+    "content": "The reader engine is a separate Swift package, CCReader\n(Compendus/CCReader/Sources/CCReader/):"
   },
   {
     "title": "Reader Engine",
@@ -266,15 +266,15 @@
     "path": "/docs/ios#reader-engine",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": "The iOS app uses a custom-built reader engine with native iOS rendering."
+    "content": "The iOS app renders the server-generated CCD (Compendus Content Document)\nnatively — there is no on-device EPUB/MOBI parsing. On first open it downloads\nand unpacks a CCD pack, then reads entirely offline."
   },
   {
-    "title": "EPUB Rendering Pipeline",
-    "slug": "ios#epub-rendering-pipeline",
-    "path": "/docs/ios#epub-rendering-pipeline",
+    "title": "CCD Rendering Pipeline",
+    "slug": "ios#ccd-rendering-pipeline",
+    "path": "/docs/ios#ccd-rendering-pipeline",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": "1. EPUBParser — Extracts ZIP, parses OPF metadata and spine order\n2. XHTMLContentParser — Parses XHTML into ContentNode AST (headings, paragraphs, images, lists)\n3. AttributedStringBuilder — Converts ContentNode AST into NSAttributedString with styles\n4. NativePaginationEngine — Uses CoreText CTFramesetter to paginate text\n5. NativePageViewController — Hosts UITextView for each page with gesture handling"
+    "content": "1. CCDPack — Downloads + unpacks the CCD pack (a ZIP of manifest.ccd.json + resources/)\n2. CCDModels — Decodes the CCD bundle (blocks/inlines) from the manifest\n3. CCDContentMapper — Maps CCD blocks → ContentNode AST (headings, paragraphs, images, lists, tables)\n4. AttributedStringBuilder — Converts ContentNode AST into NSAttributedString with styles\n5. NativePaginationEngine — Uses CoreText CTFramesetter to paginate text\n6. NativePageViewController — Hosts UITextView for each page with gesture handling"
   },
   {
     "title": "Reader Features",
@@ -282,7 +282,7 @@
     "path": "/docs/ios#reader-features",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": "- Text highlights with XPath-based range serialization\n- epub:type footnote detection with popover presentation\n- Fixed-layout (FXL) rendering with rendition:spread blank page detection\n- SVG cover detection and rendering\n- Background chapter parsing with async image pre-loading\n- Session-scoped NSCache-based image caching"
+    "content": "- Text highlights with block + character-offset locators\n- Footnote popovers (carried through the CCD as note references)\n- Fixed-layout (FXL) rendering — one full-page image block per spine page\n- SVG pages rasterized to PNG in the CCD pack (server-side)\n- Background chapter mapping with async image pre-loading\n- Session-scoped NSCache-based image caching"
   },
   {
     "title": "Server Communication",
@@ -290,7 +290,7 @@
     "path": "/docs/ios#server-communication",
     "section": "Platforms · iOS App",
     "headings": [],
-    "content": "The iOS app communicates with the Compendus server through the REST API. Key interactions:\n Endpoint |\n|\n GET /api/library |\n GET /api/search?q=... |\n GET /api/books/:id |\n GET /books/:id.:format |\n GET /covers/:id.jpg |\n PUT /api/books/:id |\n PUT /api/books/:id/transcript |\n GET /api/reader/:id/resource/ |"
+    "content": "The iOS app communicates with the Compendus server through the REST API. Key interactions:\n Endpoint                         |\n  |\n GET /api/library               |\n GET /api/search?q=...          |\n GET /api/books/:id             |\n GET /api/reader/:id/ccd/pack   |\n GET /covers/:id.jpg            |\n PUT /api/books/:id             |\n PUT /api/books/:id/transcript  |\n GET /api/reader/:id/resource/ |"
   },
   {
     "title": "API Reference",

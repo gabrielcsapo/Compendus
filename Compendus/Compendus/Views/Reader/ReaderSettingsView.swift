@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct ReaderSettingsView: View {
     @Environment(ReaderSettings.self) private var readerSettings

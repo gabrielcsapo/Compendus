@@ -5,7 +5,8 @@ import { streamFileResponse } from "../lib/file-serving";
 import { db, rawDb, bookSubjects, backgroundJobs } from "../../app/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { findBestMetadata } from "../../app/lib/metadata";
-import { enqueueJob, getJob } from "../../app/lib/queue";
+import { enqueueJob, getJob, cancelJob, cancelAllJobs } from "../../app/lib/queue";
+import { CCD_VERSION } from "../../app/lib/content-ast/types";
 import { randomUUID } from "crypto";
 
 const app = new Hono();
@@ -218,6 +219,60 @@ app.get("/api/admin/preview/:filename", async (c) => {
   return streamFileResponse(c, filePath, {
     cacheControl: "no-cache",
   });
+});
+
+// ── CCD backfill ──
+// GET /api/admin/ccd-status — how much of the library has a current-version CCD bundle.
+app.get("/api/admin/ccd-status", (c) => {
+  const total = (
+    rawDb.prepare(`SELECT COUNT(*) AS n FROM books WHERE format IN ${ANALYZABLE_SQL}`).get() as {
+      n: number;
+    }
+  ).n;
+  const current = (
+    rawDb
+      .prepare(
+        `SELECT COUNT(*) AS n FROM books WHERE format IN ${ANALYZABLE_SQL} AND ccd_version = ?`,
+      )
+      .get(CCD_VERSION) as { n: number }
+  ).n;
+  // Expose the backfill job's recent log lines (per-book failures are logged
+  // here as `<bookId> (<format>): <error>`) so failed conversions are diagnosable.
+  const logRow = rawDb
+    .prepare(`SELECT logs FROM background_jobs WHERE id = 'ccd-backfill'`)
+    .get() as { logs?: string } | undefined;
+  const logs = logRow?.logs ? logRow.logs.split("\n").slice(-50) : [];
+  return c.json({
+    success: true,
+    total,
+    current,
+    pending: total - current,
+    version: CCD_VERSION,
+    job: getJob("ccd-backfill") ?? null,
+    logs,
+  });
+});
+
+// POST /api/admin/backfill-ccd — enqueue a library-wide CCD backfill (idempotent).
+app.post("/api/admin/backfill-ccd", (c) => {
+  const jobId = "ccd-backfill";
+  const existing = getJob(jobId);
+  if (existing && existing.status === "running")
+    return c.json({ success: true, jobId, alreadyRunning: true });
+  enqueueJob(jobId, "ccd-backfill", {});
+  return c.json({ success: true, jobId });
+});
+
+// POST /api/admin/backfill-ccd/cancel — stop a running/pending CCD backfill.
+app.post("/api/admin/backfill-ccd/cancel", (c) => {
+  return c.json(cancelJob("ccd-backfill"));
+});
+
+// POST /api/admin/jobs/cancel-all — abort the running job AND delete every queued
+// job row (so nothing resumes on the next boot). The escape hatch for a runaway
+// extract/backfill that's pegging the host.
+app.post("/api/admin/jobs/cancel-all", (c) => {
+  return c.json(cancelAllJobs());
 });
 
 export const adminRoutes = app;

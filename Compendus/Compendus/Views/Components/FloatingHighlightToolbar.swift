@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import EPUBReader
+import CCReader
 
 struct FloatingHighlightToolbar: View {
     @Environment(HighlightColorManager.self) private var highlightColorManager
@@ -24,6 +24,17 @@ struct FloatingHighlightToolbar: View {
     let onShare: ((String) -> Void)?
 
     @State private var showingDefinition = false
+    @State private var showingColorPalette = false
+    /// Measured toolbar width, used to clamp it on-screen. Seeded with a sane
+    /// estimate so the first layout (before measurement) is already close.
+    @State private var measuredWidth: CGFloat = 280
+
+    /// The book's highlight colors, for the multicolor swatch gradient.
+    private var paletteColors: [Color] {
+        let cs = highlightColorManager.colorsForBook(bookId)
+            .map { Color(uiColor: UIColor(hex: $0.preset.hex) ?? .yellow) }
+        return cs.isEmpty ? [.yellow, .green, .blue, .pink] : cs
+    }
 
     private var firstWord: String {
         let pattern = try? NSRegularExpression(pattern: "[\\p{L}\\p{N}'-]+")
@@ -53,9 +64,15 @@ struct FloatingHighlightToolbar: View {
     }
 
     private var toolbarX: CGFloat {
-        let x = selectionRect.midX
-        // Clamp so toolbar doesn't overflow screen edges (estimated half-width ~160)
-        return max(160, min(x, containerSize.width - 160))
+        // Center on the selection, but keep the whole bar on-screen using its
+        // MEASURED half-width plus a margin (the bar's width varies — e.g. the
+        // Define button only shows for short selections — so a fixed estimate
+        // would still clip).
+        let half = measuredWidth / 2
+        let pad: CGFloat = 8
+        let minX = half + pad
+        let maxX = max(minX, containerSize.width - half - pad)
+        return min(max(selectionRect.midX, minX), maxX)
     }
 
     var body: some View {
@@ -67,16 +84,35 @@ struct FloatingHighlightToolbar: View {
 
             // Single-row toolbar
             HStack(spacing: 10) {
-                // Color dots
-                ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
-                    Button {
-                        onSelectColor(item.preset.hex)
-                    } label: {
-                        Circle()
-                            .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
-                            .frame(width: 28, height: 28)
+                // Highlight color: a single multicolor swatch that opens a color
+                // palette popover. Collapsing the per-color dots into one button
+                // keeps the bar narrow so it doesn't run off the screen edges.
+                Button {
+                    showingColorPalette = true
+                } label: {
+                    Circle()
+                        .fill(AngularGradient(colors: paletteColors + [paletteColors.first ?? .yellow], center: .center))
+                        .frame(width: 28, height: 28)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.55), lineWidth: 1.5))
+                }
+                .accessibilityLabel("Highlight color")
+                .popover(isPresented: $showingColorPalette) {
+                    HStack(spacing: 16) {
+                        ForEach(highlightColorManager.colorsForBook(bookId), id: \.preset.id) { item in
+                            Button {
+                                onSelectColor(item.preset.hex)
+                                showingColorPalette = false
+                            } label: {
+                                Circle()
+                                    .fill(Color(uiColor: UIColor(hex: item.preset.hex) ?? .yellow))
+                                    .frame(width: 32, height: 32)
+                                    .overlay(Circle().strokeBorder(.separator, lineWidth: 0.5))
+                            }
+                            .accessibilityLabel("\(item.preset.name) highlight")
+                        }
                     }
-                    .accessibilityLabel("\(item.preset.name) highlight")
+                    .padding(16)
+                    .presentationCompactAdaptation(.popover)
                 }
 
                 // Vertical divider between colors and actions
@@ -164,6 +200,15 @@ struct FloatingHighlightToolbar: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .fixedSize()
+            .background {
+                // Measure the bar's actual width so toolbarX can clamp it fully
+                // on-screen regardless of which buttons are present.
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { measuredWidth = g.size.width }
+                        .onChange(of: g.size.width) { _, w in measuredWidth = w }
+                }
+            }
             .position(x: toolbarX, y: toolbarY)
         }
         .sheet(isPresented: $showingDefinition) {

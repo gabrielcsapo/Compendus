@@ -68,11 +68,11 @@ export async function runInWorker<T>(
     return fallback();
   }
 
-  try {
-    const pool = getWorkerPool();
-    return (await pool.runTask(type, buffer, format)) as T;
-  } catch (error) {
-    console.warn(`[runInWorker] Worker failed for ${type}, falling back to main thread:`, error);
-    return fallback();
-  }
+  // Run in the worker pool. Do NOT fall back to the main thread when the worker
+  // TASK fails or times out — a heavy or wedged conversion re-run on the main
+  // thread would peg the event loop on this shared host. Let the error propagate
+  // so the caller (e.g. CCD backfill) marks the book failed and moves on. The
+  // main-thread fallback above is only for when no worker is built at all.
+  const pool = getWorkerPool();
+  return (await pool.runTask(type, buffer, format)) as T;
 }

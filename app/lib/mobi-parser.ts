@@ -206,6 +206,27 @@ function getVarLenFromEnd(arr: Uint8Array): number {
   return value;
 }
 
+// Variable-length quantity read forward from position `i`.
+function getVarLen(byteArray: Uint8Array, i = 0): { value: number; length: number } {
+  let value = 0;
+  let length = 0;
+  for (const byte of byteArray.subarray(i, i + 4)) {
+    value = ((value << 7) | (byte & 0b111_1111)) >>> 0;
+    length++;
+    if (byte & 0b1000_0000) break;
+  }
+  return { value, length };
+}
+
+function countUnsetEnd(x: number): number {
+  let count = 0;
+  while ((x & 1) === 0) {
+    x = x >> 1;
+    count++;
+  }
+  return count;
+}
+
 function countBitsSet(x: number): number {
   let count = 0;
   for (; x > 0; x = x >> 1) {
@@ -941,6 +962,719 @@ class MobiFile implements MobiParser {
 }
 
 // ---------------------------------------------------------------------------
+// KF8 / AZW3 support
+// ---------------------------------------------------------------------------
+
+const kf8HeaderDef: StructDef = {
+  resourceStart: [108, 4, "uint"],
+  fdst: [192, 4, "uint"],
+  numFdst: [196, 4, "uint"],
+  frag: [248, 4, "uint"],
+  skel: [252, 4, "uint"],
+  guide: [260, 4, "uint"],
+};
+
+interface Kf8Header {
+  resourceStart: number;
+  fdst: number;
+  numFdst: number;
+  frag: number;
+  skel: number;
+  guide: number;
+}
+
+const indxHeaderDef: StructDef = {
+  magic: [0, 4, "string"],
+  length: [4, 4, "uint"],
+  type: [8, 4, "uint"],
+  idxt: [20, 4, "uint"],
+  numRecords: [24, 4, "uint"],
+  encoding: [28, 4, "uint"],
+  language: [32, 4, "uint"],
+  total: [36, 4, "uint"],
+  ordt: [40, 4, "uint"],
+  ligt: [44, 4, "uint"],
+  numLigt: [48, 4, "uint"],
+  numCncx: [52, 4, "uint"],
+};
+
+const tagxHeaderDef: StructDef = {
+  magic: [0, 4, "string"],
+  length: [4, 4, "uint"],
+  numControlBytes: [8, 4, "uint"],
+};
+
+const fdstHeaderDef: StructDef = {
+  magic: [0, 4, "string"],
+  numEntries: [8, 4, "uint"],
+};
+
+const fontHeaderDef: StructDef = {
+  flags: [8, 4, "uint"],
+  dataStart: [12, 4, "uint"],
+  keyLength: [16, 4, "uint"],
+  keyStart: [20, 4, "uint"],
+};
+
+interface IndexEntry {
+  name: string;
+  tagMap: Record<number, number[]>;
+}
+
+interface IndexData {
+  table: IndexEntry[];
+  cncx: Record<number, string>;
+}
+
+/**
+ * Parse a Kindle INDX structure (skeleton / fragment / NCX / guide indexes).
+ * Faithful port of foliate-js `getIndexData`.
+ */
+function getIndexData(indxIndex: number, loadRecord: (i: number) => ArrayBuffer): IndexData {
+  const indxRecord = loadRecord(indxIndex);
+  const indx = getStruct(indxHeaderDef, indxRecord);
+  if (indx.magic !== "INDX") throw new Error("Invalid INDX record");
+  const encoding = indx.encoding as number;
+  const dec = new TextDecoder(mobiEncoding[encoding] ?? "utf-8");
+
+  const indxLength = indx.length as number;
+  const indxNumCncx = indx.numCncx as number;
+  const indxNumRecords = indx.numRecords as number;
+
+  const tagxBuffer = indxRecord.slice(indxLength);
+  const tagx = getStruct(tagxHeaderDef, tagxBuffer);
+  if (tagx.magic !== "TAGX") throw new Error("Invalid TAGX section");
+  const tagxLength = tagx.length as number;
+  const numControlBytes = tagx.numControlBytes as number;
+  const numTags = (tagxLength - 12) / 4;
+  const tagTable: Uint8Array[] = Array.from(
+    { length: numTags },
+    (_, i) => new Uint8Array(tagxBuffer.slice(12 + i * 4, 12 + i * 4 + 4)),
+  );
+
+  // CNCX string pool
+  const cncx: Record<number, string> = {};
+  let cncxRecordOffset = 0;
+  for (let i = 0; i < indxNumCncx; i++) {
+    const record = loadRecord(indxIndex + indxNumRecords + i + 1);
+    const array = new Uint8Array(record);
+    for (let pos = 0; pos < array.byteLength; ) {
+      const index = pos;
+      const { value, length } = getVarLen(array, pos);
+      pos += length;
+      const result = record.slice(pos, pos + value);
+      pos += value;
+      cncx[cncxRecordOffset + index] = dec.decode(result);
+    }
+    cncxRecordOffset += 0x10000;
+  }
+
+  const table: IndexEntry[] = [];
+  for (let i = 0; i < indxNumRecords; i++) {
+    const record = loadRecord(indxIndex + 1 + i);
+    const array = new Uint8Array(record);
+    const recIndx = getStruct(indxHeaderDef, record);
+    if (recIndx.magic !== "INDX") throw new Error("Invalid INDX record");
+    const recNumRecords = recIndx.numRecords as number;
+    const recIdxt = recIndx.idxt as number;
+
+    for (let j = 0; j < recNumRecords; j++) {
+      const offsetOffset = recIdxt + 4 + 2 * j;
+      const offset = getUint(record.slice(offsetOffset, offsetOffset + 2));
+
+      const nameLength = getUint(record.slice(offset, offset + 1));
+      const name = getString(record.slice(offset + 1, offset + 1 + nameLength));
+
+      const tags: [number, number | null, number | null, number][] = [];
+      const startPos = offset + 1 + nameLength;
+      let controlByteIndex = 0;
+      let pos = startPos + numControlBytes;
+      for (const [tag, numValues, mask, end] of tagTable) {
+        if (end & 1) {
+          controlByteIndex++;
+          continue;
+        }
+        const ctrlOffset = startPos + controlByteIndex;
+        const value = getUint(record.slice(ctrlOffset, ctrlOffset + 1)) & mask;
+        if (value === mask) {
+          if (countBitsSet(mask) > 1) {
+            const { value: v, length } = getVarLen(array, pos);
+            tags.push([tag, null, v, numValues]);
+            pos += length;
+          } else {
+            tags.push([tag, 1, null, numValues]);
+          }
+        } else {
+          tags.push([tag, value >> countUnsetEnd(mask), null, numValues]);
+        }
+      }
+
+      const tagMap: Record<number, number[]> = {};
+      for (const [tag, valueCount, valueBytes, numValues] of tags) {
+        const values: number[] = [];
+        if (valueCount != null) {
+          for (let k = 0; k < valueCount * numValues; k++) {
+            const { value, length } = getVarLen(array, pos);
+            values.push(value);
+            pos += length;
+          }
+        } else {
+          let count = 0;
+          while (count < (valueBytes as number)) {
+            const { value, length } = getVarLen(array, pos);
+            values.push(value);
+            pos += length;
+            count += length;
+          }
+        }
+        tagMap[tag] = values;
+      }
+      table.push({ name, tagMap });
+    }
+  }
+  return { table, cncx };
+}
+
+interface NcxItem {
+  index: number;
+  offset?: number;
+  size?: number;
+  label: string;
+  headingLevel?: number;
+  pos?: number[];
+  parent?: number;
+  firstChild?: number;
+  lastChild?: number;
+  children?: NcxItem[];
+}
+
+function getNCX(indxIndex: number, loadRecord: (i: number) => ArrayBuffer): NcxItem[] {
+  const { table, cncx } = getIndexData(indxIndex, loadRecord);
+  const items: NcxItem[] = table.map(({ tagMap }, index) => ({
+    index,
+    offset: tagMap[1]?.[0],
+    size: tagMap[2]?.[0],
+    label: cncx[tagMap[3]?.[0]] ?? "",
+    headingLevel: tagMap[4]?.[0],
+    pos: tagMap[6],
+    parent: tagMap[21]?.[0],
+    firstChild: tagMap[22]?.[0],
+    lastChild: tagMap[23]?.[0],
+  }));
+  const getChildren = (item: NcxItem): NcxItem => {
+    if (item.firstChild == null) return item;
+    item.children = items.filter((x) => x.parent === item.index).map(getChildren);
+    return item;
+  };
+  return items.filter((item) => item.headingLevel === 0).map(getChildren);
+}
+
+// kindle: URI handling
+const kindleResourceRegex = /kindle:(flow|embed):(\w+)(?:\?mime=(\w+\/[-+.\w]+))?/;
+function parseResourceURI(str: string): { resourceType: string; id: number; type?: string } {
+  const m = str.match(kindleResourceRegex)!;
+  return { resourceType: m[1], id: parseInt(m[2], 32), type: m[3] };
+}
+
+interface SkelEntry {
+  index: number;
+  name: string;
+  numFrag: number;
+  offset: number;
+  length: number;
+}
+
+interface FragEntry {
+  insertOffset: number;
+  selector: string;
+  index: number;
+  offset: number;
+  length: number;
+}
+
+interface Kf8Section {
+  skel: SkelEntry;
+  frags: FragEntry[];
+  fragEnd: number;
+  length: number;
+  totalLength: number;
+}
+
+/**
+ * KF8 (AZW3 / MOBI version >= 8) parser. Reconstructs each spine section by
+ * splicing fragment chunks into its skeleton, then rewrites kindle: resource
+ * references. Implements the same MobiParser interface as MobiFile.
+ */
+class Kf8File implements MobiParser {
+  private arrayBuffer: ArrayBuffer;
+  private resourceSaveDir: string;
+
+  private pdb!: PdbHeader;
+  private recordOffsets: number[] = [];
+  private start = 0; // boundary record offset for combo files
+  private resourceStartRec = 0; // absolute record index of resourceStart
+  private palmdoc!: PalmDocHeader;
+  private mobi!: MobiHeaderRaw;
+  private kf8!: Kf8Header;
+  private exth: Record<string, unknown> = {};
+  private textDecoder!: TextDecoder;
+  private decompress!: (data: Uint8Array) => Uint8Array;
+  private removeTrailing!: (arr: Uint8Array) => Uint8Array;
+  private title = "";
+
+  private fdstTable: [number, number][] = [];
+  private fullRawLength = 0;
+  private rawml: Uint8Array = new Uint8Array();
+
+  private sectionsRaw: Kf8Section[] = [];
+  private spine: MobiSpineItem[] = [];
+  private idToSection = new Map<number, Kf8Section>();
+  private toc: MobiTocItem[] = [];
+
+  private chapterCache = new Map<number, MobiProcessedChapter>();
+  private resourceCache = new Map<number, string>();
+
+  constructor(data: Uint8Array | Buffer, resourceSaveDir?: string) {
+    this.arrayBuffer = bufferToArrayBuffer(data instanceof Buffer ? new Uint8Array(data) : data);
+    this.resourceSaveDir = resourceSaveDir ?? "./images";
+    if (!existsSync(this.resourceSaveDir)) {
+      mkdirSync(this.resourceSaveDir, { recursive: true });
+    }
+  }
+
+  // -- Public API -----------------------------------------------------------
+
+  getFileInfo() {
+    return { fileName: this.title };
+  }
+
+  getSpine(): MobiSpineItem[] {
+    return this.spine;
+  }
+
+  getToc(): MobiTocItem[] {
+    return this.toc;
+  }
+
+  getMetadata(): MobiMetadata {
+    const e = this.exth;
+    const titleFromExth = e.title as string | undefined;
+    const langFromExth = e.language as string[] | string | undefined;
+    const lang = Array.isArray(langFromExth)
+      ? langFromExth[0]
+      : (langFromExth as string | undefined);
+    const mobiLangVal =
+      mobiLang[this.mobi.localeLanguage]?.[this.mobi.localeRegion >> 2] ||
+      mobiLang[this.mobi.localeLanguage]?.[0];
+    return {
+      identifier: String(this.mobi.uid),
+      title: titleFromExth ?? this.title,
+      author: this.asStringArray(e.creator),
+      publisher: (e.publisher as string) ?? "",
+      language: lang ?? mobiLangVal ?? "",
+      published: (e.date as string) ?? "",
+      description: (e.description as string) ?? "",
+      subject: this.asStringArray(e.subject),
+      rights: (e.rights as string) ?? "",
+      contributor: this.asStringArray(e.contributor),
+    };
+  }
+
+  loadChapter(id: string): MobiProcessedChapter | undefined {
+    const numId = parseInt(id, 10);
+    if (Number.isNaN(numId)) return undefined;
+    if (this.chapterCache.has(numId)) return this.chapterCache.get(numId)!;
+    const section = this.idToSection.get(numId);
+    if (!section) return undefined;
+    const str = this.reconstructSection(section);
+    const html = this.replaceResources(str);
+    const processed: MobiProcessedChapter = { html, css: [] };
+    this.chapterCache.set(numId, processed);
+    return processed;
+  }
+
+  getCoverImage(): string {
+    if (this.resourceCache.has(-1)) return this.resourceCache.get(-1)!;
+    const coverOffset = (this.exth.coverOffset ?? this.exth.thumbnailOffset) as number | undefined;
+    if (coverOffset === undefined || coverOffset >= 0xffffffff) return "";
+    try {
+      const data = this.loadResource(coverOffset);
+      if (!data) return "";
+      const bytes = new Uint8Array(data);
+      const mimeType = getFileMimeType(bytes);
+      if (mimeType === "unknown") return "";
+      const path = saveResourceToDisk(bytes, mimeType, "cover", this.resourceSaveDir);
+      this.resourceCache.set(-1, path);
+      return path;
+    } catch {
+      return "";
+    }
+  }
+
+  destroy(): void {
+    this.chapterCache.clear();
+    this.resourceCache.clear();
+    try {
+      if (existsSync(this.resourceSaveDir)) {
+        for (const f of readdirSync(this.resourceSaveDir)) {
+          try {
+            unlinkSync(resolve(this.resourceSaveDir, f));
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // -- Initialization -------------------------------------------------------
+
+  async init(): Promise<void> {
+    this.parsePdbHeader();
+
+    // Read record 0 headers; locate the KF8 part.
+    let headers = this.parseHeaders(this.getRawRecord(0));
+    let isKF8 = headers.mobi.version >= 8;
+    if (!isKF8) {
+      const boundary = headers.exth?.boundary as number | undefined;
+      if (boundary !== undefined && boundary < 0xffffffff) {
+        // Combo MOBI7+KF8 file: re-read headers from the boundary record.
+        headers = this.parseHeaders(this.getRawRecord(boundary));
+        this.start = boundary;
+        isKF8 = true;
+      }
+    }
+    if (!isKF8) {
+      throw new Error("Not a KF8/AZW3 file (version < 8 and no KF8 boundary)");
+    }
+
+    this.palmdoc = headers.palmdoc;
+    this.mobi = headers.mobi;
+    this.exth = headers.exth ?? {};
+    this.kf8 = headers.kf8!;
+
+    if (this.palmdoc.encryption !== 0) {
+      throw new Error("Encrypted MOBI/KF8 files are not supported. The file requires a DRM key.");
+    }
+
+    this.resourceStartRec = this.kf8.resourceStart; // resourceStart is absolute (not boundary-relative)
+    this.textDecoder = new TextDecoder(mobiEncoding[this.mobi.encoding] ?? "utf-8");
+
+    // Title
+    try {
+      const titleBuf = this.getRawRecord(this.start).slice(
+        this.mobi.titleOffset,
+        this.mobi.titleOffset + this.mobi.titleLength,
+      );
+      this.title = this.textDecoder.decode(titleBuf);
+    } catch {
+      this.title = this.pdb.name.replace(/ /g, "").replace(/_/g, " ");
+    }
+
+    this.setupDecompression();
+    this.decompressRawml();
+    this.parseFdst();
+    this.buildSections();
+    this.buildToc();
+  }
+
+  // -- Header parsing -------------------------------------------------------
+
+  private parsePdbHeader(): void {
+    this.pdb = getStruct(pdbHeaderDef, this.arrayBuffer) as unknown as PdbHeader;
+    const numRecords = this.pdb.numRecords;
+    this.recordOffsets = [];
+    for (let i = 0; i < numRecords; i++) {
+      const off = 78 + i * 8;
+      this.recordOffsets.push(getUint(this.arrayBuffer.slice(off, off + 4)));
+    }
+  }
+
+  private parseHeaders(buf: ArrayBuffer): {
+    palmdoc: PalmDocHeader;
+    mobi: MobiHeaderRaw;
+    exth: Record<string, unknown> | null;
+    kf8: Kf8Header | null;
+  } {
+    const palmdoc = getStruct(palmdocHeaderDef, buf) as unknown as PalmDocHeader;
+    const mobi = getStruct(mobiHeaderDef, buf) as unknown as MobiHeaderRaw;
+    if (mobi.magic !== "MOBI") throw new Error("Missing MOBI header");
+    let exth: Record<string, unknown> | null = null;
+    if (mobi.exthFlag & 0x40) {
+      try {
+        exth = parseExth(buf.slice(mobi.length + 16), mobi.encoding);
+      } catch {
+        exth = null;
+      }
+    }
+    const kf8 = mobi.version >= 8 ? (getStruct(kf8HeaderDef, buf) as unknown as Kf8Header) : null;
+    return { palmdoc, mobi, exth, kf8 };
+  }
+
+  private setupDecompression(): void {
+    const loadRecord = (i: number) => this.loadRecord(i);
+    const compression = this.palmdoc.compression;
+    if (compression === 1) {
+      this.decompress = (d) => d;
+    } else if (compression === 2) {
+      this.decompress = decompressPalmDOC;
+    } else if (compression === 17480) {
+      this.decompress = setupHuffCdic(
+        { huffcdic: this.mobi.huffcdic, numHuffcdic: this.mobi.numHuffcdic },
+        loadRecord,
+      );
+    } else {
+      throw new Error(`Unknown KF8 compression type: ${compression}`);
+    }
+    this.removeTrailing = makeTrailingEntryRemover(this.mobi.trailingFlags);
+  }
+
+  private loadText(index: number): Uint8Array {
+    const raw = new Uint8Array(this.loadRecord(index + 1));
+    return this.decompress(this.removeTrailing(raw));
+  }
+
+  private decompressRawml(): void {
+    const buffers: Uint8Array[] = [];
+    for (let i = 0; i < this.palmdoc.numTextRecords; i++) {
+      try {
+        buffers.push(this.loadText(i));
+      } catch {
+        // skip broken records
+      }
+    }
+    this.rawml = concatTypedArrays(buffers);
+  }
+
+  private parseFdst(): void {
+    try {
+      const fdstBuffer = this.loadRecord(this.kf8.fdst);
+      const fdst = getStruct(fdstHeaderDef, fdstBuffer);
+      if (fdst.magic !== "FDST") throw new Error("Missing FDST record");
+      const numEntries = fdst.numEntries as number;
+      this.fdstTable = Array.from({ length: numEntries }, (_, i) => 12 + i * 8).map(
+        (offset) =>
+          [
+            getUint(fdstBuffer.slice(offset, offset + 4)),
+            getUint(fdstBuffer.slice(offset + 4, offset + 8)),
+          ] as [number, number],
+      );
+      this.fullRawLength = this.fdstTable[this.fdstTable.length - 1][1];
+    } catch {
+      this.fdstTable = [];
+      this.fullRawLength = this.rawml.length;
+    }
+  }
+
+  // -- Section reconstruction ----------------------------------------------
+
+  private buildSections(): void {
+    const loadRecord = (i: number) => this.loadRecord(i);
+
+    const skelTable: SkelEntry[] = getIndexData(this.kf8.skel, loadRecord).table.map(
+      ({ name, tagMap }, index) => ({
+        index,
+        name,
+        numFrag: tagMap[1][0],
+        offset: tagMap[6][0],
+        length: tagMap[6][1],
+      }),
+    );
+
+    const fragData = getIndexData(this.kf8.frag, loadRecord);
+    const fragTable: FragEntry[] = fragData.table.map(({ name, tagMap }) => ({
+      insertOffset: parseInt(name, 10),
+      selector: fragData.cncx[tagMap[2][0]],
+      index: tagMap[4][0],
+      offset: tagMap[6][0],
+      length: tagMap[6][1],
+    }));
+
+    const sections: Kf8Section[] = [];
+    for (const skel of skelTable) {
+      const last = sections[sections.length - 1];
+      const fragStart = last?.fragEnd ?? 0;
+      const fragEnd = fragStart + skel.numFrag;
+      const frags = fragTable.slice(fragStart, fragEnd);
+      const length = skel.length + frags.reduce((a, f) => a + f.length, 0);
+      const totalLength = (last?.totalLength ?? 0) + length;
+      sections.push({ skel, frags, fragEnd, length, totalLength });
+    }
+    this.sectionsRaw = sections;
+
+    let id = 0;
+    for (const section of sections) {
+      if (!section.frags.length) continue; // non-linear / empty skeleton
+      const item: MobiSpineItem = {
+        id: String(id),
+        text: "",
+        start: section.skel.offset,
+        end: section.skel.offset + section.length,
+        size: section.length,
+      };
+      this.spine.push(item);
+      this.idToSection.set(id, section);
+      id++;
+    }
+  }
+
+  // Slice raw markup using FDST flow boundaries (flow[0] is combined XHTML).
+  private loadRaw(start: number, end: number): Uint8Array {
+    return this.rawml.slice(start, end);
+  }
+
+  private loadFlow(index: number): Uint8Array {
+    if (index >= 0xffffffff || index >= this.fdstTable.length) return new Uint8Array();
+    const [s, e] = this.fdstTable[index];
+    return this.loadRaw(s, e);
+  }
+
+  private reconstructSection(section: Kf8Section): string {
+    const { skel, frags, length } = section;
+    const raw = this.loadRaw(skel.offset, skel.offset + length);
+    let skeleton = raw.slice(0, skel.length);
+    for (const frag of frags) {
+      const insertOffset = frag.insertOffset - skel.offset;
+      const offset = skel.length + frag.offset;
+      const fragRaw = raw.slice(offset, offset + frag.length);
+      skeleton = concatTypedArrays([
+        skeleton.slice(0, insertOffset),
+        fragRaw,
+        skeleton.slice(insertOffset),
+      ]);
+    }
+    return this.textDecoder.decode(skeleton);
+  }
+
+  // -- Resources ------------------------------------------------------------
+
+  private loadResource(index: number): ArrayBuffer | null {
+    const recordIndex = this.resourceStartRec + index;
+    if (recordIndex < 0 || recordIndex >= this.recordOffsets.length) return null;
+    const buf = this.getRawRecord(recordIndex);
+    const magic = getString(buf.slice(0, 4));
+    if (magic === "FONT") return decodeFont(buf);
+    if (magic === "VIDE" || magic === "AUDI") return buf.slice(12);
+    return buf;
+  }
+
+  private ensureEmbedSaved(index: number): string | null {
+    if (this.resourceCache.has(index)) return this.resourceCache.get(index)!;
+    try {
+      const data = this.loadResource(index);
+      if (!data) return null;
+      const bytes = new Uint8Array(data);
+      const mimeType = getFileMimeType(bytes);
+      if (mimeType === "unknown") return null;
+      const path = saveResourceToDisk(bytes, mimeType, `resource-${index}`, this.resourceSaveDir);
+      this.resourceCache.set(index, path);
+      return path;
+    } catch {
+      return null;
+    }
+  }
+
+  // Rewrite kindle:embed / kindle:flow references in reconstructed HTML to
+  // saved resource paths, and drop unsupported references.
+  private replaceResources(str: string): string {
+    const regex = new RegExp(kindleResourceRegex, "g");
+    return str.replace(regex, (match: string) => {
+      try {
+        const { resourceType, id, type } = parseResourceURI(match);
+        if (resourceType === "flow") {
+          // CSS/SVG flow; inline as data URI for SVG-image, else drop link.
+          const raw = this.loadFlow(id);
+          if (type === "image/svg+xml") {
+            const b64 = Buffer.from(raw).toString("base64");
+            return `data:image/svg+xml;base64,${b64}`;
+          }
+          return match;
+        }
+        // embed: image / font, recindex is id (1-based here per kindle:embed)
+        const path = this.ensureEmbedSaved(id - 1);
+        return path ?? match;
+      } catch {
+        return match;
+      }
+    });
+  }
+
+  // -- TOC ------------------------------------------------------------------
+
+  private buildToc(): void {
+    const idx = this.mobi.indx;
+    if (idx >= 0xffffffff) return;
+    try {
+      const loadRecord = (i: number) => this.loadRecord(i);
+      const ncx = getNCX(idx, loadRecord);
+      const fidToSpineId = (fid: number): number => {
+        const rawIdx = this.sectionsRaw.findIndex((s) => s.frags.some((f) => f.index === fid));
+        if (rawIdx < 0) return -1;
+        // Map raw section index to spine id (spine skips empty sections).
+        let spineId = 0;
+        for (let i = 0; i < rawIdx; i++) if (this.sectionsRaw[i].frags.length) spineId++;
+        return spineId;
+      };
+      const map = (item: NcxItem): MobiTocItem => {
+        const fid = item.pos?.[0] ?? 0;
+        const spineId = fidToSpineId(fid);
+        return {
+          label: unescapeHTML(item.label),
+          href: spineId >= 0 ? `kf8:${spineId}` : `kf8:0`,
+          children: item.children?.map(map),
+        };
+      };
+      this.toc = ncx.map(map);
+    } catch {
+      this.toc = [];
+    }
+  }
+
+  // -- Record access --------------------------------------------------------
+
+  private getRawRecord(index: number): ArrayBuffer {
+    const offset = this.recordOffsets[index];
+    const nextOffset =
+      index + 1 < this.recordOffsets.length
+        ? this.recordOffsets[index + 1]
+        : this.arrayBuffer.byteLength;
+    return this.arrayBuffer.slice(offset, nextOffset);
+  }
+
+  // KF8-relative record load (offset by boundary `start`).
+  private loadRecord(index: number): ArrayBuffer {
+    return this.getRawRecord(this.start + index);
+  }
+
+  private asStringArray(val: unknown): string[] {
+    if (Array.isArray(val)) return val.map(String);
+    if (typeof val === "string") return [val];
+    return [];
+  }
+}
+
+// Decode a FONT resource record (deobfuscate; decompression of zlib fonts is
+// skipped — fonts are non-essential for text extraction).
+function decodeFont(buf: ArrayBuffer): ArrayBuffer {
+  const { flags, dataStart, keyLength, keyStart } = getStruct(fontHeaderDef, buf) as unknown as {
+    flags: number;
+    dataStart: number;
+    keyLength: number;
+    keyStart: number;
+  };
+  const array = new Uint8Array(buf.slice(dataStart));
+  if (flags & 0b10) {
+    const bytes = keyLength === 16 ? 1024 : 1040;
+    const key = new Uint8Array(buf.slice(keyStart, keyStart + keyLength));
+    const length = Math.min(bytes, array.length);
+    for (let i = 0; i < length; i++) array[i] = array[i] ^ key[i % key.length];
+  }
+  return array.buffer.slice(array.byteOffset, array.byteOffset + array.byteLength) as ArrayBuffer;
+}
+
+// ---------------------------------------------------------------------------
 // Factory functions
 // ---------------------------------------------------------------------------
 
@@ -957,12 +1691,13 @@ export async function initMobiFile(
 }
 
 /**
- * Stub for KF8/AZW3 parsing — not yet implemented.
- * Consumer code catches this error and falls back to MOBI7.
+ * Parse a KF8 / AZW3 file (MOBI version >= 8, or the KF8 part of a combo file).
  */
 export async function initKf8File(
-  _file: Uint8Array | Buffer,
-  _resourceSaveDir?: string,
+  file: Uint8Array | Buffer,
+  resourceSaveDir?: string,
 ): Promise<MobiParser> {
-  throw new Error("KF8/AZW3 format is not supported by the custom parser");
+  const parser = new Kf8File(file, resourceSaveDir);
+  await parser.init();
+  return parser;
 }

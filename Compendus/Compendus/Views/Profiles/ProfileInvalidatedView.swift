@@ -9,7 +9,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct ProfileInvalidatedView: View {
     @Environment(ServerConfig.self) private var serverConfig

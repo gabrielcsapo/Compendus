@@ -86,19 +86,19 @@ struct BookGridItem: View {
                         }
                 }
 
-                HStack(spacing: 4) {
-                    formatBadge
+                if book.isAudiobook || showServerProgress {
+                    HStack(spacing: 4) {
+                        if book.isAudiobook, let duration = book.durationDisplay {
+                            Text(duration)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
 
-                    if book.isAudiobook, let duration = book.durationDisplay {
-                        Text(duration)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if showServerProgress {
-                        Text("\(book.readingProgressPercent)%")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        if showServerProgress {
+                            Text("\(book.readingProgressPercent)%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -131,16 +131,6 @@ struct BookGridItem: View {
             label += ", finished"
         }
         return label
-    }
-
-    @ViewBuilder
-    private var formatBadge: some View {
-        let info = FormatInfo.from(format: book.format)
-        FormatBadgeView(
-            format: book.format,
-            size: .standard,
-            showConversionHint: info.isConvertible && !book.hasEpubVersion
-        )
     }
 }
 
@@ -207,10 +197,6 @@ struct DownloadedBookGridItem: View {
                         }
                 }
 
-                HStack(spacing: 4) {
-                    formatBadge
-                }
-
                 if let rating = book.rating {
                     HStack(spacing: 1) {
                         ForEach(1...5, id: \.self) { star in
@@ -226,11 +212,6 @@ struct DownloadedBookGridItem: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.authorsDisplay), \(book.formatDisplay) format, \(Int(book.readingProgress * 100))% complete\(book.series != nil ? ", \(book.series!) series" : "")")
         .accessibilityHint("Double tap to view details")
-    }
-
-    @ViewBuilder
-    private var formatBadge: some View {
-        FormatBadgeView(format: book.format, size: .standard)
     }
 }
 

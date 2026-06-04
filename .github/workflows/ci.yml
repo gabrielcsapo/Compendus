@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # Single source of truth for the Node version: .nvmrc (= package.json
+      # `engines` + the Dockerfile; locally, Homebrew node@22). Pinning it here
+      # means CI builds/loads the native better-sqlite3 binding for the SAME ABI
+      # the app runs on, so the DB-backed tests load it instead of failing with a
+      # bindings/ABI error.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # NOTE: full-project `tsc --noEmit` and `pnpm lint` (oxfmt) are intentionally
+      # NOT gated here — both are broadly red against pre-existing app code/docs,
+      # and the project ships via a transpile-only build. CI gates on the test
+      # suites (vitest below + Playwright e2e job). Re-introduce a typecheck step
+      # once the existing type errors are resolved.
+      - name: Test
+        run: pnpm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Browser + its OS deps. Cached install would be faster, but correctness first.
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Boots the prod server (pnpm build → node server.ts) against a seeded,
+      # isolated COMPENDUS_DATA_DIR (see playwright.config.ts + tests/e2e/seed.ts).
+      - name: E2E tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

@@ -7,7 +7,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct DownloadedSeriesDetailView: View {
     let seriesName: String

@@ -11,7 +11,7 @@
 import Foundation
 import UIKit
 import SwiftData
-import EPUBReader
+import CCReader
 
 public enum MarkKind: String, Codable, CaseIterable, Sendable {
     case bookmark         // visual formats — page or position only

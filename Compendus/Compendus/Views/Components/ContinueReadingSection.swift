@@ -78,6 +78,25 @@ enum ContinueReadingItem: Identifiable {
             return ISO8601DateFormatter().date(from: str)
         }
     }
+
+    /// CCD readiness gate for reflowable ebooks. Returns nil when the book is
+    /// readable now (ready/native) — only non-nil for processing/failed
+    /// reflowable books so the card can show a subtle state instead of
+    /// inviting a tap into a misleading error.
+    var ccdGate: (text: String, icon: String)? {
+        switch self {
+        case .downloaded(let book):
+            guard book.isReflowable else { return nil }
+            if book.isCcdFailed { return ("Couldn't be prepared", "exclamationmark.triangle") }
+            if book.isCcdProcessing { return ("Preparing…", "clock") }
+            return nil
+        case .remote(let book):
+            guard book.isReflowable else { return nil }
+            if book.isCcdFailed { return ("Couldn't be prepared", "exclamationmark.triangle") }
+            if book.isCcdProcessing { return ("Preparing…", "clock") }
+            return nil
+        }
+    }
 }
 
 /// A horizontal scrolling section showing recently read books
@@ -238,6 +257,20 @@ struct ContinueReadingCard: View {
                         .padding(4)
                 }
             }
+            .overlay(alignment: .bottom) {
+                // CCD readiness gate — subtle "Preparing…"/"Couldn't be
+                // prepared" pill for reflowable books that aren't yet readable.
+                if let gate = item.ccdGate {
+                    Label(gate.text, systemImage: gate.icon)
+                        .font(.caption2.weight(.medium))
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                }
+            }
 
             // Title and progress text
             VStack(alignment: .leading, spacing: 2) {
@@ -246,13 +279,9 @@ struct ContinueReadingCard: View {
                     .fontWeight(.medium)
                     .lineLimit(2)
 
-                HStack(spacing: 4) {
-                    FormatBadgeView(format: item.format, size: .compact)
-
-                    Text(progressLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text(progressLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             .frame(width: coverWidth, height: 44, alignment: .topLeading)
         }

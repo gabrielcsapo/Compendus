@@ -8,7 +8,7 @@
 
 import SwiftUI
 import SwiftData
-import EPUBReader
+import CCReader
 
 struct TranscribeButton: View {
     let book: DownloadedBook

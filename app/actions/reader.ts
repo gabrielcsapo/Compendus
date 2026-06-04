@@ -1,6 +1,14 @@
 "use server";
 
-import { db, books, bookmarks, highlights, userBookState, readingSessions } from "../lib/db";
+import {
+  db,
+  books,
+  bookmarks,
+  highlights,
+  userBookState,
+  readingSessions,
+  deviceBookProgress,
+} from "../lib/db";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { resolveProfileId } from "../lib/profile";
@@ -16,6 +24,8 @@ import type {
   FullTextContentResponse,
 } from "../lib/reader/types";
 import type { BookFormat } from "../lib/types";
+import { ccdStatusOf, isReflowableFormat } from "../lib/book-types";
+import { upsertDeviceReadingProgress } from "../lib/reading-progress";
 
 // ============================================
 // BOOKMARKS
@@ -270,6 +280,7 @@ export async function saveReadingProgress(
   pageNum?: number,
   profileId?: string,
   positionJSON?: string,
+  device?: { deviceId: string; deviceName?: string; deviceType?: string },
 ): Promise<{ position: number; pageNum?: number }> {
   const resolvedProfileId = profileId ?? resolveProfileId();
   if (!resolvedProfileId) throw new Error("profileId is required");
@@ -278,6 +289,25 @@ export async function saveReadingProgress(
   const now = new Date();
   // Use universal position format if provided, otherwise legacy format
   const lastPosition = positionJSON ?? JSON.stringify({ position, pageNum });
+
+  // Device-aware path: record this browser's own position so it shows up
+  // alongside other devices and never clobbers them. The roll-up updates
+  // userBookState (the book-level progress shown everywhere).
+  if (device?.deviceId) {
+    upsertDeviceReadingProgress({
+      profileId,
+      bookId,
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      deviceType: device.deviceType,
+      readingProgress: position,
+      lastPosition,
+      lastReadAt: now,
+      updatedAt: now,
+      now,
+    });
+    return { position, pageNum };
+  }
 
   // Check if a record already exists for this profile + book
   const existing = await db
@@ -309,6 +339,41 @@ export async function saveReadingProgress(
   }
 
   return { position, pageNum };
+}
+
+export interface DeviceReadingProgress {
+  deviceId: string;
+  deviceName: string;
+  deviceType: string;
+  readingProgress: number;
+  /** epoch milliseconds, or null */
+  lastReadAt: number | null;
+}
+
+/** Per-device reading positions for a book under the current profile. */
+export async function getDeviceReadingProgress(
+  bookId: string,
+  profileId?: string,
+): Promise<DeviceReadingProgress[]> {
+  const resolved = profileId ?? resolveProfileId();
+  if (!resolved) return [];
+  const rows = await db
+    .select()
+    .from(deviceBookProgress)
+    .where(and(eq(deviceBookProgress.profileId, resolved), eq(deviceBookProgress.bookId, bookId)));
+  return rows
+    .map((r) => ({
+      deviceId: r.deviceId,
+      deviceName: r.deviceName,
+      deviceType: r.deviceType,
+      readingProgress: r.readingProgress ?? 0,
+      lastReadAt: r.lastReadAt
+        ? r.lastReadAt instanceof Date
+          ? r.lastReadAt.getTime()
+          : (r.lastReadAt as number) * 1000
+        : null,
+    }))
+    .sort((a, b) => b.readingProgress - a.readingProgress);
 }
 
 export async function getBookProgress(
@@ -415,6 +480,32 @@ export async function getReaderInfo(
   const content = await getContent(bookId, formatOverride);
   if (!content) {
     console.log(`[getReaderInfo] No content returned for book ${bookId}`);
+    // Reflowable books (and PDFs reflowed via ?format=epub) read through the CCD.
+    // If it isn't ready yet, surface a clear message instead of a blank reader.
+    const reflowing = isReflowableFormat(book.format) || formatOverride === "epub";
+    if (reflowing) {
+      const ccdStatus = ccdStatusOf(book);
+      if (ccdStatus === "processing") {
+        return {
+          id: book.id,
+          title: book.title,
+          format: book.format as BookFormat,
+          totalPages: 0,
+          toc: [],
+          error: "This book is still being prepared for reading. Check back in a bit.",
+        };
+      }
+      if (ccdStatus === "failed") {
+        return {
+          id: book.id,
+          title: book.title,
+          format: book.format as BookFormat,
+          totalPages: 0,
+          toc: [],
+          error: "This book couldn't be prepared for reading.",
+        };
+      }
+    }
     return null;
   }
   console.log(

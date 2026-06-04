@@ -36,7 +36,7 @@ through a shared REST API.
 │  └──────────────────────────────────────┘   │
 │  ┌──────────────────────────────────────┐   │
 │  │       Background Job Queue           │   │
-│  │  transcription, conversion, TTS      │   │
+│  │  transcription, CCD generation, TTS  │   │
 │  └──────────────────────────────────────┘   │
 └─────────────────┬───────────────────────────┘
                   │
@@ -72,7 +72,8 @@ app/
 ├── lib/
 │   ├── api/          # API spec (single source of truth)
 │   ├── db/           # Drizzle schema + migrations
-│   ├── processing/   # Book file processing (epub, pdf, mobi, etc.)
+│   ├── content-ast/  # CCD bundle build (epub/pdf/mobi → canonical AST)
+│   ├── processing/   # CCD generation + packaging (ccd pack, covers)
 │   └── search/       # Full-text search indexing
 ├── root.tsx          # Root layout
 ├── routes.ts         # Route configuration
@@ -84,8 +85,8 @@ server/
     ├── books.ts      # CRUD for books
     ├── search.ts     # Full-text search
     ├── upload.ts     # File upload + processing
-    ├── reader.ts     # Reader endpoints (PDF pages, EPUB resources)
-    ├── convert.ts    # Format conversion (PDF/MOBI → EPUB)
+    ├── reader.ts     # Reader endpoints (CCD pack, PDF pages, resources)
+    ├── convert.ts    # Format conversion (→ CCD)
     ├── transcribe.ts # Audiobook transcription (Whisper)
     └── ...           # 14 route modules total
 ```
@@ -107,28 +108,29 @@ syncing and book downloads.
 
 - **SwiftUI** — Declarative UI framework for all views
 - **SwiftData** — Local persistence for downloaded books and settings
-- **Custom Reader Engine** — Native EPUB (CoreText + UITextView) and PDF (PDFKit) rendering
-- **ZIPFoundation** — EPUB extraction from ZIP archives
+- **CCReader (Swift package)** — Native reader that renders the server-generated CCD via CoreText + UITextView; PDF via PDFKit
+- **ZIPFoundation** — Unpacks the downloaded CCD pack (ZIP of manifest + resources)
 - **Whisper.cpp** — On-device audiobook transcription
-- **TTS Engine** — Text-to-speech with pre-generation and caching
+- **Kokoro TTS** — On-device neural text-to-speech with pre-generation and caching
 
 ### Reader Engine
 
+The reader lives in the **CCReader** Swift package (`Compendus/CCReader/`). It
+consumes the server-generated CCD — there is no on-device EPUB parsing.
+
 ```text
-Reader/
-├── Engine/
-│   ├── ReaderEngine.swift          # Protocol for all reader engines
-│   ├── PDFEngine.swift             # PDFKit-based PDF rendering
-│   └── Native/
-│       ├── NativeEPUBEngine.swift  # Custom EPUB rendering
-│       ├── NativePageViewController.swift  # UITextView pagination
-│       ├── NativePaginationEngine.swift    # CoreText CTFramesetter
-│       ├── AttributedStringBuilder.swift   # XHTML → NSAttributedString
-│       ├── XHTMLContentParser.swift        # XHTML → ContentNode AST
-│       └── ImageCache.swift        # Session-scoped image caching
-└── Parser/
-    ├── EPUBParser.swift            # ZIP extraction + XML parsing
-    └── EPUBManifest.swift          # OPF data models
+Sources/CCReader/Engine/
+├── ReaderEngine.swift                  # Protocol for all reader engines
+├── PDFEngine.swift                     # PDFKit-based PDF rendering
+└── Native/
+    ├── CCDPack.swift                   # Unpacks the downloaded CCD pack (ZIP)
+    ├── CCDModels.swift                 # Codable CCD bundle (blocks/inlines)
+    ├── CCDContentMapper.swift          # CCD blocks → ContentNode AST
+    ├── NativeReaderEngine.swift        # CCD-driven reader (single content path)
+    ├── AttributedStringBuilder.swift   # ContentNode AST → NSAttributedString
+    ├── NativePaginationEngine.swift    # CoreText CTFramesetter pagination
+    ├── NativePageViewController.swift  # UITextView host (single/spread)
+    └── ReaderImageCache.swift          # Session-scoped image caching
 ```
 
 ## Database Schema
@@ -152,7 +154,7 @@ Compendus uses SQLite with Drizzle ORM. The schema is defined in `app/lib/db/sch
 Long-running operations are handled by a background job queue with
 real-time progress tracking via Server-Sent Events (SSE).
 
-- **Format conversion** — PDF/MOBI/AZW3 to EPUB
+- **CCD generation** — reflowable formats (EPUB/PDF/MOBI/AZW3) → Compendus Content Document
 - **Audiobook transcription** — Whisper-based speech to text
 - **TTS pre-generation** — Text-to-speech audio caching
 - **Multi-file audio merge** — Combining audio tracks into single audiobook

@@ -7,6 +7,8 @@ import {
   getBookType,
   isConvertibleFormat,
   getConversionTarget,
+  isReflowableFormat,
+  ccdStatusOf,
   type BookType,
 } from "../lib/book-types";
 
@@ -48,6 +50,11 @@ export const BookCard = memo(function BookCard({ book, size = "default" }: BookC
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
   const bookType = getBookType(book.format, book.bookTypeOverride);
   const compact = size === "compact";
+
+  // Reflowable books (epub/mobi/azw3) read through CCD; gate the quick "Read"
+  // overlay on its readiness. PDFs read natively and comics/audio aren't gated.
+  const ccdStatus = isReflowableFormat(book.format) ? ccdStatusOf(book) : "ready";
+  const ccdReady = ccdStatus === "ready";
 
   return (
     <div className="group relative bg-surface border border-border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30">
@@ -114,20 +121,50 @@ export const BookCard = memo(function BookCard({ book, size = "default" }: BookC
 
       {/* Hover overlay with quick action - positioned absolutely over the card */}
       <div className="absolute inset-0 aspect-[2/3] bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
-        <Link
-          to={`/book/${book.id}/read`}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium text-sm hover:bg-primary-hover transition-colors shadow-lg pointer-events-auto"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-            />
-          </svg>
-          {progressPercent > 0 ? "Continue" : "Read"}
-        </Link>
+        {ccdReady ? (
+          <Link
+            to={`/book/${book.id}/read`}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium text-sm hover:bg-primary-hover transition-colors shadow-lg pointer-events-auto"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
+            </svg>
+            {progressPercent > 0 ? "Continue" : "Read"}
+          </Link>
+        ) : (
+          <span
+            className="flex items-center gap-2 px-4 py-2 bg-black/50 text-white/90 rounded-lg font-medium text-xs shadow-lg"
+            title={
+              ccdStatus === "failed"
+                ? "This book couldn't be prepared for reading."
+                : "This book is still being prepared for reading."
+            }
+          >
+            {ccdStatus === "failed" ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                Unavailable
+              </>
+            ) : (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                Preparing…
+              </>
+            )}
+          </span>
+        )}
       </div>
 
       {/* Info */}

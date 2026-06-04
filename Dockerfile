@@ -53,7 +53,10 @@ RUN mkdir -p /gpu-libs && \
 # ============================================================
 # Stage 2: Runtime image
 # ============================================================
-FROM node:25-slim
+# Node 22 LTS — pinned to match .nvmrc / package.json `engines` (locally,
+# Homebrew node@22) so the native better-sqlite3 binding's ABI is identical
+# across local, CI, and prod.
+FROM node:22-slim
 
 RUN apt-get update && apt-get install -y \
     git \

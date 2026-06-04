@@ -13,7 +13,7 @@
 		F91E18752F37E6270029A1F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18742F37E6270029A1F0 /* WidgetKit.framework */; };
 		F91E18772F37E6270029A1F0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18762F37E6270029A1F0 /* SwiftUI.framework */; };
 		F91E18882F37E6280029A1F0 /* CompendusWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		F99BA7822F6DFF7700009EE0 /* EPUBReader in Frameworks */ = {isa = PBXBuildFile; productRef = F99BA7812F6DFF7700009EE0 /* EPUBReader */; };
+		F99BA7822F6DFF7700009EE0 /* CCReader in Frameworks */ = {isa = PBXBuildFile; productRef = F99BA7812F6DFF7700009EE0 /* CCReader */; };
 		F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F9A1B0022F4500000029A1F0 /* SwiftSoup */; };
 		F9CF53942F4848380099E42C /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = F9CF53932F4848380099E42C /* Launch Screen.storyboard */; };
 		F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000000000002WHISPER /* whisper */; };
@@ -112,7 +112,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9CF5F752F50CDEA0099E42C /* whisper in Frameworks */,
-				F99BA7822F6DFF7700009EE0 /* EPUBReader in Frameworks */,
+				F99BA7822F6DFF7700009EE0 /* CCReader in Frameworks */,
 				F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */,
 				F9A1B0012F4500000029A1F0 /* SwiftSoup in Frameworks */,
 			);
@@ -222,7 +222,7 @@
 				F91E18582F3679000029A1F0 /* ZIPFoundation */,
 				F9A1B0022F4500000029A1F0 /* SwiftSoup */,
 				AA00000000000002WHISPER /* whisper */,
-				F99BA7812F6DFF7700009EE0 /* EPUBReader */,
+				F99BA7812F6DFF7700009EE0 /* CCReader */,
 			);
 			productName = Compendus;
 			productReference = F91E180A2F366F9C0029A1F0 /* Compendus.app */;
@@ -279,7 +279,7 @@
 				F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				F9A1B0032F4500000029A1F0 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				AA00000000000001WHISPER /* XCLocalSwiftPackageReference "Packages/whisper.cpp" */,
-				F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "EPUBReader" */,
+				F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "CCReader" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F91E180B2F366F9C0029A1F0 /* Products */;
@@ -752,9 +752,9 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/whisper.cpp;
 		};
-		F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "EPUBReader" */ = {
+		F99BA7802F6DFF7700009EE0 /* XCLocalSwiftPackageReference "CCReader" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = EPUBReader;
+			relativePath = CCReader;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -787,9 +787,9 @@
 			package = F91E18592F3679000029A1F0 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
 		};
-		F99BA7812F6DFF7700009EE0 /* EPUBReader */ = {
+		F99BA7812F6DFF7700009EE0 /* CCReader */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = EPUBReader;
+			productName = CCReader;
 		};
 		F9A1B0022F4500000029A1F0 /* SwiftSoup */ = {
 			isa = XCSwiftPackageProductDependency;

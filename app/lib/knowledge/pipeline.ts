@@ -23,7 +23,9 @@ import {
   bookImages,
 } from "../db";
 import { ensureEpub } from "../processing/ensure-epub";
-import { extractBookSource, type BookSection } from "./book-source";
+import { readCcdBundle } from "../storage";
+import type { ContentBundle } from "../content-ast/types";
+import { extractBookSource, bookSourceFromCcd, type BookSection } from "./book-source";
 import { chunkSections, type PassageChunk } from "./chunker";
 import { embedBatch, vectorToBuffer, EMBEDDING_MODEL } from "./embeddings";
 import { extractEntitiesBatch, ensureGlinerReady, isNoiseSpan } from "./gliner-extract";
@@ -86,23 +88,32 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
     throw new Error("Book not found");
   }
 
-  // Resolve an EPUB source, converting PDF/MOBI/AZW3 on demand. Audiobooks and
-  // comics aren't analyzable and ensureEpub throws a clear reason for them
-  // (caught by analyzeBook, which records it on book_analysis).
-  onProgress?.(1, "Preparing EPUB…");
-  const epubPath = await ensureEpub(book, {
-    onProgress: (p, m) => onProgress?.(Math.max(1, Math.round(p * 0.1)), `Converting: ${m}`),
-  });
-  log(book.format === "epub" ? "using original EPUB" : `prepared EPUB from ${book.format}`);
-
   // Idempotent reset: clear prior graph rows + figures for this book.
   const figuresDir = pathResolve(process.cwd(), "data", "figures", bookId);
   clearBookGraph(bookId);
   rmSync(figuresDir, { recursive: true, force: true });
 
-  // 1. Extract clean text + image binaries (the dedicated, NLP-grade source).
-  onProgress?.(2, "Reading book text and images…");
-  const src = await extractBookSource(epubPath, figuresDir);
+  // 1. Source text. Prefer the canonical CCD bundle (already-clean, correct
+  // reading order incl. de-interleaved PDF columns — one substrate for every
+  // format). Fall back to EPUB extraction for books not yet backfilled.
+  onProgress?.(2, "Reading book text…");
+  let src: Awaited<ReturnType<typeof extractBookSource>>;
+  const bundle = book.ccdPath ? readCcdBundle<ContentBundle>(book.ccdPath) : null;
+  if (bundle) {
+    log(`using CCD bundle (${bundle.chapters.length} chapters, ${bundle.sourceFormat})`);
+    src = bookSourceFromCcd(bundle);
+  } else {
+    onProgress?.(1, "Preparing EPUB…");
+    const epubPath = await ensureEpub(book, {
+      onProgress: (p, m) => onProgress?.(Math.max(1, Math.round(p * 0.1)), `Converting: ${m}`),
+    });
+    log(
+      book.format === "epub"
+        ? "using original EPUB (no CCD yet)"
+        : `prepared EPUB from ${book.format} (no CCD yet)`,
+    );
+    src = await extractBookSource(epubPath, figuresDir);
+  }
   if ("unsupported" in src) {
     upsertStatus(bookId, "error", src.unsupported);
     throw new Error(src.unsupported);
@@ -159,7 +170,7 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
   //    thread settings; a per-batch timeout + circuit breaker means a stall
   //    degrades semantic wander but NEVER blocks the graph build.
   onProgress?.(15, "Embedding passages for semantic search…");
-  const embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress);
+  const embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress, aborted);
   log(`embedded ${embedded}/${chunks.length} passages`);
 
   // 6. Load the GLiNER entity model (encoder — fast, light; can't lock up the
@@ -392,9 +403,14 @@ async function embedPassagesBestEffort(
   refs: PassageRef[],
   log: (m: string) => void,
   onProgress?: (p: number, m: string) => void,
+  aborted?: () => boolean,
 ): Promise<number> {
   let embedded = 0;
   for (let i = 0; i < chunks.length; i += EMBED_BATCH) {
+    if (aborted?.()) {
+      log(`embedding aborted at ${i}/${chunks.length}`);
+      return embedded;
+    }
     const slice = chunks.slice(i, i + EMBED_BATCH);
     let vecs: Float32Array[];
     try {
