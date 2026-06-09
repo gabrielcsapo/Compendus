@@ -61,8 +61,3 @@ export const paperStyles = [
   "shadow-paper",
   "transition-[box-shadow,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]",
 ].join(" ");
-
-// ── Code Block ───────────────────────────────────────────────────
-
-export const codeBlockStyles =
-  "bg-surface-elevated text-foreground p-4 rounded-lg overflow-x-auto text-sm font-mono border border-border";

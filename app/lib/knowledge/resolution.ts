@@ -17,7 +17,7 @@ import { embed, vectorToBuffer, bufferToVector, cosine } from "./embeddings";
 import { matchPersonName } from "./person-name";
 import { isNoiseSpan } from "./gliner-extract";
 
-export function normalizeName(name: string): string {
+function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .replace(/^(the|a|an)\s+/, "")
@@ -36,7 +36,7 @@ export function normalizeName(name: string): string {
  * variants ("mr tanimoto" vs "tanimoto" hash differently) — that's the job of
  * the matching/clustering passes; this only fixes id *stability*.
  */
-export function stableEntityId(type: string, normalizedName: string): string {
+function stableEntityId(type: string, normalizedName: string): string {
   const h = createHash("sha256").update(`${type}|${normalizedName}`).digest("hex");
   // Format the first 32 hex chars as a UUID (purely cosmetic; any stable TEXT works).
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
@@ -385,9 +385,6 @@ function compressCanonicalChains(): void {
     if (final !== r.cid) upd.run(final, r.id);
   }
 }
-
-/** @deprecated old name — alias retained for the route layer. */
-export const consolidateGraph = rebuildCanonicalMapping;
 
 export interface CandidateLinkView {
   id: string;

@@ -18,7 +18,7 @@ function tsToUnixSeconds(value: Date | number): number {
  * lastPosition), most-recent lastReadAt wins. Book-level fields (isRead/rating/
  * review) are owned by userBookState directly and left untouched here.
  */
-export function recomputeReadingProgressRollup(profileId: string, bookId: string, now: Date) {
+function recomputeReadingProgressRollup(profileId: string, bookId: string, now: Date) {
   const rows = db
     .select()
     .from(deviceBookProgress)

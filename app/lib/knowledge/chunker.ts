@@ -36,7 +36,7 @@ interface Span {
  * then sentence breaks. Offsets are into the original string (no reassembly), so
  * `text.slice(start, end)` always reconstructs the passage exactly.
  */
-export function chunkText(text: string): Span[] {
+function chunkText(text: string): Span[] {
   const spans: Span[] = [];
   const len = text.length;
   let cursor = 0;

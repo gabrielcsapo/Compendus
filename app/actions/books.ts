@@ -10,7 +10,7 @@ import {
   userBookState,
   backgroundJobs,
 } from "../lib/db";
-import { eq, desc, asc, like, inArray, sql, and, or } from "drizzle-orm";
+import { eq, desc, asc, like, inArray, sql, and, or, type SQL } from "drizzle-orm";
 import {
   deleteBookFile,
   deleteCoverImage,
@@ -73,135 +73,51 @@ interface GetBooksOptions {
   profileId?: string;
 }
 
-export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithState[]> {
-  const {
-    limit = 50,
-    offset = 0,
-    orderBy = "createdAt",
-    order = "desc",
-    format,
-    type,
-    collectionId,
-    tagId,
-    search,
-    series,
-    ids,
-    profileId: explicitProfileId,
-  } = options;
-  const profileId = explicitProfileId ?? resolveProfileId();
+/** Columns selected alongside the book row to overlay per-profile reading state. */
+const userStateSelection = {
+  book: books,
+  ubsReadingProgress: userBookState.readingProgress,
+  ubsLastReadAt: userBookState.lastReadAt,
+  ubsLastPosition: userBookState.lastPosition,
+  ubsIsRead: userBookState.isRead,
+  ubsRating: userBookState.rating,
+  ubsReview: userBookState.review,
+};
 
-  // When profileId is provided, LEFT JOIN userBookState to overlay per-profile reading state
-  if (profileId) {
-    let query = db
-      .select({
-        book: books,
-        ubsReadingProgress: userBookState.readingProgress,
-        ubsLastReadAt: userBookState.lastReadAt,
-        ubsLastPosition: userBookState.lastPosition,
-        ubsIsRead: userBookState.isRead,
-        ubsRating: userBookState.rating,
-        ubsReview: userBookState.review,
-      })
-      .from(books)
-      .leftJoin(
-        userBookState,
-        and(eq(userBookState.bookId, books.id), eq(userBookState.profileId, profileId)),
-      )
-      .$dynamic();
+function userStateJoinOn(profileId: string) {
+  return and(eq(userBookState.bookId, books.id), eq(userBookState.profileId, profileId));
+}
 
-    // Apply filters
-    const conditions = [];
+function overlayUserState(row: {
+  book: Book;
+  ubsReadingProgress: number | null;
+  ubsLastReadAt: Date | null;
+  ubsLastPosition: string | null;
+  ubsIsRead: boolean | null;
+  ubsRating: number | null;
+  ubsReview: string | null;
+}): BookWithState {
+  return {
+    ...row.book,
+    readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
+    lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
+    lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
+    isRead: row.ubsIsRead ?? row.book.isRead,
+    rating: row.ubsRating ?? row.book.rating,
+    review: row.ubsReview ?? row.book.review,
+  };
+}
 
-    if (format) {
-      const fmts = Array.isArray(format) ? format : [format];
-      conditions.push(inArray(books.format, fmts));
-    }
-
-    if (type) {
-      const formats = getFormatsByType(type);
-      conditions.push(
-        sql`(
-          (${books.format} IN (${sql.join(
-            formats.map((f) => sql`${f}`),
-            sql`, `,
-          )}) AND ${books.bookTypeOverride} IS NULL)
-          OR ${books.bookTypeOverride} = ${type}
-        )`,
-      );
-    }
-
-    if (search) {
-      conditions.push(like(books.title, `%${search}%`));
-    }
-
-    if (series) {
-      conditions.push(eq(books.series, series));
-    }
-
-    if (ids && ids.length > 0) {
-      conditions.push(inArray(books.id, ids));
-    }
-
-    if (collectionId) {
-      const bookIdsInCollection = db
-        .select({ bookId: booksCollections.bookId })
-        .from(booksCollections)
-        .where(eq(booksCollections.collectionId, collectionId));
-      conditions.push(inArray(books.id, bookIdsInCollection));
-    }
-
-    if (tagId) {
-      const bookIdsWithTag = db
-        .select({ bookId: booksTags.bookId })
-        .from(booksTags)
-        .where(eq(booksTags.tagId, tagId));
-      conditions.push(inArray(books.id, bookIdsWithTag));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-
-    // Apply ordering
-    if (series) {
-      query = query.orderBy(asc(sql`CAST(${books.seriesNumber} AS REAL)`), asc(books.title));
-    } else {
-      if (orderBy === "lastReadAt") {
-        // Sort by userBookState.lastReadAt when profile is provided
-        const orderFn = order === "asc" ? asc : desc;
-        query = query.orderBy(orderFn(userBookState.lastReadAt));
-      } else {
-        const orderColumn =
-          {
-            title: books.title,
-            createdAt: books.createdAt,
-          }[orderBy] || books.createdAt;
-        const orderFn = order === "asc" ? asc : desc;
-        query = query.orderBy(orderFn(orderColumn));
-      }
-    }
-
-    query = query.limit(limit).offset(offset);
-
-    const rows = await query;
-
-    // Overlay userBookState fields onto the book objects
-    return rows.map((row) => ({
-      ...row.book,
-      readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
-      lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
-      lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
-      isRead: row.ubsIsRead ?? row.book.isRead,
-      rating: row.ubsRating ?? row.book.rating,
-      review: row.ubsReview ?? row.book.review,
-    }));
-  }
-
-  // No profileId — legacy path, read from books table directly
-  let query = db.select().from(books).$dynamic();
-
-  // Apply filters
-  const conditions = [];
+function buildBookConditions({
+  format,
+  type,
+  search,
+  series,
+  ids,
+  collectionId,
+  tagId,
+}: GetBooksOptions): SQL[] {
+  const conditions: SQL[] = [];
 
   if (format) {
     const fmts = Array.isArray(format) ? format : [format];
@@ -252,28 +168,70 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
     conditions.push(inArray(books.id, bookIdsWithTag));
   }
 
+  return conditions;
+}
+
+function buildBookOrder(
+  orderBy: "title" | "createdAt" | "lastReadAt",
+  order: "asc" | "desc",
+  series: string | undefined,
+  hasProfile: boolean,
+) {
+  // When filtering by series, sort by series number first
+  if (series) {
+    return [asc(sql`CAST(${books.seriesNumber} AS REAL)`), asc(books.title)];
+  }
+
+  const column =
+    orderBy === "lastReadAt"
+      ? // Per-profile reading state lives on userBookState when a profile is active
+        hasProfile
+        ? userBookState.lastReadAt
+        : books.lastReadAt
+      : orderBy === "title"
+        ? books.title
+        : books.createdAt;
+
+  return [order === "asc" ? asc(column) : desc(column)];
+}
+
+export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithState[]> {
+  const { limit = 50, offset = 0, orderBy = "createdAt", order = "desc" } = options;
+  const profileId = options.profileId ?? resolveProfileId();
+
+  const conditions = buildBookConditions(options);
+  const ordering = buildBookOrder(orderBy, order, options.series, Boolean(profileId));
+
+  // When profileId is provided, LEFT JOIN userBookState to overlay per-profile reading state
+  if (profileId) {
+    let query = db
+      .select(userStateSelection)
+      .from(books)
+      .leftJoin(userBookState, userStateJoinOn(profileId))
+      .$dynamic();
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+
+    const rows = await query
+      .orderBy(...ordering)
+      .limit(limit)
+      .offset(offset);
+    return rows.map(overlayUserState);
+  }
+
+  // No profileId — legacy path, read from books table directly
+  let query = db.select().from(books).$dynamic();
+
   if (conditions.length > 0) {
     query = query.where(and(...conditions));
   }
 
-  // Apply ordering — when filtering by series, sort by series number first
-  if (series) {
-    query = query.orderBy(asc(sql`CAST(${books.seriesNumber} AS REAL)`), asc(books.title));
-  } else {
-    const orderColumn = {
-      title: books.title,
-      createdAt: books.createdAt,
-      lastReadAt: books.lastReadAt,
-    }[orderBy];
-
-    const orderFn = order === "asc" ? asc : desc;
-    query = query.orderBy(orderFn(orderColumn));
-  }
-
-  // Apply pagination
-  query = query.limit(limit).offset(offset);
-
-  return query;
+  return query
+    .orderBy(...ordering)
+    .limit(limit)
+    .offset(offset);
 }
 
 export async function getBook(
@@ -283,34 +241,13 @@ export async function getBook(
   const profileId = explicitProfileId ?? resolveProfileId();
   if (profileId) {
     const row = await db
-      .select({
-        book: books,
-        ubsReadingProgress: userBookState.readingProgress,
-        ubsLastReadAt: userBookState.lastReadAt,
-        ubsLastPosition: userBookState.lastPosition,
-        ubsIsRead: userBookState.isRead,
-        ubsRating: userBookState.rating,
-        ubsReview: userBookState.review,
-      })
+      .select(userStateSelection)
       .from(books)
-      .leftJoin(
-        userBookState,
-        and(eq(userBookState.bookId, books.id), eq(userBookState.profileId, profileId)),
-      )
+      .leftJoin(userBookState, userStateJoinOn(profileId))
       .where(eq(books.id, id))
       .get();
 
-    if (!row) return null;
-
-    return {
-      ...row.book,
-      readingProgress: row.ubsReadingProgress ?? row.book.readingProgress,
-      lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
-      lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
-      isRead: row.ubsIsRead ?? row.book.isRead,
-      rating: row.ubsRating ?? row.book.rating,
-      review: row.ubsReview ?? row.book.review,
-    };
+    return row ? overlayUserState(row) : null;
   }
 
   const result = await db.select().from(books).where(eq(books.id, id)).get();

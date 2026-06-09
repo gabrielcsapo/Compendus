@@ -23,7 +23,7 @@ export function getWebDeviceId(): string | undefined {
 }
 
 /** Friendly name, e.g. "Chrome on macOS". User override wins. */
-export function getWebDeviceName(): string {
+function getWebDeviceName(): string {
   if (typeof localStorage !== "undefined") {
     const override = localStorage.getItem(NAME_KEY);
     if (override && override.trim()) return override.trim();
@@ -31,13 +31,7 @@ export function getWebDeviceName(): string {
   return defaultDeviceName();
 }
 
-export function setWebDeviceName(name: string | null): void {
-  if (typeof localStorage === "undefined") return;
-  if (name && name.trim()) localStorage.setItem(NAME_KEY, name.trim());
-  else localStorage.removeItem(NAME_KEY);
-}
-
-export function getWebDeviceType(): string {
+function getWebDeviceType(): string {
   return "Web";
 }
 

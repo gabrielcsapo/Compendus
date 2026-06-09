@@ -49,11 +49,7 @@ struct UnifiedReaderView: View {
     @State private var searchQuery: String = ""
     @State private var showingShareSheet = false
     @State private var shareText: String = ""
-    @State private var scrubberValue: Double = 0
-    @State private var isScrubbing = false
-    @State private var scrubberThumbnail: UIImage? = nil
-    @State private var lastFetchedThumbnailPage: Int = -1
-    @State private var scrubberThumbnailTask: Task<Void, Never>? = nil
+    @State private var scrubber = ScrubberState()
     @State private var showingHighlightSetup = false
     @State private var showingBookColorEditor = false
 
@@ -93,20 +89,14 @@ struct UnifiedReaderView: View {
     @AppStorage("compendus.reader.hasSeenReadAloudHint") private var hasSeenReadAloudHint = false
 
     // Reader mode (infinite scroll lyrics view without audio)
-    @State private var readerModeActive = false
-    @State private var readerModeSegmentMap: [ReaderModeSegmentMapping] = []
-    @State private var readerModeActiveSegment: Int = -1
-    @State private var readerModeActiveSegmentText: String = ""
-    @State private var readerModeStartSegment: Int = 0
+    @State private var readerMode = ReaderModeState()
 
     // Footnote popover
     @State private var showingFootnote = false
     @State private var footnoteContent = ""
 
     // Link confirmation
-    @State private var showingLinkConfirmation = false
-    @State private var pendingLinkURL: URL?
-    @State private var pendingLinkIsExternal = false
+    @State private var linkConfirmation = LinkConfirmationState()
 
     // Bookmarks
     @State private var bookmarks: [ReadingMark] = []
@@ -125,6 +115,31 @@ struct UnifiedReaderView: View {
         case loading
         case ready
         case error(String)
+    }
+
+    /// Scrubber-bar interaction state (value, drag flag, thumbnail preview).
+    struct ScrubberState {
+        var value: Double = 0
+        var isScrubbing = false
+        var thumbnail: UIImage? = nil
+        var lastFetchedPage: Int = -1
+        var thumbnailTask: Task<Void, Never>? = nil
+    }
+
+    /// Reader-mode (infinite-scroll lyrics view) session state.
+    struct ReaderModeState {
+        var active = false
+        var segmentMap: [ReaderModeSegmentMapping] = []
+        var activeSegment: Int = -1
+        var activeSegmentText: String = ""
+        var startSegment: Int = 0
+    }
+
+    /// In-book link tap pending user confirmation.
+    struct LinkConfirmationState {
+        var isPresented = false
+        var url: URL?
+        var isExternal = false
     }
 
     // Break out complex optional chains to help the type-checker across module boundaries
@@ -219,7 +234,7 @@ struct UnifiedReaderView: View {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in saveProgress() }
             .onDisappear {
                 saveProgress()
-                readerModeActive = false
+                readerMode.active = false
                 readAlongService.deactivate()
                 if let nativeEPUB = engine as? NativeReaderEngine { nativeEPUB.cleanup() }
             }
@@ -545,20 +560,20 @@ struct UnifiedReaderView: View {
     var body: some View {
         sheetsGroup4
             .alert(
-                pendingLinkIsExternal ? "Open External Link?" : "Navigate to Link?",
-                isPresented: $showingLinkConfirmation
+                linkConfirmation.isExternal ? "Open External Link?" : "Navigate to Link?",
+                isPresented: $linkConfirmation.isPresented
             ) {
-                Button("Cancel", role: .cancel) { pendingLinkURL = nil }
-                Button(pendingLinkIsExternal ? "Open" : "Go") {
-                    if let url = pendingLinkURL,
+                Button("Cancel", role: .cancel) { linkConfirmation.url = nil }
+                Button(linkConfirmation.isExternal ? "Open" : "Go") {
+                    if let url = linkConfirmation.url,
                        let nativeEngine = engine as? NativeReaderEngine {
                         nativeEngine.performLinkNavigation(url)
                     }
-                    pendingLinkURL = nil
+                    linkConfirmation.url = nil
                 }
             } message: {
-                if let url = pendingLinkURL {
-                    if pendingLinkIsExternal {
+                if let url = linkConfirmation.url {
+                    if linkConfirmation.isExternal {
                         Text("This will open \(url.absoluteString) in your browser.")
                     } else {
                         Text("Navigate to this section in the book?")
@@ -614,15 +629,15 @@ struct UnifiedReaderView: View {
                 // up, so a center tap dismisses the bars).
                 EngineViewWrapper(engine: engine)
                     .ignoresSafeArea()
-                    .opacity(readerModeActive ? 0 : 1)
-                    .allowsHitTesting(!readAlongService.isActive && !readerModeActive)
+                    .opacity(readerMode.active ? 0 : 1)
+                    .allowsHitTesting(!readAlongService.isActive && !readerMode.active)
 
                 // (Removed) Invisible corner-tap bookmark hot zone — the
                 // top-bar bookmark button already covers this when chrome is
                 // up, and the invisible variant was undiscoverable.
                 // Show a small dog-ear indicator only when this page is
                 // bookmarked so the user has visual confirmation.
-                if !showingOverlay && !readerModeActive && currentPageBookmark != nil {
+                if !showingOverlay && !readerMode.active && currentPageBookmark != nil {
                     VStack {
                         HStack {
                             Spacer()
@@ -639,15 +654,15 @@ struct UnifiedReaderView: View {
                 }
 
                 // Reader mode replaces the engine view when active
-                if readerModeActive, let segments = readerModeSegments(engine: engine) {
+                if readerMode.active, let segments = readerModeSegments(engine: engine) {
                     ReaderModeScrollView(
                         segments: segments,
                         totalPages: engine.totalPositions,
-                        initialSegment: readerModeStartSegment,
+                        initialSegment: readerMode.startSegment,
                         onActiveSegmentChanged: { index in
-                            readerModeActiveSegment = index
+                            readerMode.activeSegment = index
                             if index >= 0 && index < segments.count {
-                                readerModeActiveSegmentText = segments[index].text
+                                readerMode.activeSegmentText = segments[index].text
                             }
                         },
                         onToggleOverlay: { toggleOverlay() }
@@ -660,7 +675,7 @@ struct UnifiedReaderView: View {
                 // than covering the page with a plain karaoke block. A transparent
                 // layer captures taps to toggle chrome (the engine view's hit
                 // testing is disabled while read-along is active).
-                if readAlongService.isActive && !showingOverlay && !readerModeActive {
+                if readAlongService.isActive && !showingOverlay && !readerMode.active {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture { toggleOverlay() }
@@ -716,7 +731,7 @@ struct UnifiedReaderView: View {
 
                     // Hide the page-scrubber bar in reader mode (own page info)
                     // and during read-aloud (the docked player owns the bottom).
-                    if showingOverlay && !readerModeActive && !readAlongService.isActive {
+                    if showingOverlay && !readerMode.active && !readAlongService.isActive {
                         readerBottomBar(engine: engine)
                             .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                             .simultaneousGesture(TapGesture().onEnded { scheduleOverlayHide() })
@@ -1072,21 +1087,21 @@ struct UnifiedReaderView: View {
                     Button {
                         // Defer toggle so the context menu fully dismisses first
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            if readerModeActive {
+                            if readerMode.active {
                                 // Exiting reader mode: navigate EPUB to the last viewed passage
                                 restoreEPUBPosition(engine: engine)
                             } else {
                                 // Pre-compute mapping and start segment before view renders
                                 buildReaderModeMapping(forEngine: engine)
-                                readerModeStartSegment = computeStartSegment(forEngine: engine)
+                                readerMode.startSegment = computeStartSegment(forEngine: engine)
                             }
                             withAnimation(.easeInOut(duration: 0.3)) {
-                                readerModeActive.toggle()
-                                if readerModeActive { showingOverlay = false }
+                                readerMode.active.toggle()
+                                if readerMode.active { showingOverlay = false }
                             }
                         }
                     } label: {
-                        Label(readerModeActive ? "Exit Reader Mode" : "Reader Mode", systemImage: readerModeActive ? "book" : "scroll")
+                        Label(readerMode.active ? "Exit Reader Mode" : "Reader Mode", systemImage: readerMode.active ? "book" : "scroll")
                     }
                 }
 
@@ -1257,7 +1272,7 @@ struct UnifiedReaderView: View {
         // When actively scrubbing, preview the destination page/chapter so the
         // user can see where they're about to land.
         let nativeEngine = engine as? NativeReaderEngine
-        let scrubPage: Int? = isScrubbing ? Int(scrubberValue) : nil
+        let scrubPage: Int? = scrubber.isScrubbing ? Int(scrubber.value) : nil
         let chapterTitle: String? = {
             if let scrubPage, let nativeEngine {
                 return nativeEngine.chapterTitle(forGlobalPage: scrubPage) ?? engine.currentLocation?.title
@@ -1320,7 +1335,7 @@ struct UnifiedReaderView: View {
             if !engine.isComic, let chapterTitle, !chapterTitle.isEmpty {
                 Text(chapterTitle)
                     .font(.caption2)
-                    .foregroundStyle(isScrubbing ? .secondary : .tertiary)
+                    .foregroundStyle(scrubber.isScrubbing ? .secondary : .tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .padding(.horizontal, 8)
@@ -1330,7 +1345,7 @@ struct UnifiedReaderView: View {
             // Estimated reading time left (P2.5) — EPUB only. Uses a rough
             // 250 WPM × ~300 words/page heuristic = ~1.2 min/page. Cheap,
             // mostly accurate, and matches what users expect from Kindle.
-            if !isScrubbing, let label = readingTimeLeftLabel(engine: engine) {
+            if !scrubber.isScrubbing, let label = readingTimeLeftLabel(engine: engine) {
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -1369,9 +1384,9 @@ struct UnifiedReaderView: View {
         if engine.isPDF, let pdfEngine = engine as? PDFEngine, engine.totalPositions > 1 {
             Slider(
                 value: Binding(
-                    get: { isScrubbing ? scrubberValue : Double(pdfEngine.currentPage) },
+                    get: { scrubber.isScrubbing ? scrubber.value : Double(pdfEngine.currentPage) },
                     set: { newValue in
-                        scrubberValue = newValue
+                        scrubber.value = newValue
                         fetchScrubberThumbnail(engine: engine, page: Int(newValue))
                     }
                 ),
@@ -1380,7 +1395,7 @@ struct UnifiedReaderView: View {
                 onEditingChanged: { editing in
                     handleScrubberEditingChanged(editing: editing) {
                         Task { await pdfEngine.go(to: ReaderLocation(
-                            href: nil, pageIndex: Int(scrubberValue),
+                            href: nil, pageIndex: Int(scrubber.value),
                             progression: 0, totalProgression: 0, title: nil
                         ))}
                     }
@@ -1393,9 +1408,9 @@ struct UnifiedReaderView: View {
         } else if let comicEngine = engine as? ComicEngine, engine.totalPositions > 1 {
             Slider(
                 value: Binding(
-                    get: { isScrubbing ? scrubberValue : Double(comicEngine.currentPage) },
+                    get: { scrubber.isScrubbing ? scrubber.value : Double(comicEngine.currentPage) },
                     set: { newValue in
-                        scrubberValue = newValue
+                        scrubber.value = newValue
                         fetchScrubberThumbnail(engine: engine, page: Int(newValue))
                     }
                 ),
@@ -1404,7 +1419,7 @@ struct UnifiedReaderView: View {
                 onEditingChanged: { editing in
                     handleScrubberEditingChanged(editing: editing) {
                         Task { await comicEngine.go(to: ReaderLocation(
-                            href: nil, pageIndex: Int(scrubberValue),
+                            href: nil, pageIndex: Int(scrubber.value),
                             progression: 0, totalProgression: 0, title: nil
                         ))}
                     }
@@ -1418,20 +1433,20 @@ struct UnifiedReaderView: View {
                   nativeEngine.totalPositions > 1 {
             Slider(
                 value: Binding(
-                    get: { isScrubbing ? scrubberValue : Double(nativeEngine.globalPageIndex) },
-                    set: { scrubberValue = $0 }
+                    get: { scrubber.isScrubbing ? scrubber.value : Double(nativeEngine.globalPageIndex) },
+                    set: { scrubber.value = $0 }
                 ),
                 in: 0...Double(max(0, nativeEngine.totalPositions - 1)),
                 step: 1,
                 onEditingChanged: { editing in
-                    isScrubbing = editing
+                    scrubber.isScrubbing = editing
                     if editing {
                         // Suspend auto-hide while the user is dragging.
                         overlayHideTask?.cancel()
                         overlayHideTask = nil
                     } else {
                         // Navigate only when the user lifts their finger
-                        let page = Int(scrubberValue)
+                        let page = Int(scrubber.value)
                         let totalPages = max(1, nativeEngine.totalPositions)
                         let progression = Double(page) / Double(totalPages)
                         Task { await nativeEngine.go(toProgression: progression) }
@@ -1450,7 +1465,7 @@ struct UnifiedReaderView: View {
 
     @ViewBuilder
     private func scrubberPreviewOverlay() -> some View {
-        if isScrubbing, let thumb = scrubberThumbnail {
+        if scrubber.isScrubbing, let thumb = scrubber.thumbnail {
             Image(uiImage: thumb)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -1469,10 +1484,10 @@ struct UnifiedReaderView: View {
 
     /// Debounced thumbnail fetch — only kicks off when the integer page changes.
     private func fetchScrubberThumbnail(engine: any ReaderEngine, page: Int) {
-        guard page != lastFetchedThumbnailPage else { return }
-        lastFetchedThumbnailPage = page
-        scrubberThumbnailTask?.cancel()
-        scrubberThumbnailTask = Task {
+        guard page != scrubber.lastFetchedPage else { return }
+        scrubber.lastFetchedPage = page
+        scrubber.thumbnailTask?.cancel()
+        scrubber.thumbnailTask = Task {
             let size = CGSize(width: 90, height: 130)
             let image: UIImage?
             if let comic = engine as? ComicEngine {
@@ -1484,9 +1499,9 @@ struct UnifiedReaderView: View {
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                if isScrubbing {
+                if scrubber.isScrubbing {
                     withAnimation(.easeInOut(duration: 0.15)) {
-                        scrubberThumbnail = image
+                        scrubber.thumbnail = image
                     }
                 }
             }
@@ -1494,16 +1509,16 @@ struct UnifiedReaderView: View {
     }
 
     private func handleScrubberEditingChanged(editing: Bool, onCommit: @escaping () -> Void) {
-        isScrubbing = editing
+        scrubber.isScrubbing = editing
         if editing {
             // Suspend auto-hide while dragging.
             overlayHideTask?.cancel()
             overlayHideTask = nil
-            lastFetchedThumbnailPage = -1
+            scrubber.lastFetchedPage = -1
         } else {
-            scrubberThumbnailTask?.cancel()
-            scrubberThumbnailTask = nil
-            scrubberThumbnail = nil
+            scrubber.thumbnailTask?.cancel()
+            scrubber.thumbnailTask = nil
+            scrubber.thumbnail = nil
             onCommit()
             scheduleOverlayHide()
         }
@@ -1515,9 +1530,9 @@ struct UnifiedReaderView: View {
     /// highlighting, so if Reader Mode (the continuous dimmed scroll) is on,
     /// exit it first — restoring the paginated position from the active segment.
     private func exitReaderModeIfActive() {
-        guard readerModeActive, let engine else { return }
+        guard readerMode.active, let engine else { return }
         restoreEPUBPosition(engine: engine)
-        withAnimation(.easeInOut(duration: 0.3)) { readerModeActive = false }
+        withAnimation(.easeInOut(duration: 0.3)) { readerMode.active = false }
     }
 
     private func toggleOverlay() {
@@ -1827,9 +1842,9 @@ struct UnifiedReaderView: View {
             }
 
             nativeEngine.onLinkNavigationRequested = { [self] url, isExternal in
-                pendingLinkURL = url
-                pendingLinkIsExternal = isExternal
-                showingLinkConfirmation = true
+                linkConfirmation.url = url
+                linkConfirmation.isExternal = isExternal
+                linkConfirmation.isPresented = true
             }
         }
     }
@@ -2273,7 +2288,7 @@ struct UnifiedReaderView: View {
                 ))
             }
         }
-        readerModeSegmentMap = mapping
+        readerMode.segmentMap = mapping
     }
 
     /// Build segments from all parsed chapters for reader mode infinite scroll.
@@ -2331,7 +2346,7 @@ struct UnifiedReaderView: View {
 
     /// Eagerly compute the start segment for the current page without requiring
     /// the full mapping array. Called from the toggle button handler so the value
-    /// is ready before `readerModeActive` triggers the first render.
+    /// is ready before `readerMode.active` triggers the first render.
     private func computeStartSegment(forEngine engine: any ReaderEngine) -> Int {
         guard let nativeEngine = engine as? NativeReaderEngine else { return 0 }
         let currentSpine = nativeEngine.activeSpineIndex
@@ -2361,14 +2376,14 @@ struct UnifiedReaderView: View {
     /// Navigate the EPUB engine to the page containing the active reader mode segment's text,
     /// then briefly flash-highlight it so the user can see where to pick up reading.
     private func restoreEPUBPosition(engine: any ReaderEngine) {
-        guard !readerModeActiveSegmentText.isEmpty,
-              readerModeActiveSegment >= 0,
-              readerModeActiveSegment < readerModeSegmentMap.count,
+        guard !readerMode.activeSegmentText.isEmpty,
+              readerMode.activeSegment >= 0,
+              readerMode.activeSegment < readerMode.segmentMap.count,
               let nativeEngine = engine as? NativeReaderEngine else { return }
 
-        let mapping = readerModeSegmentMap[readerModeActiveSegment]
+        let mapping = readerMode.segmentMap[readerMode.activeSegment]
         let spineIndex = mapping.spineIndex
-        let fullText = readerModeActiveSegmentText
+        let fullText = readerMode.activeSegmentText
 
         // Search for the segment text within the chapter's plain text
         let chapters = nativeEngine.allChaptersPlainText

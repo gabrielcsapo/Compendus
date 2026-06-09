@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface MobiSpineItem {
+interface MobiSpineItem {
   id: string;
   text: string;
   start: number;
@@ -19,13 +19,13 @@ export interface MobiSpineItem {
   size: number;
 }
 
-export interface MobiTocItem {
+interface MobiTocItem {
   label: string;
   href: string;
   children?: MobiTocItem[];
 }
 
-export interface MobiMetadata {
+interface MobiMetadata {
   identifier: string;
   title: string;
   author: string[];
@@ -38,7 +38,7 @@ export interface MobiMetadata {
   contributor: string[];
 }
 
-export interface MobiProcessedChapter {
+interface MobiProcessedChapter {
   html: string;
   css: Array<{ id: string; href: string }>;
 }

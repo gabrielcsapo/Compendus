@@ -24,7 +24,7 @@ import type { EntityType } from "../db/schema";
  * left for later. Lives here now that the old generative extraction/llm path is
  * gone — this is the single source of truth for the relationship type set.
  */
-export const TIER1_RELATIONSHIPS = [
+const TIER1_RELATIONSHIPS = [
   "located_in",
   "part_of",
   "member_of",

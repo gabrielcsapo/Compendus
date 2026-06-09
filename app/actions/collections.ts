@@ -178,22 +178,6 @@ export async function getCollectionsForBook(
     .where(and(...conditions));
 }
 
-export async function getCollectionBookCount(
-  collectionId: string,
-  profileId?: string,
-): Promise<number> {
-  // Verify collection belongs to this profile (if profileId provided)
-  const collection = await getCollection(collectionId, profileId);
-  if (!collection) return 0;
-
-  const result = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(booksCollections)
-    .where(eq(booksCollections.collectionId, collectionId))
-    .get();
-  return result?.count || 0;
-}
-
 /**
  * Batch-fetch book counts for multiple collections in a single query.
  * Returns a Map of collectionId -> count.

@@ -136,7 +136,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
   );
 }
 
-export function GlobalToastPanel({
+function GlobalToastPanel({
   toasts,
   onDismiss,
 }: {

@@ -9,7 +9,7 @@
 import { resolve } from "path";
 
 export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
-export const EMBEDDING_DIM = 384;
+const EMBEDDING_DIM = 384;
 
 type Extractor = (
   text: string | string[],
@@ -88,16 +88,4 @@ export function cosine(a: Float32Array, b: Float32Array): number {
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) dot += a[i] * b[i];
   return dot;
-}
-
-/** Brute-force top-k nearest neighbors by cosine similarity. */
-export function topKByCosine<T extends { embedding: Float32Array }>(
-  query: Float32Array,
-  items: T[],
-  k: number,
-): Array<T & { score: number }> {
-  return items
-    .map((item) => ({ ...item, score: cosine(query, item.embedding) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
 }

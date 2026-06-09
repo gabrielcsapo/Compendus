@@ -3,20 +3,20 @@ import { resolve, dirname } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { readFile, writeFile, unlink, readdir } from "fs/promises";
 
-export interface TranscriptWord {
+interface TranscriptWord {
   word: string;
   start: number;
   end: number;
 }
 
-export interface TranscriptSegment {
+interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
   words: TranscriptWord[];
 }
 
-export interface Transcript {
+interface Transcript {
   duration: number;
   language: string;
   segments: TranscriptSegment[];

@@ -44,7 +44,7 @@ function remapResources(bundle: ContentBundle, remap: Map<string, string>): Cont
 }
 
 /** Collect every unique image/embed resource handle referenced anywhere in the bundle. */
-export function collectResourceHandles(bundle: ContentBundle): string[] {
+function collectResourceHandles(bundle: ContentBundle): string[] {
   const handles = new Set<string>();
   const visitBlocks = (blocks: Block[]) => {
     for (const b of blocks) {

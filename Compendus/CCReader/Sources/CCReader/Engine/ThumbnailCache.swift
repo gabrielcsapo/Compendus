@@ -10,8 +10,8 @@
 import UIKit
 
 @MainActor
-final class ThumbnailCache {
-    static let shared = ThumbnailCache()
+public final class ThumbnailCache {
+    public static let shared = ThumbnailCache()
 
     private let cache = NSCache<Key, UIImage>()
 
@@ -26,15 +26,15 @@ final class ThumbnailCache {
         }
     }
 
-    func image(bookId: String, page: Int) -> UIImage? {
+    public func image(bookId: String, page: Int) -> UIImage? {
         cache.object(forKey: Key(bookId: bookId, page: page))
     }
 
-    func store(_ image: UIImage, bookId: String, page: Int) {
+    public func store(_ image: UIImage, bookId: String, page: Int) {
         cache.setObject(image, forKey: Key(bookId: bookId, page: page))
     }
 
-    func clear(bookId: String) {
+    public func clear(bookId: String) {
         // NSCache has no per-key wildcard; cheapest correct behavior is full clear.
         cache.removeAllObjects()
     }
@@ -65,7 +65,7 @@ final class ThumbnailCache {
 extension UIImage {
     /// Downscale so the larger dimension is at most `maxDimension` (in pixels).
     /// Returns `self` unchanged when already smaller.
-    func thumbnail(maxDimension: CGFloat) -> UIImage? {
+    public func thumbnail(maxDimension: CGFloat) -> UIImage? {
         let widthPx = size.width * scale
         let heightPx = size.height * scale
         let largest = max(widthPx, heightPx)

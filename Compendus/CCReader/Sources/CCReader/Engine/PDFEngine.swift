@@ -59,6 +59,19 @@ public class PDFEngine: ReaderEngine {
         return page.thumbnail(of: renderSize, for: .mediaBox)
     }
 
+    /// Absolute-index thumbnail for the scrubber preview. Cached via ThumbnailCache.
+    public func thumbnail(forPage page: Int, size: CGSize) async -> UIImage? {
+        guard page >= 0, page < totalPositions else { return nil }
+        let cacheKey = bookURL.absoluteString
+        if let cached = ThumbnailCache.shared.image(bookId: cacheKey, page: page) {
+            return cached
+        }
+        guard let pdfPage = pdfDocument?.page(at: page) else { return nil }
+        let image = pdfPage.thumbnail(of: size, for: .mediaBox)
+        ThumbnailCache.shared.store(image, bookId: cacheKey, page: page)
+        return image
+    }
+
     // MARK: - ReaderEngine Protocol
 
     public func makeViewController() -> UIViewController {

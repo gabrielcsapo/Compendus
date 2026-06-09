@@ -4,7 +4,7 @@ import { resolve } from "path";
 
 // ── Public types ──
 
-export interface EpubSpineItem {
+interface EpubSpineItem {
   id: string;
   href: string;
   mediaType: string;
@@ -12,7 +12,7 @@ export interface EpubSpineItem {
   linear: string;
 }
 
-export interface EpubTocItem {
+interface EpubTocItem {
   label: string;
   href: string;
   id: string;
@@ -20,7 +20,7 @@ export interface EpubTocItem {
   children?: EpubTocItem[];
 }
 
-export interface EpubMetadata {
+interface EpubMetadata {
   title: string;
   language: string;
   identifier: { id: string; scheme?: string; [key: string]: string | undefined };
@@ -33,7 +33,7 @@ export interface EpubMetadata {
   subject?: { subject: string }[];
 }
 
-export interface EpubChapter {
+interface EpubChapter {
   html: string;
   css?: { id: string; href: string; epubPath: string }[];
 }

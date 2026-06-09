@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useRouter } from "react-flight-router/client";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -157,7 +157,7 @@ export function BatchEditClient({
   const [sortBy, setSortBy] = useState<SortOption>("title-asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const toggleFieldFilter = useCallback((filter: FieldFilter) => {
+  const toggleFieldFilter = (filter: FieldFilter) => {
     setFieldFilters((prev) => {
       const next = new Set(prev);
       if (next.has(filter)) {
@@ -171,7 +171,7 @@ export function BatchEditClient({
       }
       return next;
     });
-  }, []);
+  };
   const [edits, setEdits] = useState<Map<string, BookEdits>>(new Map());
   const [bookTagsState, setBookTagsState] = useState<Record<string, Tag[]>>({ ...initialBookTags });
   const [tagAdditions, setTagAdditions] = useState<Map<string, string[]>>(new Map());
@@ -194,14 +194,27 @@ export function BatchEditClient({
   // Column filter state
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
 
-  // Tag input state per book (search text + dropdown visibility)
-  const [tagInputState, setTagInputState] = useState<Record<string, string>>({});
-  const [openTagDropdown, setOpenTagDropdown] = useState<string | null>(null);
-  const [dropdownPos, setDropdownPos] = useState<{
+  // Tag dropdown state — only one dropdown can be open at a time
+  const [tagDropdown, setTagDropdown] = useState<{
+    bookId: string;
+    search: string;
     top: number;
     left: number;
     width: number;
   } | null>(null);
+
+  function openTagDropdownFor(bookId: string, search: string, inputEl: HTMLElement) {
+    const cellEl = inputEl.closest("[data-tag-cell]");
+    if (!cellEl) return;
+    const rect = cellEl.getBoundingClientRect();
+    setTagDropdown({
+      bookId,
+      search,
+      top: rect.bottom + 2,
+      left: rect.left,
+      width: Math.max(rect.width, 180),
+    });
+  }
 
   // Virtualization
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -222,16 +235,16 @@ export function BatchEditClient({
 
   // Close tag dropdown when clicking outside
   useEffect(() => {
-    if (!openTagDropdown) return;
+    if (!tagDropdown) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest(`[data-tag-cell="${openTagDropdown}"]`)) {
-        setOpenTagDropdown(null);
+      if (!target.closest(`[data-tag-cell="${tagDropdown.bookId}"]`)) {
+        setTagDropdown(null);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [openTagDropdown]);
+  }, [tagDropdown]);
 
   const filteredBooks = useMemo(() => {
     const filtered = allBooks.filter((book) => {
@@ -390,47 +403,35 @@ export function BatchEditClient({
     measureElement: (el) => el.getBoundingClientRect().height,
   });
 
-  const getEditValue = useCallback(
-    (bookId: string, field: keyof BookEdits): string | undefined => {
-      const bookEdits = edits.get(bookId);
-      if (!bookEdits) return undefined;
-      const val = bookEdits[field];
-      if (val === null) return "";
-      return val as string | undefined;
-    },
-    [edits],
-  );
+  const getEditValue = (bookId: string, field: keyof BookEdits): string | undefined => {
+    const bookEdits = edits.get(bookId);
+    if (!bookEdits) return undefined;
+    const val = bookEdits[field];
+    if (val === null) return "";
+    return val as string | undefined;
+  };
 
-  const setEditValue = useCallback(
-    (bookId: string, field: keyof BookEdits, value: string | null) => {
-      setEdits((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(bookId) || {};
-        next.set(bookId, { ...existing, [field]: value });
-        return next;
-      });
-    },
-    [],
-  );
+  const setEditValue = (bookId: string, field: keyof BookEdits, value: string | null) => {
+    setEdits((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(bookId) || {};
+      next.set(bookId, { ...existing, [field]: value });
+      return next;
+    });
+  };
 
-  const isFieldModified = useCallback(
-    (bookId: string, field: keyof BookEdits): boolean => {
-      const bookEdits = edits.get(bookId);
-      return bookEdits !== undefined && field in bookEdits;
-    },
-    [edits],
-  );
+  const isFieldModified = (bookId: string, field: keyof BookEdits): boolean => {
+    const bookEdits = edits.get(bookId);
+    return bookEdits !== undefined && field in bookEdits;
+  };
 
-  const isBookTagsModified = useCallback(
-    (bookId: string): boolean => {
-      return (
-        (tagAdditions.get(bookId)?.length ?? 0) > 0 || (tagRemovals.get(bookId)?.length ?? 0) > 0
-      );
-    },
-    [tagAdditions, tagRemovals],
-  );
+  const isBookTagsModified = (bookId: string): boolean => {
+    return (
+      (tagAdditions.get(bookId)?.length ?? 0) > 0 || (tagRemovals.get(bookId)?.length ?? 0) > 0
+    );
+  };
 
-  const toggleSelect = useCallback((bookId: string) => {
+  const toggleSelect = (bookId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(bookId)) {
@@ -440,9 +441,9 @@ export function BatchEditClient({
       }
       return next;
     });
-  }, []);
+  };
 
-  const toggleSelectAll = useCallback(() => {
+  const toggleSelectAll = () => {
     setSelectedIds((prev) => {
       const allVisible = filteredBooks.map((b) => b.id);
       const allSelected = allVisible.every((id) => prev.has(id));
@@ -459,14 +460,14 @@ export function BatchEditClient({
       }
       return next;
     });
-  }, [filteredBooks]);
+  };
 
   const allVisibleSelected = useMemo(() => {
     if (filteredBooks.length === 0) return false;
     return filteredBooks.every((b) => selectedIds.has(b.id));
   }, [filteredBooks, selectedIds]);
 
-  const addTagToBook = useCallback((bookId: string, tag: Tag) => {
+  const addTagToBook = (bookId: string, tag: Tag) => {
     setBookTagsState((prev) => {
       const current = prev[bookId] || [];
       if (current.some((t) => t.id === tag.id)) return prev;
@@ -489,41 +490,38 @@ export function BatchEditClient({
       );
       return next;
     });
-    setOpenTagDropdown(null);
-  }, []);
+    setTagDropdown(null);
+  };
 
-  const removeTagFromBookLocal = useCallback(
-    (bookId: string, tagId: string) => {
-      setBookTagsState((prev) => {
-        const current = prev[bookId] || [];
-        return { ...prev, [bookId]: current.filter((t) => t.id !== tagId) };
-      });
-      setTagRemovals((prev) => {
+  const removeTagFromBookLocal = (bookId: string, tagId: string) => {
+    setBookTagsState((prev) => {
+      const current = prev[bookId] || [];
+      return { ...prev, [bookId]: current.filter((t) => t.id !== tagId) };
+    });
+    setTagRemovals((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(bookId) || [];
+      if (!existing.includes(tagId)) {
+        next.set(bookId, [...existing, tagId]);
+      }
+      return next;
+    });
+    const tag = allTags.find((t) => t.id === tagId);
+    if (tag) {
+      setTagAdditions((prev) => {
         const next = new Map(prev);
         const existing = next.get(bookId) || [];
-        if (!existing.includes(tagId)) {
-          next.set(bookId, [...existing, tagId]);
-        }
+        next.set(
+          bookId,
+          existing.filter((name) => name !== tag.name),
+        );
         return next;
       });
-      const tag = allTags.find((t) => t.id === tagId);
-      if (tag) {
-        setTagAdditions((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(bookId) || [];
-          next.set(
-            bookId,
-            existing.filter((name) => name !== tag.name),
-          );
-          return next;
-        });
-      }
-    },
-    [allTags],
-  );
+    }
+  };
 
   // Bulk actions
-  const applyBulkSeries = useCallback(() => {
+  const applyBulkSeries = () => {
     if (!bulkSeries.trim()) return;
     setEdits((prev) => {
       const next = new Map(prev);
@@ -534,9 +532,9 @@ export function BatchEditClient({
       return next;
     });
     setBulkSeries("");
-  }, [bulkSeries, selectedIds]);
+  };
 
-  const applyBulkAuthors = useCallback(() => {
+  const applyBulkAuthors = () => {
     if (!bulkAuthors.trim()) return;
     setEdits((prev) => {
       const next = new Map(prev);
@@ -547,9 +545,9 @@ export function BatchEditClient({
       return next;
     });
     setBulkAuthors("");
-  }, [bulkAuthors, selectedIds]);
+  };
 
-  const applyBulkAddTag = useCallback(() => {
+  const applyBulkAddTag = () => {
     if (!bulkAddTag) return;
     const tag = allTags.find((t) => t.id === bulkAddTag);
     if (!tag) return;
@@ -557,17 +555,17 @@ export function BatchEditClient({
       addTagToBook(bookId, tag);
     }
     setBulkAddTag("");
-  }, [bulkAddTag, selectedIds, allTags, addTagToBook]);
+  };
 
-  const applyBulkRemoveTag = useCallback(() => {
+  const applyBulkRemoveTag = () => {
     if (!bulkRemoveTag) return;
     for (const bookId of selectedIds) {
       removeTagFromBookLocal(bookId, bulkRemoveTag);
     }
     setBulkRemoveTag("");
-  }, [bulkRemoveTag, selectedIds, removeTagFromBookLocal]);
+  };
 
-  const applyBulkLanguage = useCallback(() => {
+  const applyBulkLanguage = () => {
     if (!bulkLanguage) return;
     setEdits((prev) => {
       const next = new Map(prev);
@@ -578,9 +576,9 @@ export function BatchEditClient({
       return next;
     });
     setBulkLanguage("");
-  }, [bulkLanguage, selectedIds]);
+  };
 
-  const applyBulkCategory = useCallback(() => {
+  const applyBulkCategory = () => {
     if (!bulkCategory) return;
     setEdits((prev) => {
       const next = new Map(prev);
@@ -594,9 +592,9 @@ export function BatchEditClient({
       return next;
     });
     setBulkCategory("");
-  }, [bulkCategory, selectedIds]);
+  };
 
-  const handleBulkDelete = useCallback(async () => {
+  const handleBulkDelete = async () => {
     setIsDeleting(true);
     setMessage(null);
     const ids = Array.from(selectedIds);
@@ -631,7 +629,7 @@ export function BatchEditClient({
       setMessage({ type: "success", text: `Deleted ${deleted} book${deleted !== 1 ? "s" : ""}.` });
       router.refresh();
     }
-  }, [selectedIds, allBooks]);
+  };
 
   const isDirty = useMemo(() => {
     if (edits.size > 0) return true;
@@ -656,7 +654,7 @@ export function BatchEditClient({
     return ids.size;
   }, [edits, tagAdditions, tagRemovals]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = async () => {
     setIsSaving(true);
     setMessage(null);
     setSaveProgress(null);
@@ -760,9 +758,9 @@ export function BatchEditClient({
       setIsSaving(false);
       setSaveProgress(null);
     }
-  }, [edits, tagAdditions, tagRemovals]);
+  };
 
-  const handleExportCSV = useCallback(() => {
+  const handleExportCSV = () => {
     const escapeCSV = (val: string) => {
       if (val.includes(",") || val.includes('"') || val.includes("\n")) {
         return `"${val.replace(/"/g, '""')}"`;
@@ -811,7 +809,7 @@ export function BatchEditClient({
     a.download = `library-export-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [filteredBooks, edits, bookTagsState]);
+  };
 
   const modifiedCellClass = "bg-amber-50 dark:bg-amber-900/20";
   const cellInputClass =
@@ -1847,37 +1845,14 @@ export function BatchEditClient({
                     ))}
                     <input
                       type="text"
-                      value={tagInputState[book.id] || ""}
-                      onChange={(e) => {
-                        setTagInputState((prev) => ({ ...prev, [book.id]: e.target.value }));
-                        setOpenTagDropdown(book.id);
-                        const cellEl = e.currentTarget.closest("[data-tag-cell]");
-                        if (cellEl) {
-                          const rect = cellEl.getBoundingClientRect();
-                          setDropdownPos({
-                            top: rect.bottom + 2,
-                            left: rect.left,
-                            width: Math.max(rect.width, 180),
-                          });
-                        }
-                      }}
-                      onFocus={(e) => {
-                        setOpenTagDropdown(book.id);
-                        const cellEl = e.currentTarget.closest("[data-tag-cell]");
-                        if (cellEl) {
-                          const rect = cellEl.getBoundingClientRect();
-                          setDropdownPos({
-                            top: rect.bottom + 2,
-                            left: rect.left,
-                            width: Math.max(rect.width, 180),
-                          });
-                        }
-                      }}
+                      value={tagDropdown?.bookId === book.id ? tagDropdown.search : ""}
+                      onChange={(e) => openTagDropdownFor(book.id, e.target.value, e.currentTarget)}
+                      onFocus={(e) => openTagDropdownFor(book.id, "", e.currentTarget)}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") setOpenTagDropdown(null);
+                        if (e.key === "Escape") setTagDropdown(null);
                         if (
                           e.key === "Backspace" &&
-                          !tagInputState[book.id] &&
+                          !(tagDropdown?.bookId === book.id && tagDropdown.search) &&
                           currentTags.length > 0
                         ) {
                           removeTagFromBookLocal(book.id, currentTags[currentTags.length - 1].id);
@@ -1936,12 +1911,11 @@ export function BatchEditClient({
       </div>
 
       {/* Tag dropdown portal — rendered outside scroll container to avoid clipping */}
-      {openTagDropdown &&
-        dropdownPos &&
+      {tagDropdown &&
         (() => {
-          const bookId = openTagDropdown;
+          const bookId = tagDropdown.bookId;
           const currentTags = bookTagsState[bookId] || [];
-          const query = (tagInputState[bookId] || "").toLowerCase();
+          const query = tagDropdown.search.toLowerCase();
           const available = allTags
             .filter((tag) => !currentTags.some((t) => t.id === tag.id))
             .filter((tag) => !query || tag.name.toLowerCase().includes(query));
@@ -1951,9 +1925,9 @@ export function BatchEditClient({
               data-tag-cell={bookId}
               className="fixed bg-surface border border-border rounded-lg shadow-lg py-1 max-h-48 overflow-y-auto"
               style={{
-                top: dropdownPos.top,
-                left: dropdownPos.left,
-                width: dropdownPos.width,
+                top: tagDropdown.top,
+                left: tagDropdown.left,
+                width: tagDropdown.width,
                 zIndex: 9999,
               }}
             >
@@ -1961,10 +1935,7 @@ export function BatchEditClient({
                 <button
                   key={tag.id}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    addTagToBook(bookId, tag);
-                    setTagInputState((prev) => ({ ...prev, [bookId]: "" }));
-                  }}
+                  onClick={() => addTagToBook(bookId, tag)}
                   className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-surface-elevated transition-colors flex items-center gap-2"
                 >
                   {tag.color && (

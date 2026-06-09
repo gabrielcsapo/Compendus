@@ -33,7 +33,7 @@ import { EntityResolver, recomputeStatsForBook, rebuildCanonicalMapping } from "
 import { extractRelations, relationKey, type RelEntity, type ExtractedRelation } from "./relations";
 import { extractKeyphrases } from "./keyphrase";
 
-export const PIPELINE_VERSION = "2.1.0";
+const PIPELINE_VERSION = "2.1.0";
 const EXTRACT_MODEL = "gliner_small-v2";
 
 export interface AnalyzeOptions {

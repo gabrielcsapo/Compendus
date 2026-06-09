@@ -35,7 +35,7 @@ interface Line {
   bold: boolean;
 }
 
-export interface PdfDiagnostics {
+interface PdfDiagnostics {
   pages: number;
   rawChars: number;
   emittedChars: number;

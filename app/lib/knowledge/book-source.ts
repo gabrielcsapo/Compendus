@@ -24,7 +24,7 @@ import { initEpubFile } from "../epub-parser";
 import { blocksToPlainText } from "../content-ast/bundle";
 import type { ContentBundle } from "../content-ast/types";
 
-export interface ExtractedImage {
+interface ExtractedImage {
   /** Relative path (under the book's figures dir) where the binary was copied. */
   storedPath: string;
   mimeType: string;

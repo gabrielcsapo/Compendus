@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export const HIGHLIGHT_COLORS = [
+const HIGHLIGHT_COLORS = [
   { name: "Yellow", value: "#ffff00" },
   { name: "Green", value: "#00ff00" },
   { name: "Blue", value: "#00bfff" },

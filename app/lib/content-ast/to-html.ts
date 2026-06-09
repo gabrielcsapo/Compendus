@@ -202,7 +202,7 @@ function inlineText(inlines: Inline[]): string {
   return s;
 }
 
-export function renderChapterHtml(blocks: Block[], bookId: string): string {
+function renderChapterHtml(blocks: Block[], bookId: string): string {
   return blocks.map((b) => renderBlock(b, bookId)).join("");
 }
 

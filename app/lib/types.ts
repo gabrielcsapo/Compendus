@@ -19,7 +19,7 @@ export interface Chapter {
   content: string;
 }
 
-export interface TocItem {
+interface TocItem {
   title: string;
   href: string;
   index: number;
@@ -53,7 +53,7 @@ export interface ProcessingResult {
   processingTime?: number;
 }
 
-export interface MetadataOverrides {
+interface MetadataOverrides {
   title?: string;
   authors?: string[];
   isbn?: string;

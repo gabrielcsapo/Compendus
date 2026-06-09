@@ -1,19 +1,16 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": [
+    "app/routes.ts",
+    "app/root.tsx",
     "app/routes/**/*.tsx",
-    "react-router-vite/entry.*.tsx",
-    "react-router-vite/plugin.ts",
+    "server.ts",
+    "server/index.ts",
     "scripts/*.ts",
     "tests/**/*.ts",
     "app/lib/reader/parser-worker.ts"
   ],
-  "project": [
-    "app/**/*.{ts,tsx}",
-    "react-router-vite/**/*.{ts,tsx}",
-    "scripts/**/*.ts",
-    "tests/**/*.ts"
-  ],
+  "project": ["app/**/*.{ts,tsx}", "server/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
   "ignore": ["app/types/**/*.d.ts", "local/**"],
   "ignoreDependencies": [
     "@tailwindcss/typography",

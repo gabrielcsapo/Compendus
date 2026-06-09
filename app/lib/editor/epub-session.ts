@@ -335,8 +335,3 @@ export async function removeFile(bookId: string, path: string): Promise<void> {
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-
-export function isSessionDirty(bookId: string): boolean {
-  const session = getSession(bookId);
-  return session?.isDirty || false;
-}

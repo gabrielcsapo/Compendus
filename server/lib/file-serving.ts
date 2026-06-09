@@ -30,7 +30,7 @@ export function generateETag(mtime: Date, size: number): string {
  * Check If-None-Match header against an ETag.
  * Returns a 304 response if the ETag matches, or null if the request should proceed.
  */
-export function checkConditional(c: Context, etag: string): Response | null {
+function checkConditional(c: Context, etag: string): Response | null {
   const ifNoneMatch = c.req.header("if-none-match");
   if (ifNoneMatch && ifNoneMatch === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag } });
@@ -69,7 +69,7 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
   otf: "font/otf",
 };
 
-export function getContentType(filePath: string): string {
+function getContentType(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase() || "";
   return CONTENT_TYPE_MAP[ext] || lookup(filePath) || "application/octet-stream";
 }
@@ -242,17 +242,4 @@ export async function serveCachedResource(
       ETag: etag,
     },
   });
-}
-
-/**
- * Invalidate the resource cache for a book (e.g., after re-upload or edit).
- */
-export async function invalidateResourceCache(bookId: string): Promise<void> {
-  const bookCacheDir = resolve(RESOURCE_CACHE_DIR, bookId);
-  const { rm } = await import("fs/promises");
-  try {
-    await rm(bookCacheDir, { recursive: true, force: true });
-  } catch {
-    // Cache dir may not exist, that's fine
-  }
 }

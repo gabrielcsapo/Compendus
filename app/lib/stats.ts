@@ -6,7 +6,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
  * value (shouldn't happen — schema default is 15 — but defensive). The
  * authoritative source is `profiles.dailyGoalMinutes`.
  */
-export const DEFAULT_DAILY_GOAL_MINUTES = 15;
+const DEFAULT_DAILY_GOAL_MINUTES = 15;
 
 export type StatsResponse = {
   totalMinutes: number;

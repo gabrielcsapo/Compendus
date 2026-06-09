@@ -115,7 +115,7 @@ export function applyHighlightsToDOM(
 /**
  * Remove all highlight marks from the DOM, restoring original text nodes.
  */
-export function clearHighlightMarks(contentEl: HTMLElement): void {
+function clearHighlightMarks(contentEl: HTMLElement): void {
   const marks = contentEl.querySelectorAll("[data-highlight-id]");
   for (const mark of marks) {
     const parent = mark.parentNode;

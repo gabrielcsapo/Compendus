@@ -12,7 +12,8 @@ import {
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { resolveProfileId } from "../lib/profile";
-import { getContent, paginationEngine } from "../lib/reader";
+import { getContent } from "../lib/reader";
+import * as pagination from "../lib/reader/pagination";
 import type {
   ViewportConfig,
   TocEntry,
@@ -376,32 +377,6 @@ export async function getDeviceReadingProgress(
     .sort((a, b) => b.readingProgress - a.readingProgress);
 }
 
-export async function getBookProgress(
-  bookId: string,
-  profileId?: string,
-): Promise<{
-  readingProgress: number;
-  lastPosition: string | null;
-  lastReadAt: Date | null;
-} | null> {
-  const conditions = [eq(userBookState.bookId, bookId)];
-  if (profileId) conditions.push(eq(userBookState.profileId, profileId));
-
-  const state = await db
-    .select()
-    .from(userBookState)
-    .where(and(...conditions))
-    .get();
-
-  if (!state) return null;
-
-  return {
-    readingProgress: state.readingProgress ?? 0,
-    lastPosition: state.lastPosition,
-    lastReadAt: state.lastReadAt,
-  };
-}
-
 // ============================================
 // PROFILE RESOLUTION
 // ============================================
@@ -531,12 +506,12 @@ export async function getReaderInfo(
   }
 
   // Calculate total pages for viewport
-  const totalPages = paginationEngine.calculateTotalPages(content, viewport);
+  const totalPages = pagination.calculateTotalPages(content, viewport);
 
   // Get TOC with page numbers
   let toc: TocEntry[] = [];
   if (content.type === "text" || content.type === "pdf") {
-    toc = paginationEngine.calculateTocPageNumbers(content, content.toc, viewport);
+    toc = pagination.calculateTocPageNumbers(content, content.toc, viewport);
   }
 
   const response: ReaderInfoResponse = {
@@ -568,8 +543,8 @@ export async function getReaderPage(
   const content = await getContent(bookId, formatOverride);
   if (!content) return null;
 
-  const totalPages = paginationEngine.calculateTotalPages(content, viewport);
-  const pageContent = paginationEngine.getPage(content, pageNum, viewport, bookId);
+  const totalPages = pagination.calculateTotalPages(content, viewport);
+  const pageContent = pagination.getPage(content, pageNum, viewport, bookId);
 
   return {
     pageNum: Math.max(1, Math.min(pageNum, totalPages)),
@@ -601,7 +576,7 @@ export async function searchContent(
   const content = await getContent(bookId, formatOverride);
   if (!content) return [];
 
-  return paginationEngine.searchContent(content, query, viewport, maxResults);
+  return pagination.searchContent(content, query, viewport, maxResults);
 }
 
 export async function getReaderPageForPosition(
@@ -614,8 +589,8 @@ export async function getReaderPageForPosition(
   const content = await getContent(bookId, formatOverride);
   if (!content) return null;
 
-  const pageNum = paginationEngine.getPageForPosition(content, position, viewport);
-  const pageContent = paginationEngine.getPage(content, pageNum, viewport, bookId);
+  const pageNum = pagination.getPageForPosition(content, position, viewport);
+  const pageContent = pagination.getPage(content, pageNum, viewport, bookId);
 
   return {
     pageNum,

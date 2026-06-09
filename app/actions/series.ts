@@ -24,59 +24,6 @@ export interface SeriesInfo {
   totalWanted: number;
 }
 
-export interface SeriesWithCounts {
-  name: string;
-  ownedCount: number;
-  wantedCount: number;
-}
-
-/**
- * Get all series with counts of owned and wanted books
- */
-export async function getAllSeriesWithCounts(): Promise<SeriesWithCounts[]> {
-  const ownedSeries = await db
-    .select({
-      series: books.series,
-      count: sql<number>`count(*)`,
-    })
-    .from(books)
-    .where(isNotNull(books.series))
-    .groupBy(books.series);
-
-  const wantedSeries = await db
-    .select({
-      series: wantedBooks.series,
-      count: sql<number>`count(*)`,
-    })
-    .from(wantedBooks)
-    .where(isNotNull(wantedBooks.series))
-    .groupBy(wantedBooks.series);
-
-  // Combine owned and wanted
-  const seriesMap = new Map<string, { ownedCount: number; wantedCount: number }>();
-
-  for (const s of ownedSeries) {
-    if (s.series) {
-      seriesMap.set(s.series, { ownedCount: s.count, wantedCount: 0 });
-    }
-  }
-
-  for (const s of wantedSeries) {
-    if (s.series) {
-      const existing = seriesMap.get(s.series);
-      if (existing) {
-        existing.wantedCount = s.count;
-      } else {
-        seriesMap.set(s.series, { ownedCount: 0, wantedCount: s.count });
-      }
-    }
-  }
-
-  return Array.from(seriesMap.entries())
-    .map(([name, counts]) => ({ name, ...counts }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
 /**
  * Get series details with owned and wanted books
  */

@@ -209,7 +209,7 @@ export function updateJobProgress(
 /**
  * Append a line to the job's logs column. Keeps the last 500 lines max.
  */
-export function appendJobLog(id: string, line: string): void {
+function appendJobLog(id: string, line: string): void {
   const row = db
     .select({ logs: backgroundJobs.logs })
     .from(backgroundJobs)

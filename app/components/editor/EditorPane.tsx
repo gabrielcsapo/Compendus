@@ -29,7 +29,7 @@ function getLanguageExtension(path: string) {
   return xml();
 }
 
-export function EditorPane({ content, filePath, isDark, onChange }: EditorPaneProps) {
+function EditorPane({ content, filePath, isDark, onChange }: EditorPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);

@@ -223,7 +223,7 @@ const ROLE_MAP: Record<string, SemanticRole> = {
 
 const NOTE_TYPES = new Set(["footnote", "endnote", "rearnote", "note"]);
 
-export interface Diagnostics {
+interface Diagnostics {
   blockCounts: Record<string, number>;
   markCounts: Record<string, number>;
   /** Tags that fell through to a `foreign` block or were dropped, with counts. */

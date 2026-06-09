@@ -1,52 +1,27 @@
 import type { BookMetadata } from "../types";
 
 /**
- * Simple in-memory cache with TTL for API responses
+ * Simple in-memory cache with TTL for API responses.
+ * Expired entries are dropped lazily on read.
  */
-interface CacheEntry<T> {
-  data: T;
-  expiresAt: number;
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+const cache = new Map<string, { data: unknown; expiresAt: number }>();
+
+function cacheGet<T>(key: string): T | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+
+  if (Date.now() > entry.expiresAt) {
+    cache.delete(key);
+    return null;
+  }
+
+  return entry.data as T;
 }
 
-class MetadataCache {
-  private cache = new Map<string, CacheEntry<unknown>>();
-  private defaultTTL = 30 * 60 * 1000; // 30 minutes
-
-  get<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) return null;
-
-    if (Date.now() > entry.expiresAt) {
-      this.cache.delete(key);
-      return null;
-    }
-
-    return entry.data as T;
-  }
-
-  set<T>(key: string, data: T, ttl: number = this.defaultTTL): void {
-    this.cache.set(key, {
-      data,
-      expiresAt: Date.now() + ttl,
-    });
-  }
-
-  // Clear expired entries periodically
-  cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.cache.entries()) {
-      if (now > entry.expiresAt) {
-        this.cache.delete(key);
-      }
-    }
-  }
+function cacheSet(key: string, data: unknown): void {
+  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
 }
-
-// Global cache instance
-const metadataCache = new MetadataCache();
-
-// Run cleanup every 5 minutes
-setInterval(() => metadataCache.cleanup(), 5 * 60 * 1000);
 
 interface OpenLibrarySearchResult {
   numFound: number;
@@ -160,7 +135,7 @@ export interface MetadataSearchResult {
 export async function searchGoogleBooks(query: string): Promise<MetadataSearchResult[]> {
   // Check cache first
   const cacheKey = `google:${query.toLowerCase().trim()}`;
-  const cached = metadataCache.get<MetadataSearchResult[]>(cacheKey);
+  const cached = cacheGet<MetadataSearchResult[]>(cacheKey);
   if (cached) {
     return cached;
   }
@@ -250,7 +225,7 @@ export async function searchGoogleBooks(query: string): Promise<MetadataSearchRe
     });
 
     // Cache the results
-    metadataCache.set(cacheKey, results);
+    cacheSet(cacheKey, results);
     return results;
   } catch (error) {
     // Silently fail - will fall back to Open Library
@@ -279,7 +254,7 @@ export async function searchBookMetadata(
 
   // Check cache first
   const cacheKey = `openlibrary:search:${query.toLowerCase().trim()}`;
-  const cached = metadataCache.get<MetadataSearchResult[]>(cacheKey);
+  const cached = cacheGet<MetadataSearchResult[]>(cacheKey);
   if (cached) {
     return cached;
   }
@@ -324,7 +299,7 @@ export async function searchBookMetadata(
   });
 
   // Cache the results
-  metadataCache.set(cacheKey, results);
+  cacheSet(cacheKey, results);
   return results;
 }
 
@@ -336,7 +311,7 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
 
   // Check cache first
   const cacheKey = `openlibrary:isbn:${cleanIsbn}`;
-  const cached = metadataCache.get<MetadataSearchResult | null>(cacheKey);
+  const cached = cacheGet<MetadataSearchResult | null>(cacheKey);
   if (cached !== null) {
     return cached;
   }
@@ -346,7 +321,7 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
   if (!response.ok) {
     console.error("Open Library ISBN lookup failed:", response.statusText);
     // Cache the null result to avoid repeated failed lookups
-    metadataCache.set(cacheKey, null);
+    cacheSet(cacheKey, null);
     return null;
   }
 
@@ -417,7 +392,7 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
   };
 
   // Cache the result
-  metadataCache.set(cacheKey, result);
+  cacheSet(cacheKey, result);
   return result;
 }
 

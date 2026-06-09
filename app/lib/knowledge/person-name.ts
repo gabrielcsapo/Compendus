@@ -63,14 +63,14 @@ const TITLES = new Set([
   "pres",
 ]);
 
-export interface ParsedName {
+interface ParsedName {
   titles: Set<string>;
   coreTokens: string[];
   core: string;
 }
 
 /** Split a normalized name into honorific titles and the core name tokens. */
-export function parsePersonName(norm: string): ParsedName {
+function parsePersonName(norm: string): ParsedName {
   const titles = new Set<string>();
   const coreTokens: string[] = [];
   for (const tok of norm.split(" ")) {
