@@ -13,6 +13,17 @@ export const routes: RouteConfig[] = [
       { id: "dashboard", path: "dashboard", component: () => import("./routes/dashboard.js") },
       { id: "search", path: "search", component: () => import("./routes/search.js") },
       { id: "wander", path: "wander", component: () => import("./routes/wander.js") },
+      { id: "journeys", path: "journeys", component: () => import("./routes/journeys.js") },
+      {
+        id: "fleet-worker",
+        path: "fleet-worker",
+        component: () => import("./routes/fleet-worker.js"),
+      },
+      {
+        id: "journey",
+        path: "journey/:topicId",
+        component: () => import("./routes/journey.js"),
+      },
       { id: "entity", path: "entity/:id", component: () => import("./routes/entity.js") },
       { id: "book-detail", path: "book/:id", component: () => import("./routes/book-detail.js") },
       { id: "book-read", path: "book/:id/read", component: () => import("./routes/book-read.js") },
@@ -35,7 +46,21 @@ export const routes: RouteConfig[] = [
         path: "admin",
         component: () => import("./routes/admin.js"),
         children: [
-          { id: "admin-data", index: true, component: () => import("./routes/admin-data.js") },
+          {
+            id: "admin-overview",
+            index: true,
+            component: () => import("./routes/admin-overview.js"),
+          },
+          {
+            id: "admin-storage",
+            path: "storage",
+            component: () => import("./routes/admin-data.js"),
+          },
+          {
+            id: "admin-jobs",
+            path: "jobs",
+            component: () => import("./routes/admin-jobs.js"),
+          },
           {
             id: "admin-batch-edit",
             path: "batch-edit",
@@ -55,6 +80,11 @@ export const routes: RouteConfig[] = [
             id: "admin-duplicates",
             path: "duplicates",
             component: () => import("./routes/admin-duplicates.js"),
+          },
+          {
+            id: "admin-fleet",
+            path: "fleet",
+            component: () => import("./routes/admin-fleet.js"),
           },
         ],
       },

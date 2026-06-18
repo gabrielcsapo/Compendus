@@ -9,8 +9,9 @@
  *
  * Both patterns persist to SQLite and notify SSE subscribers in real time.
  */
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { mkdirSync, statSync } from "fs";
+import { resolve } from "path";
 import { db, backgroundJobs, books } from "./db";
 import { transcribeAudio, isWhisperAvailable } from "./processing/transcribe";
 
@@ -207,25 +208,61 @@ export function updateJobProgress(
 }
 
 /**
- * Append a line to the job's logs column. Keeps the last 500 lines max.
+ * Append a line to the job's logs column. BUFFERED: a busy conversion logs
+ * hundreds of lines, and the old read-modify-write per line (read full
+ * column, split 500 lines, rejoin, write) ate the event loop. Lines collect
+ * in memory and flush every FLUSH_EVERY lines or 2s, whichever first; a
+ * crash loses at most a couple of seconds of job log (the console mirror
+ * still has everything).
  */
-function appendJobLog(id: string, line: string): void {
+const LOG_BUFFERS = new Map<
+  string,
+  { lines: string[]; timer: ReturnType<typeof setTimeout> | null }
+>();
+const LOG_FLUSH_EVERY = 20;
+const LOG_FLUSH_MS = 2000;
+const LOG_MAX_LINES = 500;
+
+function flushJobLog(id: string): void {
+  const buf = LOG_BUFFERS.get(id);
+  if (!buf || buf.lines.length === 0) return;
+  if (buf.timer) clearTimeout(buf.timer);
+  LOG_BUFFERS.delete(id);
   const row = db
     .select({ logs: backgroundJobs.logs })
     .from(backgroundJobs)
     .where(eq(backgroundJobs.id, id))
     .get();
   if (!row) return;
-
-  const existing = row.logs ?? "";
-  const lines = existing ? existing.split("\n") : [];
-  lines.push(line);
-  // Keep last 500 lines to prevent unbounded growth
-  const trimmed = lines.length > 500 ? lines.slice(-500) : lines;
+  const lines = row.logs ? row.logs.split("\n") : [];
+  lines.push(...buf.lines);
+  const trimmed = lines.length > LOG_MAX_LINES ? lines.slice(-LOG_MAX_LINES) : lines;
   db.update(backgroundJobs)
     .set({ logs: trimmed.join("\n") })
     .where(eq(backgroundJobs.id, id))
     .run();
+}
+
+function appendJobLog(id: string, line: string): void {
+  let buf = LOG_BUFFERS.get(id);
+  if (!buf) {
+    buf = { lines: [], timer: null };
+    LOG_BUFFERS.set(id, buf);
+  }
+  buf.lines.push(line);
+  if (buf.lines.length >= LOG_FLUSH_EVERY) {
+    flushJobLog(id);
+  } else if (!buf.timer) {
+    buf.timer = setTimeout(() => {
+      try {
+        flushJobLog(id);
+      } catch (e) {
+        // A throw inside a bare timer is an uncaught exception — process
+        // death. SQLITE_BUSY here just means the lines flush on the next try.
+        console.error("[Queue] log flush failed:", e);
+      }
+    }, LOG_FLUSH_MS);
+  }
 }
 
 /**
@@ -250,15 +287,18 @@ export function cancelJob(id: string): { success: boolean; message: string } {
   }
 
   if (row.status === "running") {
-    // Signal the running job to abort
-    currentAbortController?.abort();
+    // Abort only when this row is the job actually in flight — an orphaned
+    // "running" row (previous container died mid-job) shares the status but
+    // not the controller, and aborting would kill the unrelated current job.
+    const live = currentJobId === id;
+    if (live) currentAbortController?.abort();
     updateJobProgress(id, {
       status: "error",
       progress: 0,
-      message: "Cancelled by user",
+      message: live ? "Cancelled by user" : "Cancelled (orphaned by an earlier crash)",
       result: { error: "Cancelled" },
     });
-    return { success: true, message: "Running job cancelled" };
+    return { success: true, message: live ? "Running job cancelled" : "Orphaned job cleared" };
   }
 
   // completed or error — just delete it
@@ -310,10 +350,70 @@ let processorStartedAt: number | null = null;
  *  progress is NOT stuck, however long it runs (big books take many minutes). */
 let lastProgressAt: number | null = null;
 let currentAbortController: AbortController | null = null;
+/** Id of the job the processor is actually executing right now. A DB row can
+ *  say "running" while belonging to a dead process (container swap, OOM) —
+ *  cancelJob must only abort the controller when the ids MATCH, or cancelling
+ *  an orphaned row kills whatever innocent job is currently in flight. */
+let currentJobId: string | null = null;
 
 /** Consider the processor stuck only when the running job has reported NO
  *  progress for this long (genuinely hung), not merely run a long time. */
 const STUCK_NO_PROGRESS_MS = 3 * 60 * 1000;
+
+// --- user pause -------------------------------------------------------------------
+// The grind is throughput work that will happily eat the whole CPU quota for
+// days; when the user actually wants to USE the app (matching books, reading)
+// they need a way to reclaim the box. Pause stops claiming jobs and aborts +
+// requeues the current one (nothing is lost — it re-claims on resume). Always
+// auto-resumes so a forgotten pause can't silently freeze the grind forever.
+
+let queuePausedUntil: number | null = null;
+
+export function queuePauseState(): { paused: boolean; until: number | null } {
+  const paused = queuePausedUntil !== null && Date.now() < queuePausedUntil;
+  return { paused, until: paused ? queuePausedUntil : null };
+}
+
+export function pauseQueue(minutes = 60): {
+  paused: true;
+  until: number;
+  requeuedJob: string | null;
+} {
+  const mins = Math.min(Math.max(minutes, 1), 24 * 60);
+  queuePausedUntil = Date.now() + mins * 60_000;
+  let requeuedJob: string | null = null;
+  if (currentJobId) {
+    requeuedJob = currentJobId;
+    const jobId = currentJobId;
+    currentAbortController?.abort();
+    const requeue = () =>
+      db
+        .update(backgroundJobs)
+        .set({ status: "pending", updatedAt: new Date() })
+        .where(eq(backgroundJobs.id, jobId))
+        .run();
+    requeue();
+    // A progress callback already in flight can flip the row back to
+    // "running" after our write; re-assert once the abort has settled.
+    setTimeout(() => {
+      try {
+        requeue();
+      } catch (e) {
+        console.error("[Queue] pause requeue retry failed:", e);
+      }
+    }, 5000);
+  }
+  console.log(
+    `[Queue] PAUSED for ${mins}min by user${requeuedJob ? ` (requeued ${requeuedJob})` : ""}`,
+  );
+  return { paused: true, until: queuePausedUntil, requeuedJob };
+}
+
+export function resumeQueue(): { paused: false } {
+  queuePausedUntil = null;
+  console.log("[Queue] resumed by user");
+  return { paused: false };
+}
 
 async function processTranscribeJob(jobId: string, payload: TranscribePayload): Promise<void> {
   const { bookId, bookPath, outputPath } = payload;
@@ -349,6 +449,77 @@ async function processConvertJob(jobId: string, payload: ConvertPayload): Promis
   const { bookId } = payload;
   const book = db.select().from(books).where(eq(books.id, bookId)).get();
   if (!book) throw new Error("Book not found");
+
+  // Crash-recovered jobs re-run from the top; don't redo a conversion that
+  // already landed (the row can bounce pending↔running across OOM boots even
+  // after the EPUB was written). Fresh re-convert flows clear the path first.
+  if (book.convertedEpubPath) {
+    const { resolveStoragePath } = await import("./storage");
+    const { existsSync } = await import("fs");
+    if (existsSync(resolveStoragePath(book.convertedEpubPath))) {
+      appendJobLog(jobId, "EPUB already converted — skipping");
+      return;
+    }
+  }
+
+  // FLEET FIRST for PDFs: the in-process conversion has OOM-killed this
+  // container on big image-heavy PDFs (the crash-loop of 2026-06-11). The
+  // pdf-epub kernel runs the identical conversion on whatever device leases
+  // it; apply copies the EPUB into place. Poll with watchdog heartbeats and
+  // fall back to local conversion if the fleet is asleep.
+  if (book.format === "pdf") {
+    try {
+      const fabric = await import("./fabric");
+      const { kernelHashFor } = await import("./fabric/kernels");
+      if (fabric.runtimeOnFleet("js-kernel")) {
+        const authors = (() => {
+          try {
+            const a = JSON.parse(book.authors ?? "[]");
+            return Array.isArray(a) ? a : [];
+          } catch {
+            return [];
+          }
+        })();
+        const { item } = fabric.enqueueWork({
+          project: "compendus",
+          kind: "convert-pdf-epub",
+          payload: {
+            bookId: book.id,
+            kernelHash: kernelHashFor("pdf-epub"),
+            fileRef: `/api/fabric/files/${book.id}`,
+            title: book.title,
+            authors,
+            language: book.language ?? undefined,
+          },
+          requirements: { runtimes: ["js-kernel"], estMinutes: 10 },
+        });
+        appendJobLog(jobId, `EPUB conversion offered to the fleet (${item.id})`);
+        const beat = setInterval(
+          () => updateJobProgress(jobId, { progress: 35, message: "Fleet is converting…" }),
+          20_000,
+        );
+        try {
+          const res = await fabric.waitForWorkResult(item.id, {
+            timeoutMs: 15 * 60 * 1000,
+            leaseWithinMs: 2 * 60 * 1000,
+          });
+          if (res) {
+            const fresh = db.select().from(books).where(eq(books.id, bookId)).get();
+            if (fresh?.convertedEpubPath) {
+              appendJobLog(jobId, "fleet converted the PDF — done");
+              console.log(`[Queue] PDF → EPUB fleet conversion complete for ${bookId}`);
+              return;
+            }
+          }
+          appendJobLog(jobId, "fleet didn't convert in time — converting locally");
+        } finally {
+          clearInterval(beat);
+        }
+      }
+    } catch (e) {
+      appendJobLog(jobId, `fleet conversion unavailable (${e instanceof Error ? e.message : e})`);
+    }
+  }
 
   // Shared with the knowledge pipeline's on-demand conversion (single source of
   // truth for "turn this book into an EPUB and record it on the book row").
@@ -447,10 +618,64 @@ async function processGenerateCcdJob(jobId: string, payload: { bookId?: string }
   }
   if (!needsCcd(book)) return; // already converted at the current version — nothing to do
   updateJobProgress(jobId, { status: "running", progress: 30, message: "Building CCD…" });
+
+  // FLEET FIRST for PDFs: conversion is the box's heaviest reader-facing CPU
+  // and pdfjs runs natively on every fleet host (browser tabs included). The
+  // apply hook writes ccd_path when the result lands; we poll, heartbeat the
+  // watchdog, and fall back to local conversion if nobody picks it up.
+  if (book.format === "pdf") {
+    try {
+      const fabric = await import("./fabric");
+      const { kernelHashFor } = await import("./fabric/kernels");
+      const { CCD_VERSION } = await import("./content-ast/types");
+      if (fabric.runtimeOnFleet("js-kernel")) {
+        const { item } = fabric.enqueueWork({
+          project: "compendus",
+          kind: "convert-pdf-ccd",
+          payload: {
+            bookId: book.id,
+            kernelHash: kernelHashFor("pdf-ccd"),
+            fileRef: `/api/fabric/files/${book.id}`,
+            expectCcdVersion: CCD_VERSION,
+          },
+          requirements: { runtimes: ["js-kernel"], estMinutes: 5 },
+        });
+        appendJobLog(jobId, `PDF conversion offered to the fleet (${item.id})`);
+        const beat = setInterval(
+          () => updateJobProgress(jobId, { progress: 35, message: "Fleet is converting…" }),
+          20_000,
+        );
+        try {
+          const res = await fabric.waitForWorkResult(item.id, {
+            timeoutMs: 10 * 60 * 1000,
+            leaseWithinMs: 2 * 60 * 1000,
+          });
+          if (res) {
+            const fresh = db.select().from(books).where(eq(books.id, bookId)).get();
+            if (fresh && !needsCcd(fresh)) {
+              appendJobLog(jobId, "fleet converted the PDF — done");
+              return;
+            }
+          }
+          appendJobLog(jobId, "fleet didn't convert in time — converting locally");
+        } finally {
+          clearInterval(beat);
+        }
+      }
+    } catch (e) {
+      appendJobLog(jobId, `fleet conversion unavailable (${e instanceof Error ? e.message : e})`);
+    }
+  }
+
   await generateCcd(book); // persists ccd_path/ccd_version on success, or ccd_error on failure
 }
 
 async function processNextJob(): Promise<void> {
+  if (queuePausedUntil) {
+    if (Date.now() < queuePausedUntil) return; // user pause — claim nothing
+    queuePausedUntil = null;
+    console.log("[Queue] pause expired — resuming");
+  }
   if (processorRunning) {
     // Safety valve: only treat the job as stuck if it has made NO progress for a
     // while (a long-but-progressing job is healthy). Crucially, ABORT the stuck
@@ -466,16 +691,62 @@ async function processNextJob(): Promise<void> {
       processorStartedAt = null;
       lastProgressAt = null;
       currentAbortController = null;
+      currentJobId = null;
     }
     return; // wait for the next tick before starting another job
+  }
+
+  // BACKPRESSURE on fire-and-continue: every extract job that offloads to the
+  // fleet leaves a queued extract-entities item + a future apply. Without a
+  // cap the box fires books far faster than the fleet drains them (38 in
+  // flight observed) and the continuous embed + serialized applies starve the
+  // 2-core event loop — server unreachable for minutes. While the fleet
+  // backlog is deep, stop claiming NEW extract jobs (other tiers still run);
+  // applies land, the backlog shrinks, extraction resumes.
+  const FLEET_EXTRACT_BACKLOG_MAX = Number(process.env.FLEET_EXTRACT_BACKLOG_MAX || 4);
+  let skipExtract = false;
+  try {
+    const { runtimeOnFleet } = await import("./fabric");
+    // Backpressure only makes sense while a gliner device is actually awake
+    // to drain the backlog. Fleet asleep (laptop unplugged) + a standing
+    // backlog froze the whole extract tier — with no device checked in, the
+    // pipeline's runtimeOnFleet gate makes new jobs extract LOCALLY anyway,
+    // so claiming them is always safe.
+    if (runtimeOnFleet("gliner")) {
+      const { rawDb } = await import("./db");
+      const backlog = (
+        rawDb
+          .prepare(
+            "SELECT COUNT(*) AS n FROM work_items WHERE kind = 'extract-entities' AND status IN ('queued','leased')",
+          )
+          .get() as { n: number }
+      ).n;
+      skipExtract = backlog >= FLEET_EXTRACT_BACKLOG_MAX;
+    }
+  } catch {
+    // fabric tables unavailable (fresh DB mid-migration) — no backpressure
   }
 
   // Find oldest pending job
   const row = db
     .select()
     .from(backgroundJobs)
-    .where(eq(backgroundJobs.status, "pending"))
-    .orderBy(asc(backgroundJobs.createdAt))
+    .where(
+      skipExtract
+        ? sql`${backgroundJobs.status} = 'pending' AND ${backgroundJobs.type} != 'extract'`
+        : eq(backgroundJobs.status, "pending"),
+    )
+    // Reader-facing work preempts enrichment: a fresh upload's CCD must not
+    // sit behind days of queued analysis. Within a tier, FIFO.
+    .orderBy(
+      sql`CASE ${backgroundJobs.type}
+        WHEN 'generate-ccd' THEN 0
+        WHEN 'convert' THEN 1
+        WHEN 'transcribe' THEN 2
+        WHEN 'extract' THEN 3
+        ELSE 4 END`,
+      asc(backgroundJobs.createdAt),
+    )
     .limit(1)
     .get();
 
@@ -486,6 +757,7 @@ async function processNextJob(): Promise<void> {
   lastProgressAt = Date.now();
   currentAbortController = new AbortController();
   const jobId = row.id;
+  currentJobId = jobId;
 
   try {
     console.log(`[Queue] Processing job ${jobId} (type: ${row.type})`);
@@ -529,8 +801,9 @@ async function processNextJob(): Promise<void> {
 
     console.log(`[Queue] Job ${jobId} completed`);
   } catch (error) {
-    // Don't overwrite cancel status
-    if (currentAbortController.signal.aborted) return;
+    // Don't overwrite cancel status (controller may already be cleared by the
+    // watchdog that aborted this job — treat that as cancelled too)
+    if (!currentAbortController || currentAbortController.signal.aborted) return;
 
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error(`[Queue] Job ${jobId} failed:`, errorMessage);
@@ -542,7 +815,9 @@ async function processNextJob(): Promise<void> {
       result: { error: errorMessage },
     });
   } finally {
+    flushJobLog(jobId);
     currentAbortController = null;
+    currentJobId = null;
     processorRunning = false;
     processorStartedAt = null;
   }
@@ -555,6 +830,17 @@ async function processNextJob(): Promise<void> {
  */
 let processorStarted = false;
 
+function rawDbPrune(): number {
+  const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  const res = db
+    .delete(backgroundJobs)
+    .where(
+      sql`${backgroundJobs.status} = 'completed' AND ${backgroundJobs.updatedAt} < ${Math.floor(+cutoff / 1000)}`,
+    )
+    .run();
+  return res.changes;
+}
+
 export function startJobProcessor(): void {
   if (processorStarted) {
     console.log("[Queue] Job processor already started, skipping");
@@ -562,7 +848,32 @@ export function startJobProcessor(): void {
   }
   processorStarted = true;
 
-  // Reset stale running jobs (server crashed while processing)
+  // Kill switch for the legacy embedding/GLiNER extraction pipeline while the
+  // concept substrate is being parallel-run. A restart resets the in-memory
+  // pause, so without this the OOM-prone grind would resume on every boot.
+  if (process.env.PAUSE_PROCESSING === "1") {
+    console.log("[Queue] PAUSE_PROCESSING=1 — legacy job processor disabled");
+    return;
+  }
+
+  // Prune completed jobs older than 7 days — they have no value once the
+  // book shows its result, and thousands of them turned the admin jobs view
+  // into noise (1,759 rows, mostly history).
+  try {
+    const pruned = rawDbPrune();
+    if (pruned > 0) console.log(`[Queue] pruned ${pruned} completed jobs older than 7 days`);
+  } catch {
+    /* best-effort */
+  }
+
+  // Reset stale running jobs (server crashed while processing). ONE strike:
+  // a job found "running" at boot took the previous process down with it (OOM,
+  // native crash, OOM-kill). Three strikes meant a single poison book (a large
+  // book OOMing during embedding was the live case) could reboot the 6GB box
+  // FOUR times before parking — minutes of flapping with 100% errors. One retry
+  // tolerates the rare clean-restart-caught-mid-job, then parks: anything that
+  // crashes the whole container twice is not going to succeed on a third try.
+  const MAX_BOOT_RESETS = 1;
   const stale = db.select().from(backgroundJobs).where(eq(backgroundJobs.status, "running")).all();
 
   // Only reset enqueued job types (not inline jobs like audio merge)
@@ -573,21 +884,44 @@ export function startJobProcessor(): void {
       row.type === "extract" ||
       row.type === "generate-ccd"
     ) {
+      if (row.attempts >= MAX_BOOT_RESETS) {
+        db.update(backgroundJobs)
+          .set({
+            status: "error",
+            message: `Crashed the worker ${row.attempts} times — parked (cancel/re-enqueue to retry)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(backgroundJobs.id, row.id))
+          .run();
+        console.warn(`[Queue] Job ${row.id} crashed the worker ${row.attempts}x — parked as error`);
+        continue;
+      }
       db.update(backgroundJobs)
-        .set({ status: "pending", updatedAt: new Date() })
+        .set({ status: "pending", attempts: row.attempts + 1, updatedAt: new Date() })
         .where(eq(backgroundJobs.id, row.id))
         .run();
-      console.log(`[Queue] Reset stale job ${row.id} back to pending`);
+      console.log(
+        `[Queue] Reset stale job ${row.id} back to pending (boot reset ${row.attempts + 1}/${MAX_BOOT_RESETS})`,
+      );
     }
   }
 
-  // Start polling loop
-  setInterval(() => {
-    processNextJob().catch((err) => {
-      console.error("[Queue] Processor error:", err);
-      processorRunning = false;
-    });
-  }, 2000);
+  // Boot grace before pulling heavy jobs. Right after a restart the container is
+  // already near its memory ceiling: the boot build, MiniLM + GLiNER model loads,
+  // and the substrate warm-up all peak together. Starting a large-book extract on
+  // top of that is what tips the 6GB box into an OOM/native crash → restart →
+  // boot-reset re-queue → crash again. Letting boot settle first breaks that
+  // collision; for a personal library a ~45s delay on resuming the queue is free.
+  const BOOT_GRACE_MS = 45_000;
+  setTimeout(() => {
+    setInterval(() => {
+      processNextJob().catch((err) => {
+        console.error("[Queue] Processor error:", err);
+        processorRunning = false;
+      });
+    }, 2000);
+    console.log("[Queue] polling started (boot grace elapsed)");
+  }, BOOT_GRACE_MS);
 
-  console.log("[Queue] Job processor started");
+  console.log(`[Queue] Job processor started (polling in ${BOOT_GRACE_MS / 1000}s)`);
 }

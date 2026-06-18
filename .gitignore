@@ -57,3 +57,6 @@ models/onnx-community/gliner_small-v2/onnx/
 # `pnpm ccd:fixtures`, large/churny, and kept out of release builds (a clean
 # checkout has none, so the synchronized group won't bundle them).
 /Compendus/Compendus/Reader/Samples/*.ccd
+
+# Fabric content-addressed artifact blobs — runtime fleet-job outputs, regenerable
+/fabric/

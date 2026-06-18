@@ -188,11 +188,12 @@ async function writeEpubMetadata(
   // Step 6: Write the updated OPF back to the ZIP
   zip.file(opfPath, updatedOpf);
 
-  // Step 7: Generate and save the modified EPUB
+  // Step 7: Generate and save the modified EPUB. Level 6, not 9 — max
+  // compression buys ~1-2% size for 2-3x the CPU on the 2-core box.
   const newBuffer = await zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",
-    compressionOptions: { level: 9 },
+    compressionOptions: { level: 6 },
   });
 
   await safeWriteFile(filePath, newBuffer);

@@ -1,0 +1,1 @@
+ALTER TABLE `background_jobs` ADD `attempts` integer DEFAULT 0 NOT NULL;

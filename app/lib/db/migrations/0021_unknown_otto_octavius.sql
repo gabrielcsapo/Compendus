@@ -1,0 +1,1 @@
+ALTER TABLE `passage_rank` ADD `prose` real DEFAULT 1 NOT NULL;

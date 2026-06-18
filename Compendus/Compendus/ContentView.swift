@@ -19,6 +19,7 @@ private enum MacSidebarItem: Hashable {
     case libraryAll, libraryEbooks, libraryAudiobooks, libraryComics, librarySeries
     // Other
     case highlights
+    case wander
     case settings
     case profile
 
@@ -58,6 +59,10 @@ struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var deepLinkedBook: DownloadedBook?
     @State private var showDataMigration = false
+    // Journeys is a first-class destination presented full-screen from the custom
+    // bottom bar (NOT a 6th TabView tab — a 6th tab triggers iOS's "More" overflow,
+    // which wraps tabs in an extra nav controller and shows a stray back chevron).
+    @State private var showJourneys = false
     #if targetEnvironment(macCatalyst)
     @State private var macSidebarSelection: MacSidebarItem = .deviceAll
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -181,6 +186,11 @@ struct ContentView: View {
             }
             Section {
                 macSidebarButton("Highlights", icon: "highlighter", item: .highlights)
+                macSidebarButton(
+                    "Wander",
+                    icon: "point.topleft.down.curvedto.point.bottomright.up",
+                    item: .wander
+                )
             }
         }
         .listStyle(.sidebar)
@@ -245,6 +255,8 @@ struct ContentView: View {
             LibraryView()
         } else if macSidebarSelection == .highlights {
             HighlightsView()
+        } else if macSidebarSelection == .wander {
+            WanderView()
         } else if macSidebarSelection == .settings {
             NavigationStack { SettingsView() }
         } else if macSidebarSelection == .profile {
@@ -294,12 +306,16 @@ struct ContentView: View {
 
             // Integrated bottom bar: mini player + tab icons.
             // Hidden on Wander (tag 4) for a full-screen, immersive experience.
+            // (Journeys is a full-screen cover, not a tab — see showJourneys.)
             if nav.selectedTab != 4 {
-                CustomBottomBar(selectedTab: $nav.selectedTab)
+                CustomBottomBar(selectedTab: $nav.selectedTab, showJourneys: $showJourneys)
                     .transition(.move(edge: .bottom))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: nav.selectedTab)
+        .fullScreenCover(isPresented: $showJourneys) {
+            JourneysView()
+        }
     }
 
     // MARK: - Deep Link
@@ -330,6 +346,8 @@ struct ContentView: View {
 
 struct CustomBottomBar: View {
     @Binding var selectedTab: Int
+    /// Journeys is presented full-screen (not a tab) — its bar item toggles this.
+    @Binding var showJourneys: Bool
     @Environment(AudiobookPlayer.self) private var player
     @Environment(ThemeManager.self) private var themeManager
     @Environment(ServerConfig.self) private var serverConfig
@@ -352,6 +370,7 @@ struct CustomBottomBar: View {
             activeIcon: "point.topleft.down.curvedto.point.bottomright.up",
             label: "Wander"
         ),
+        TabItem(icon: "signpost.right", activeIcon: "signpost.right.fill", label: "Journeys"),
     ]
 
     var body: some View {
@@ -366,25 +385,33 @@ struct CustomBottomBar: View {
             // Tab buttons
             HStack(spacing: 0) {
                 ForEach(0..<tabs.count, id: \.self) { index in
+                    // The last item (Journeys) opens a full-screen cover rather than
+                    // selecting a tab — keeps the TabView at 5 (no "More" overflow).
+                    let isJourneys = index == tabs.count - 1
+                    let active = isJourneys ? showJourneys : (selectedTab == index)
                     Button {
-                        selectedTab = index
+                        if isJourneys {
+                            showJourneys = true
+                        } else {
+                            selectedTab = index
+                        }
                     } label: {
                         VStack(spacing: 4) {
                             if index == Self.profileTabIndex {
                                 ProfileTabIcon(
-                                    isActive: selectedTab == index,
+                                    isActive: active,
                                     accentColor: themeManager.accentColor,
                                     serverConfig: serverConfig
                                 )
                             } else {
-                                Image(systemName: selectedTab == index ? tabs[index].activeIcon : tabs[index].icon)
+                                Image(systemName: active ? tabs[index].activeIcon : tabs[index].icon)
                                     .font(.system(size: 20))
                             }
 
                             Text(tabs[index].label)
                                 .font(.caption2)
                         }
-                        .foregroundStyle(selectedTab == index ? themeManager.accentColor : .secondary)
+                        .foregroundStyle(active ? themeManager.accentColor : .secondary)
                         .frame(maxWidth: .infinity)
                     }
                 }

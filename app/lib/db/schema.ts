@@ -6,6 +6,7 @@ import {
   blob,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -434,6 +435,11 @@ export const backgroundJobs = sqliteTable(
     payload: text("payload"), // JSON: job-specific input data
     result: text("result"), // JSON: result or error details
     logs: text("logs"), // Captured stdout/stderr output
+    // Boot-reset counter: a job found "running" at startup crashed or killed
+    // the previous process. After a few strikes it is parked as error instead
+    // of resurrected — one poison job (e.g. an OOMing convert) must not
+    // crash-loop the container forever.
+    attempts: integer("attempts").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -783,12 +789,281 @@ export const wanderSessions = sqliteTable(
     startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp" }),
     ideasVisited: integer("ideas_visited").notNull().default(1),
+    pathJson: text("path_json"), // ordered passage ids visited (wander v2)
+    stepsTakenJson: text("steps_taken_json"), // step kinds clicked, for ranking tuning
   },
   (table) => [
     index("idx_wander_sessions_profile").on(table.profileId),
     index("idx_wander_sessions_started").on(table.startedAt),
   ],
 );
+
+// --- Semantic substrate (wander-semantic-substrate-proposal.md §§3-6, 10-11) ----
+//
+// Embedding-first structure over the corpus: one shared vector space (int8 +
+// scale), a precomputed kNN graph, and everything derived from it — topics
+// (graph communities), centrality, bridges, coverage, roles, and curricula.
+// passages.embedding / entities.embedding remain until the cutover migration.
+
+// One vector per object, all in the same space. kind+refId examples:
+// ('passage', passageId), ('book', bookId), ('chapter', `${bookId}:${spine}`),
+// ('topic', topicId), ('entity', canonicalEntityId), ('prototype', roleName).
+export const embeddings = sqliteTable(
+  "embeddings",
+  {
+    kind: text("kind").notNull(),
+    refId: text("ref_id").notNull(),
+    vec: blob("vec", { mode: "buffer" }).notNull(), // int8[dim]
+    scale: real("scale").notNull(), // dequant: f32 ≈ int8 * scale
+    model: text("model").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.refId] }),
+    index("idx_embeddings_kind").on(table.kind),
+  ],
+);
+
+// Precomputed top-K semantic neighbors per passage — the wander/structure graph.
+export const passageNeighbors = sqliteTable(
+  "passage_neighbors",
+  {
+    passageId: text("passage_id").notNull(),
+    neighborId: text("neighbor_id").notNull(),
+    score: real("score").notNull(),
+    rank: integer("rank").notNull(), // 1..K
+    crossBook: integer("cross_book", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("idx_passage_neighbors_rank").on(table.passageId, table.rank),
+    index("idx_passage_neighbors_passage").on(table.passageId),
+  ],
+);
+
+// Emergent themes = communities of the kNN graph. label is filled by the
+// naming pass (NPMI-distinctive entities) and may be NULL until it runs.
+export const topics = sqliteTable("topics", {
+  id: text("id").primaryKey(),
+  label: text("label"),
+  size: integer("size").notNull(),
+  bookCount: integer("book_count").notNull().default(1),
+  parent: text("parent"), // set when an oversized community was subdivided
+});
+
+export const passageTopics = sqliteTable(
+  "passage_topics",
+  {
+    passageId: text("passage_id").primaryKey(),
+    topicId: text("topic_id").notNull(),
+  },
+  (table) => [index("idx_passage_topics_topic").on(table.topicId)],
+);
+
+export const passageRank = sqliteTable("passage_rank", {
+  passageId: text("passage_id").primaryKey(),
+  centrality: real("centrality").notNull(), // cross-book-weighted degree
+  bookNorm: real("book_norm").notNull(), // percentile within its book (0..1)
+  prose: real("prose").notNull().default(1), // 0..1; low = citations/front-matter noise
+});
+
+// Cross-book, cross-topic edges — the rarest, most valuable connections.
+export const bridges = sqliteTable(
+  "bridges",
+  {
+    passageA: text("passage_a").notNull(),
+    passageB: text("passage_b").notNull(),
+    score: real("score").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_bridges_pair").on(table.passageA, table.passageB),
+    index("idx_bridges_a").on(table.passageA),
+  ],
+);
+
+// Coverage: which passages a profile has actually encountered (learning mode).
+export const passageSeen = sqliteTable(
+  "passage_seen",
+  {
+    profileId: text("profile_id").notNull(),
+    passageId: text("passage_id").notNull(),
+    firstSeen: integer("first_seen", { mode: "timestamp" }).notNull(),
+    lastSeen: integer("last_seen", { mode: "timestamp" }).notNull(),
+    via: text("via").notNull(), // 'wander' | 'reader' | 'audio' | 'study'
+  },
+  (table) => [
+    uniqueIndex("idx_passage_seen_pk").on(table.profileId, table.passageId),
+    index("idx_passage_seen_profile").on(table.profileId),
+  ],
+);
+
+// Pedagogical role of each passage (curriculum Tier A).
+export const passageRoles = sqliteTable(
+  "passage_roles",
+  {
+    passageId: text("passage_id").primaryKey(),
+    role: text("role").notNull(), // 'definition'|'example'|'argument'|'application'|'narrative'
+    confidence: real("confidence").notNull(),
+  },
+  (table) => [index("idx_passage_roles_role").on(table.role)],
+);
+
+export const curricula = sqliteTable(
+  "curricula",
+  {
+    id: text("id").primaryKey(),
+    topicId: text("topic_id").notNull(),
+    profileId: text("profile_id"), // NULL = shared skeleton
+    title: text("title"),
+    builder: text("builder").notNull(), // 'structural' | 'encoder' | 'device' | 'server-llm'
+    builtAt: integer("built_at", { mode: "timestamp" }).notNull(),
+    version: integer("version").notNull().default(1),
+  },
+  (table) => [index("idx_curricula_topic").on(table.topicId)],
+);
+
+export const curriculumItems = sqliteTable(
+  "curriculum_items",
+  {
+    curriculumId: text("curriculum_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    passageId: text("passage_id").notNull(), // items ARE passages (Rule 2)
+    module: text("module"),
+    role: text("role"),
+    transition: text("transition"), // generated/templated scaffolding, validated
+    questionJson: text("question_json"),
+  },
+  (table) => [uniqueIndex("idx_curriculum_items_pk").on(table.curriculumId, table.ordinal)],
+);
+
+// Saved wander paths — exploration that can be resumed, replayed, or narrated.
+export const trails = sqliteTable(
+  "trails",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    pathJson: text("path_json").notNull(), // ordered passage ids
+    // Content-addressed rendered narration (fabric tts-render-trail artifact).
+    audioHash: text("audio_hash"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index("idx_trails_profile").on(table.profileId)],
+);
+
+// Device-authored names for realm clusters (journeys' categorical layer).
+// Realms are computed from topic centroids at request time; a realm's identity
+// is the content hash of its member topic ids, so labels survive re-clustering
+// when membership is unchanged and quietly retire when the territory shifts.
+export const realmLabels = sqliteTable("realm_labels", {
+  realmKey: text("realm_key").primaryKey(), // sha256(sorted topic ids)
+  label: text("label").notNull(),
+  blurb: text("blurb"),
+  modelId: text("model_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+// Device-authored names for individual topics (roads). Keyed by the content
+// hash of member passage ids — survives rebuilds when membership is unchanged
+// (topic UUIDs regenerate every rebuild; passage ids don't).
+export const topicLabels = sqliteTable("topic_labels", {
+  topicKey: text("topic_key").primaryKey(), // sha256(sorted member passage ids)
+  label: text("label").notNull(),
+  blurb: text("blurb"),
+  modelId: text("model_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+// --- Idle Fleet compute fabric (wander-semantic-substrate-proposal.md §12) -----
+//
+// A generic, schema-blind work queue. Charging/idle devices (and an optional
+// guarded server worker) lease typed jobs, compute, and post validated results.
+// Payloads are opaque JSON; per-kind validators live in app/lib/fabric. The
+// fabric is an accelerator, never a dependency: nothing user-facing waits on it.
+
+export const workItems = sqliteTable(
+  "work_items",
+  {
+    id: text("id").primaryKey(),
+    project: text("project").notNull(), // 'compendus' | other tenants later
+    kind: text("kind").notNull(),
+    payload: text("payload").notNull(), // JSON, kind-specific, opaque to the queue
+    requirements: text("requirements").notNull().default("{}"), // JSON: {runtimes?, minRamClass?, estMinutes?}
+    priority: integer("priority").notNull().default(0), // higher leases first
+    deadline: integer("deadline", { mode: "timestamp" }),
+    status: text("status", { enum: ["queued", "leased", "done", "failed"] })
+      .notNull()
+      .default("queued"),
+    leaseOwner: text("lease_owner").references(() => fabricDevices.id, { onDelete: "set null" }),
+    leaseUntil: integer("lease_until", { mode: "timestamp" }),
+    /** When the current/last lease began — processing time = completedAt - leasedAt. */
+    leasedAt: integer("leased_at", { mode: "timestamp" }),
+    /** Permanent attribution: which device completed this item (leaseOwner clears). */
+    completedBy: text("completed_by"),
+    attempts: integer("attempts").notNull().default(0),
+    // sha256(kind \n stable(payload)) — dedupe key; completed artifacts add model_id
+    idempotencyKey: text("idempotency_key").notNull(),
+    result: text("result"), // JSON, validated by the kind's registered validator
+    error: text("error"), // last failure reason (validation or worker-reported)
+    artifactHash: text("artifact_hash").references(() => fabricArtifacts.hash, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+  },
+  (table) => [
+    index("idx_work_items_status").on(table.status, table.priority),
+    index("idx_work_items_idempotency").on(table.idempotencyKey),
+    index("idx_work_items_kind").on(table.kind),
+    // reapExpiredLeases runs on every device lease poll — without this it
+    // walks every leased row evaluating lease_until in memory.
+    index("idx_work_items_lease_expiry").on(table.status, table.leaseUntil),
+  ],
+);
+
+// Enrolled workers: identity (token), capability, and contribution counters.
+export const fabricDevices = sqliteTable(
+  "fabric_devices",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    platform: text("platform", { enum: ["macos", "ios", "ipados", "server"] }).notNull(),
+    capabilities: text("capabilities").notNull().default("{}"), // JSON: {runtimes: [...], ramClass}
+    tokenHash: text("token_hash").notNull(), // sha256 of the bearer token (shown once at enroll)
+    lastSeen: integer("last_seen", { mode: "timestamp" }),
+    jobsDone: integer("jobs_done").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    // deviceByToken authenticates EVERY fabric request — keep it off a scan.
+    index("idx_fabric_devices_token_hash").on(table.tokenHash),
+  ],
+);
+
+// Content-addressed shared results: compute once, serve every device. Small
+// results inline in work_items.result; large ones live as blobs under
+// data/fabric/ with this row as the index.
+export const fabricArtifacts = sqliteTable("fabric_artifacts", {
+  hash: text("hash").primaryKey(), // sha256(kind | payloadHash | modelId)
+  kind: text("kind").notNull(),
+  modelId: text("model_id").notNull(), // pinned model name, or OS version for AFM
+  mime: text("mime").notNull(),
+  bytes: integer("bytes").notNull(),
+  path: text("path"), // relative blob path; NULL = result is inline on the work item
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
 
 // Type exports
 export type Profile = typeof profiles.$inferSelect;
@@ -829,3 +1104,118 @@ export type BookImage = typeof bookImages.$inferSelect;
 export type NewBookImage = typeof bookImages.$inferInsert;
 export type WanderSession = typeof wanderSessions.$inferSelect;
 export type NewWanderSession = typeof wanderSessions.$inferInsert;
+export type WorkItem = typeof workItems.$inferSelect;
+export type NewWorkItem = typeof workItems.$inferInsert;
+export type FabricDevice = typeof fabricDevices.$inferSelect;
+export type NewFabricDevice = typeof fabricDevices.$inferInsert;
+export type FabricArtifact = typeof fabricArtifacts.$inferSelect;
+export type NewFabricArtifact = typeof fabricArtifacts.$inferInsert;
+export type Embedding = typeof embeddings.$inferSelect;
+export type PassageNeighbor = typeof passageNeighbors.$inferSelect;
+export type Topic = typeof topics.$inferSelect;
+export type Trail = typeof trails.$inferSelect;
+export type Curriculum = typeof curricula.$inferSelect;
+export type CurriculumItem = typeof curriculumItems.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Concept substrate (cs_*) — the cheap, CPU-only replacement for the embedding
+// + GLiNER + kNN stack. Lives ALONGSIDE the old substrate so the two can be
+// parallel-run before cutover. See app/lib/concept/.
+// ---------------------------------------------------------------------------
+
+export const csConcepts = sqliteTable("cs_concepts", {
+  id: text("id").primaryKey(), // normalized concept key
+  display: text("display").notNull(), // original-casing form
+  df: integer("df").notNull().default(0), // passage document frequency
+});
+
+export const csPassageConcepts = sqliteTable(
+  "cs_passage_concepts",
+  {
+    passageId: text("passage_id").notNull(),
+    conceptId: text("concept_id").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.passageId, t.conceptId] }),
+    index("idx_cs_pc_concept").on(t.conceptId),
+  ],
+);
+
+export const csConceptEdges = sqliteTable(
+  "cs_concept_edges",
+  {
+    a: text("a").notNull(), // a < b lexicographically
+    b: text("b").notNull(),
+    cooccur: integer("cooccur").notNull().default(0), // raw co-occurrence count
+  },
+  (t) => [
+    primaryKey({ columns: [t.a, t.b] }),
+    index("idx_cs_edge_a").on(t.a),
+    index("idx_cs_edge_b").on(t.b),
+  ],
+);
+
+export const csPassageSalience = sqliteTable("cs_passage_salience", {
+  passageId: text("passage_id").primaryKey(),
+  novelty: real("novelty").notNull().default(0), // sequential-novelty bits/char
+  prose: real("prose").notNull().default(0), // prose-quality 0..1
+  salience: real("salience").notNull().default(0), // novelty * prose
+});
+
+export const csTopics = sqliteTable("cs_topics", {
+  id: text("id").primaryKey(),
+  label: text("label"), // top concepts joined
+  size: integer("size").notNull().default(0), // member concepts
+  bookCount: integer("book_count").notNull().default(0),
+});
+
+export const csConceptTopics = sqliteTable(
+  "cs_concept_topics",
+  { conceptId: text("concept_id").primaryKey(), topicId: text("topic_id").notNull() },
+  (t) => [index("idx_cs_ct_topic").on(t.topicId)],
+);
+
+export const csPassageTopics = sqliteTable(
+  "cs_passage_topics",
+  { passageId: text("passage_id").primaryKey(), topicId: text("topic_id").notNull() },
+  (t) => [index("idx_cs_pt_topic").on(t.topicId)],
+);
+
+// books whose concepts have been ingested (incremental bookkeeping)
+export const csIngested = sqliteTable("cs_ingested", {
+  bookId: text("book_id").primaryKey(),
+  passageCount: integer("passage_count").notNull().default(0),
+  ingestedAt: integer("ingested_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// Reckoning prove-or-kill: candidate cross-book "tension" pairs (the box mines
+// these cheaply from shared concepts; the idle Mac fleet adjudicates them with
+// a local LLM into agree/contradict/qualify/neutral). See app/lib/reckoning/.
+// ---------------------------------------------------------------------------
+export const csTensionCandidates = sqliteTable(
+  "cs_tension_candidates",
+  {
+    id: text("id").primaryKey(),
+    passageA: text("passage_a").notNull(),
+    passageB: text("passage_b").notNull(),
+    bookA: text("book_a").notNull(),
+    bookB: text("book_b").notNull(),
+    shared: text("shared").notNull(), // JSON array of the shared concept display forms
+    heuristicScore: real("heuristic_score").notNull().default(0),
+    status: text("status").notNull().default("candidate"), // candidate | queued | judged | error
+    verdict: text("verdict"), // agree | contradict | qualify | neutral (from the fleet judge)
+    tension: text("tension"), // one-line statement of the relationship
+    stanceQuestion: text("stance_question"), // a position the reader could take
+    spanA: text("span_a"), // verbatim quote from passage A (grounding)
+    spanB: text("span_b"), // verbatim quote from passage B (grounding)
+    modelId: text("model_id"), // which local model judged it
+    evalLabel: text("eval_label"), // human prove-or-kill mark: real | trivial | false
+    createdAt: integer("created_at").notNull(),
+    judgedAt: integer("judged_at"),
+  },
+  (t) => [
+    uniqueIndex("idx_cs_tension_pair").on(t.passageA, t.passageB),
+    index("idx_cs_tension_status").on(t.status),
+  ],
+);

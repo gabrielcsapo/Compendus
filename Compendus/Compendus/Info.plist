@@ -21,6 +21,7 @@
 		<string>com.compendus.edit-sync</string>
 		<string>com.compendus.tts-generation</string>
 		<string>com.compendus.data-sync</string>
+		<string>com.compendus.fleet-worker</string>
 	</array>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Compendus uses speech recognition to generate transcripts for audiobook lyrics display.</string>

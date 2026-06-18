@@ -802,7 +802,15 @@ class MobiFile implements MobiParser {
     const rawBytes = concatTypedArrays(buffers);
 
     // Build binary string (1 char = 1 byte) for filepos mapping
-    const str = Array.from(rawBytes, (val) => String.fromCharCode(val)).join("");
+    // Chunked fromCharCode: the old per-byte Array.from + join allocated one
+    // JS string PER BYTE (millions of objects for a novel) — seconds of GC on
+    // a small box. NOT TextDecoder("latin1"): that's windows-1252, which
+    // remaps 0x80-0x9F and corrupts the byte↔char filepos mapping.
+    let str = "";
+    const STR_CHUNK = 0x8000;
+    for (let i = 0; i < rawBytes.length; i += STR_CHUNK) {
+      str += String.fromCharCode(...rawBytes.subarray(i, i + STR_CHUNK));
+    }
 
     // Split by pagebreak markers
     const chapters: MobiSpineItem[] = [];

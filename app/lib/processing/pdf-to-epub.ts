@@ -3,15 +3,41 @@ import "../reader/parsers/pdf-polyfill";
 
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import JSZip from "jszip";
-import sharp from "sharp";
 import type { OPS as OPSType } from "pdfjs-dist";
 
 // pdfjs-dist OPS enum for operator list processing
 const OPS: typeof OPSType = (pdfjsLib as unknown as { OPS: typeof OPSType }).OPS;
 
+/** Raw-bitmap → PNG encoder. Injectable so this module stays platform-neutral:
+ *  Node callers default to sharp (native, fast); the pdf-epub fleet kernel
+ *  passes a pure-JS encoder because a browser tab has no native modules. */
+export type PngEncoder = (
+  raw: Uint8Array,
+  width: number,
+  height: number,
+  channels: 1 | 3 | 4,
+) => Promise<Uint8Array>;
+
 interface ConvertOptions {
   onProgress?: (percent: number, message: string) => void;
+  encodePng?: PngEncoder;
+  /**
+   * Node-only: stream the assembled EPUB straight to this path instead of
+   * materializing it in memory (an image-heavy 400-page PDF produced a 1.2GB
+   * EPUB — generateAsync held all of it in RAM and OOM-killed the 2-core
+   * container). When set, the resolved Uint8Array is EMPTY — the file on disk
+   * is the output. Fleet kernels (browser hosts) never set this.
+   */
+  streamToFile?: string;
 }
+
+/** Default encoder — sharp, imported lazily so bundling this module for a
+ *  browser host never touches the native binary (the import only executes on
+ *  the Node path; build-kernels marks "sharp" external). */
+const sharpEncodePng: PngEncoder = async (raw, width, height, channels) => {
+  const sharp = (await import("sharp")).default;
+  return sharp(raw, { raw: { width, height, channels } }).png().toBuffer();
+};
 
 interface TextItem {
   text: string;
@@ -28,7 +54,7 @@ interface TextItem {
 interface PageData {
   pageNum: number;
   textItems: TextItem[];
-  images: { id: string; data: Buffer; mimeType: string }[];
+  images: { id: string; data: Uint8Array; mimeType: string }[];
   width: number;
   height: number;
 }
@@ -44,11 +70,12 @@ interface Chapter {
  * then assembles an EPUB using JSZip.
  */
 export async function convertPdfToEpub(
-  pdfBuffer: Buffer,
+  pdfBuffer: Uint8Array,
   metadata: { title?: string; authors?: string[]; language?: string },
   options?: ConvertOptions,
-): Promise<Buffer> {
+): Promise<Uint8Array> {
   const progress = options?.onProgress ?? (() => {});
+  const encodePng = options?.encodePng ?? sharpEncodePng;
 
   progress(2, "Loading PDF...");
 
@@ -60,6 +87,7 @@ export async function convertPdfToEpub(
     data,
     useSystemFonts: true,
     disableFontFace: true,
+    verbosity: 0, // errors only — Type3 warnings flood the log per glyph
   });
 
   const pdfDoc = await loadingTask.promise;
@@ -73,7 +101,7 @@ export async function convertPdfToEpub(
     const pct = 5 + Math.round((i / numPages) * 60);
     progress(pct, `Extracting page ${i}/${numPages}...`);
 
-    const pageData = await extractPageContent(pdfDoc, i);
+    const pageData = await extractPageContent(pdfDoc, i, encodePng);
     pages.push(pageData);
   }
 
@@ -85,10 +113,10 @@ export async function convertPdfToEpub(
   progress(72, "Generating EPUB...");
 
   // Assemble EPUB
-  const epubBuffer = await assembleEpub(chapters, metadata, progress);
+  const epubBuffer = await assembleEpub(chapters, metadata, progress, options?.streamToFile);
 
   // Clean up
-  await pdfDoc.destroy();
+  await loadingTask.destroy();
 
   progress(100, "Conversion complete");
 
@@ -101,6 +129,7 @@ export async function convertPdfToEpub(
 async function extractPageContent(
   pdfDoc: pdfjsLib.PDFDocumentProxy,
   pageNum: number,
+  encodePng: PngEncoder,
 ): Promise<PageData> {
   const page = await pdfDoc.getPage(pageNum);
   const viewport = page.getViewport({ scale: 1.0 });
@@ -127,7 +156,7 @@ async function extractPageContent(
   }
 
   // Extract embedded images
-  const images: { id: string; data: Buffer; mimeType: string }[] = [];
+  const images: { id: string; data: Uint8Array; mimeType: string }[] = [];
   try {
     const operatorList = await page.getOperatorList();
     const imgIds = new Set<string>();
@@ -158,16 +187,14 @@ async function extractPageContent(
             // pdfjs ImageKind: 1 = GRAYSCALE_1BPP, 2 = RGB_24BPP, 3 = RGBA_32BPP
             const channels = imgData.kind === 3 ? 4 : imgData.kind === 1 ? 1 : 3;
 
-            // Convert raw pixel data to actual PNG using sharp
-            const pngBuffer = await sharp(Buffer.from(imgData.data), {
-              raw: {
-                width: imgData.width,
-                height: imgData.height,
-                channels,
-              },
-            })
-              .png()
-              .toBuffer();
+            // Convert raw pixel data to an actual PNG (sharp on Node, pure-JS
+            // encoder when running as a fleet kernel)
+            const pngBuffer = await encodePng(
+              imgData.data,
+              imgData.width,
+              imgData.height,
+              channels as 1 | 3 | 4,
+            );
 
             images.push({
               id: `page${pageNum}_${imgName}`,
@@ -351,7 +378,8 @@ async function assembleEpub(
   chapters: Chapter[],
   metadata: { title?: string; authors?: string[]; language?: string },
   progress: (pct: number, msg: string) => void,
-): Promise<Buffer> {
+  streamToFile?: string,
+): Promise<Uint8Array> {
   const zip = new JSZip();
   const title = metadata.title ?? "Untitled";
   const authors = metadata.authors ?? ["Unknown"];
@@ -510,9 +538,29 @@ ${tocItems}
 
   progress(95, "Compressing EPUB...");
 
-  // Generate the ZIP buffer
+  // Node path with a target file: stream entries to disk as they deflate —
+  // peak memory stays ~constant instead of holding the whole EPUB.
+  if (streamToFile) {
+    const { createWriteStream } = await import("node:fs");
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      zip
+        .generateNodeStream({
+          type: "nodebuffer",
+          streamFiles: true,
+          compression: "DEFLATE",
+          compressionOptions: { level: 6 },
+        })
+        .pipe(createWriteStream(streamToFile))
+        .on("finish", () => resolvePromise())
+        .on("error", rejectPromise);
+    });
+    return new Uint8Array(0);
+  }
+
+  // Generate the ZIP bytes ("uint8array" works on Node AND in a browser tab —
+  // "nodebuffer" would crash the fleet-kernel host)
   const epubBuffer = await zip.generateAsync({
-    type: "nodebuffer",
+    type: "uint8array",
     mimeType: "application/epub+zip",
     compression: "DEFLATE",
     compressionOptions: { level: 6 },

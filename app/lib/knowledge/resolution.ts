@@ -11,10 +11,13 @@
  */
 import { eq } from "drizzle-orm";
 import { createHash } from "crypto";
+import { createRequire } from "node:module";
 import { db, rawDb, entities, entityCanonical, type Entity } from "../db";
 import { type EntityType } from "../db/schema";
-import { embed, vectorToBuffer, bufferToVector, cosine } from "./embeddings";
+import { embed, embedBatch, vectorToBuffer, bufferToVector, cosine } from "./embeddings";
 import { matchPersonName } from "./person-name";
+
+const nodeRequire = createRequire(import.meta.url);
 import { isNoiseSpan } from "./gliner-extract";
 
 function normalizeName(name: string): string {
@@ -59,6 +62,35 @@ export interface ResolveInput {
  */
 export class EntityResolver {
   private byId = new Map<string, Entity>();
+  /** Pre-batched name embeddings keyed by entity id (see preEmbed). */
+  private preEmbedded = new Map<string, Float32Array>();
+
+  /**
+   * Batch-embed the names of entities that don't exist yet, in a handful of
+   * forward passes instead of one inference call per resolve(). A 700-passage
+   * book can surface hundreds of NEW names; per-name embed() calls were the
+   * dominant CPU of the whole apply (and ran on the box's main thread).
+   */
+  async preEmbed(inputs: Array<{ name: string; type: EntityType }>): Promise<void> {
+    const wanted = new Map<string, string>(); // id → effectiveNorm
+    for (const input of inputs) {
+      const norm = normalizeName(input.name);
+      const effectiveNorm = norm.length === 0 ? input.name.trim().toLowerCase() : norm;
+      if (!effectiveNorm) continue;
+      const id = stableEntityId(input.type, effectiveNorm);
+      if (wanted.has(id) || this.preEmbedded.has(id) || this.byId.has(id)) continue;
+      const exists = db.select({ id: entities.id }).from(entities).where(eq(entities.id, id)).get();
+      if (exists) continue;
+      wanted.set(id, effectiveNorm);
+    }
+    const ids = [...wanted.keys()];
+    const BATCH = 32;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const slice = ids.slice(i, i + BATCH);
+      const vecs = await embedBatch(slice.map((id) => wanted.get(id)!));
+      slice.forEach((id, x) => this.preEmbedded.set(id, vecs[x]));
+    }
+  }
 
   async resolve(input: ResolveInput): Promise<string> {
     const norm = normalizeName(input.name);
@@ -74,8 +106,9 @@ export class EntityResolver {
       return id;
     }
 
-    // New extracted entity: embed its normalized name for later clustering.
-    const vec = effectiveNorm ? await embed(effectiveNorm) : null;
+    // New extracted entity: embed its normalized name for later clustering
+    // (preEmbed() batches these; the single-name path is the fallback).
+    const vec = this.preEmbedded.get(id) ?? (effectiveNorm ? await embed(effectiveNorm) : null);
     const now = new Date();
     const row: typeof entities.$inferInsert = {
       id,
@@ -140,16 +173,29 @@ export class EntityResolver {
  * arg is kept for call-site compatibility but the recompute is global.
  */
 export function recomputeStatsForBook(_bookId?: string): void {
+  // One grouped scan + UPDATE...FROM instead of two correlated subqueries PER
+  // entity row — the old shape walked canonical_mentions once per entity
+  // (tens of thousands of scans per recompute at corpus scale).
   rawDb
     .prepare(
       `UPDATE entities SET
-         mention_count = (
-           SELECT COUNT(*) FROM canonical_mentions WHERE entity_id = entities.id
-         ),
-         book_count = (
-           SELECT COUNT(DISTINCT book_id) FROM canonical_mentions WHERE entity_id = entities.id
-         ),
-         updated_at = unixepoch()`,
+         mention_count = s.mc,
+         book_count = s.bc,
+         updated_at = unixepoch()
+       FROM (
+         SELECT entity_id, COUNT(*) AS mc, COUNT(DISTINCT book_id) AS bc
+         FROM canonical_mentions GROUP BY entity_id
+       ) AS s
+       WHERE s.entity_id = entities.id
+         AND (entities.mention_count != s.mc OR entities.book_count != s.bc)`,
+    )
+    .run();
+  // Zero out entities whose mentions vanished (re-analysis removed them).
+  rawDb
+    .prepare(
+      `UPDATE entities SET mention_count = 0, book_count = 0, updated_at = unixepoch()
+       WHERE mention_count != 0
+         AND id NOT IN (SELECT DISTINCT entity_id FROM canonical_mentions)`,
     )
     .run();
 }
@@ -331,16 +377,71 @@ function proposeEmbeddingCandidates(
     if (excluded.has(e.id) || !e.embedding) continue;
     (byType.get(e.type) ?? byType.set(e.type, []).get(e.type)!).push(e);
   }
+  // Hard cap on the brute-force O(n²) sweep. At corpus scale a single type
+  // group (tens of thousands of persons/concepts) is hundreds of millions of
+  // cosine ops on the MAIN THREAD with no yields — minutes of total freeze
+  // every canonical rebuild, the real cause of the recurring "box unreachable
+  // ~15 min" alerts. These candidates are optional human-review merge
+  // SUGGESTIONS; exact-name resolution is unaffected. (Re-enable usearch via
+  // COMPENDUS_RESOLUTION_ANN=1 — proven safe in the substrate worker — for
+  // O(n log n) candidates at any scale.)
+  const BRUTE_MAX = Number(process.env.RESOLUTION_BRUTE_MAX || 2500);
+  const annOn = process.env.COMPENDUS_RESOLUTION_ANN === "1";
+
   for (const rows of byType.values()) {
     if (rows.length < 2) continue;
-    const vecs = new Map<string, Float32Array>();
-    for (const e of rows) vecs.set(e.id, bufferToVector(e.embedding as Buffer));
-    for (let i = 0; i < rows.length; i++) {
-      const av = vecs.get(rows[i].id)!;
-      for (let j = i + 1; j < rows.length; j++) {
-        const score = cosine(av, vecs.get(rows[j].id)!);
-        if (score >= CLUSTER_THRESHOLD && propose(rows[i].id, rows[j].id, "embedding", score)) {
-          count++;
+    // Skip oversized groups when not using ANN — rather than freeze the box.
+    if (!annOn && rows.length > BRUTE_MAX) continue;
+    const vecs: Float32Array[] = rows.map((e) => bufferToVector(e.embedding as Buffer));
+
+    // Large type groups (thousands of persons/concepts at corpus scale) used
+    // to run a full O(n²) cosine sweep — tens of millions of comparisons per
+    // canonical rebuild. An ephemeral HNSW index turns that into n top-M
+    // queries; at threshold 0.92 the candidates are extremely close pairs,
+    // exactly what ANN recall is best at. Small groups keep exact brute force.
+    // DEFAULT OFF: enabling usearch here coincided with silent container
+    // deaths (native crash leaves no JS trace) at exactly this point in the
+    // apply path on the deploy box — opt in via COMPENDUS_RESOLUTION_ANN=1
+    // once that's root-caused. The substrate-rebuild usearch usage (worker
+    // thread) has shown no such crashes.
+    const ANN_GROUP_MIN =
+      process.env.COMPENDUS_RESOLUTION_ANN === "1" ? 500 : Number.POSITIVE_INFINITY;
+    let usedAnn = false;
+    if (rows.length >= ANN_GROUP_MIN) {
+      try {
+        const u = nodeRequire("usearch");
+        const idx = new u.Index({
+          metricKind: u.MetricKind.Cos,
+          dimensions: vecs[0].length,
+          connectivity: 16,
+        });
+        for (let i = 0; i < rows.length; i++) idx.add(BigInt(i), vecs[i]);
+        const M = 8;
+        for (let i = 0; i < rows.length; i++) {
+          const res = idx.search(vecs[i], M);
+          for (let x = 0; x < res.keys.length; x++) {
+            const j = Number(res.keys[x]);
+            if (j <= i) continue; // each pair once, skip self
+            const score = 1 - res.distances[x];
+            if (score >= CLUSTER_THRESHOLD && propose(rows[i].id, rows[j].id, "embedding", score)) {
+              count++;
+            }
+          }
+        }
+        usedAnn = true;
+      } catch {
+        usedAnn = false; // usearch unavailable — exact path below
+      }
+    }
+
+    if (!usedAnn) {
+      for (let i = 0; i < rows.length; i++) {
+        const av = vecs[i];
+        for (let j = i + 1; j < rows.length; j++) {
+          const score = cosine(av, vecs[j]);
+          if (score >= CLUSTER_THRESHOLD && propose(rows[i].id, rows[j].id, "embedding", score)) {
+            count++;
+          }
         }
       }
     }

@@ -21,9 +21,9 @@ const multiChapterPdf = readFileSync(join(fixturesDir, "multi-chapter.pdf"));
 const blankPdf = readFileSync(join(fixturesDir, "blank.pdf"));
 
 // Collect generated EPUBs to write to output/ for manual inspection
-const generatedEpubs: { name: string; buffer: Buffer }[] = [];
+const generatedEpubs: { name: string; buffer: Uint8Array }[] = [];
 
-function saveForInspection(name: string, buffer: Buffer) {
+function saveForInspection(name: string, buffer: Uint8Array) {
   generatedEpubs.push({ name, buffer });
 }
 
@@ -33,7 +33,7 @@ afterAll(() => {
   }
 });
 
-async function parseEpub(buffer: Buffer) {
+async function parseEpub(buffer: Uint8Array) {
   return JSZip.loadAsync(buffer);
 }
 
@@ -42,7 +42,7 @@ describe("convertPdfToEpub", () => {
     it("should produce a valid EPUB ZIP with all required files", async () => {
       const epub = await convertPdfToEpub(simpleTextPdf, { title: "Test" });
 
-      expect(Buffer.isBuffer(epub)).toBe(true);
+      expect(epub).toBeInstanceOf(Uint8Array);
       expect(epub.length).toBeGreaterThan(0);
 
       const zip = await parseEpub(epub);
@@ -172,22 +172,28 @@ describe("convertPdfToEpub", () => {
       expect(html).toContain("Yukon Department of Education");
     });
 
-    it("should extract text from an image-heavy PDF (with-images.pdf)", async () => {
-      const epub = await convertPdfToEpub(withImagesPdf, { title: "Samantha" });
-      saveForInspection("with-images", epub);
-      const zip = await parseEpub(epub);
+    // Image-heavy conversion takes ~5s on an idle machine — over vitest's 5s
+    // default whenever anything else (e.g. a fleet extraction) shares the CPU.
+    it(
+      "should extract text from an image-heavy PDF (with-images.pdf)",
+      { timeout: 30_000 },
+      async () => {
+        const epub = await convertPdfToEpub(withImagesPdf, { title: "Samantha" });
+        saveForInspection("with-images", epub);
+        const zip = await parseEpub(epub);
 
-      // Collect all chapter content
-      const chapterFiles = Object.keys(zip.files).filter(
-        (f) => f.startsWith("OEBPS/chapter-") && f.endsWith(".xhtml"),
-      );
-      const allContent = await Promise.all(chapterFiles.map((f) => zip.file(f)!.async("string")));
-      const combined = allContent.join("\n");
+        // Collect all chapter content
+        const chapterFiles = Object.keys(zip.files).filter(
+          (f) => f.startsWith("OEBPS/chapter-") && f.endsWith(".xhtml"),
+        );
+        const allContent = await Promise.all(chapterFiles.map((f) => zip.file(f)!.async("string")));
+        const combined = allContent.join("\n");
 
-      // 15-page illustrated children's book — should extract story text
-      expect(combined).toContain("Samantha");
-      expect(combined).toContain("monkey");
-    });
+        // 15-page illustrated children's book — should extract story text
+        expect(combined).toContain("Samantha");
+        expect(combined).toContain("monkey");
+      },
+    );
 
     it("should extract text from the multi-chapter PDF", async () => {
       const epub = await convertPdfToEpub(multiChapterPdf, { title: "Chapters" });
@@ -246,18 +252,18 @@ describe("convertPdfToEpub", () => {
     it("should handle a blank PDF without crashing", async () => {
       const epub = await convertPdfToEpub(blankPdf, { title: "Blank" });
 
-      expect(Buffer.isBuffer(epub)).toBe(true);
+      expect(epub).toBeInstanceOf(Uint8Array);
 
       const zip = await parseEpub(epub);
       expect(zip.file("OEBPS/content.opf")).not.toBeNull();
       expect(zip.file("OEBPS/chapter-1.xhtml")).not.toBeNull();
     });
 
-    it("should handle a large image-heavy PDF without crashing", async () => {
+    it("should handle a large image-heavy PDF without crashing", { timeout: 30_000 }, async () => {
       // 15-page illustrated book (2.5MB) — should complete without errors
       const epub = await convertPdfToEpub(withImagesPdf, { title: "Image Heavy" });
 
-      expect(Buffer.isBuffer(epub)).toBe(true);
+      expect(epub).toBeInstanceOf(Uint8Array);
 
       const zip = await parseEpub(epub);
       // Should still produce valid EPUB structure
@@ -299,7 +305,7 @@ describe("convertPdfToEpub", () => {
     it("should work without onProgress (no callback)", async () => {
       // Should not throw when options are omitted
       const epub = await convertPdfToEpub(simpleTextPdf, { title: "No Progress" });
-      expect(Buffer.isBuffer(epub)).toBe(true);
+      expect(epub).toBeInstanceOf(Uint8Array);
     });
   });
 });

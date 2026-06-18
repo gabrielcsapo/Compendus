@@ -138,8 +138,14 @@ function detectColumns(items: PItem[], pageWidth: number): PItem[][] {
 export async function convertPdf(buf: Uint8Array): Promise<PdfCCD> {
   const data = new Uint8Array(buf.byteLength);
   data.set(buf);
-  const doc = await pdfjsLib.getDocument({ data, useSystemFonts: true, disableFontFace: true })
-    .promise;
+  // verbosity 0 = errors only (Type3 font warnings flood the log per glyph)
+  const loadingTask = pdfjsLib.getDocument({
+    data,
+    useSystemFonts: true,
+    disableFontFace: true,
+    verbosity: 0,
+  });
+  const doc = await loadingTask.promise;
 
   const pages: { items: PItem[]; width: number }[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -169,7 +175,7 @@ export async function convertPdf(buf: Uint8Array): Promise<PdfCCD> {
     }
     pages.push({ items, width: vp.width });
   }
-  await doc.destroy();
+  await loadingTask.destroy();
 
   const sizes = pages
     .flatMap((p) => p.items)

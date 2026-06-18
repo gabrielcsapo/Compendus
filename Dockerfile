@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     git \
     build-essential \
+    unzip \
+    tar \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -77,14 +79,20 @@ COPY --from=builder /whisper/build/ggml/src/libggml*.so* /usr/local/lib/
 COPY --from=builder /gpu-libs/ /usr/local/lib/
 RUN ldconfig
 
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install -g --force corepack && corepack enable
+# corepack reads package.json's `packageManager` field at run time, so the
+# container's pnpm always matches whatever generated pnpm-lock.yaml — never
+# hardcode a version here (it has broken `--frozen-lockfile` twice).
+RUN corepack enable
 
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
-RUN corepack install
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm-workspace.yaml declares `docs` as an importer; frozen install needs its
+# manifest present or the workspace shape (and overrides hash) won't match.
+COPY docs/package.json ./docs/package.json
+# puppeteer is a dev-only tool; its postinstall downloads Chrome and needs
+# `unzip`, which node:22-slim lacks — skip the browser entirely in the image.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN pnpm install --frozen-lockfile
 
 COPY . .

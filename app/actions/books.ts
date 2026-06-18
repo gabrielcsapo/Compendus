@@ -812,10 +812,30 @@ export async function adminListJobs(opts: {
 }): Promise<{ items: AdminJobRecord[]; total: number }> {
   const { page, pageSize, q = "" } = opts;
 
-  const all = db
+  // SQL-side filter + pagination: the admin panel polls this on an interval,
+  // and loading EVERY job row (each carrying up to 500 lines of logs) to
+  // search and slice in JS was MBs of work per poll. Logs ride only on the
+  // returned page.
+  const search = q.trim().toLowerCase();
+  const where = search
+    ? sql`LOWER(${backgroundJobs.id} || ' ' || ${backgroundJobs.type} || ' ' || ${backgroundJobs.status} || ' ' || COALESCE(${backgroundJobs.message}, '')) LIKE ${`%${search}%`}`
+    : sql`1=1`;
+
+  const total =
+    db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(backgroundJobs)
+      .where(where)
+      .get()?.n ?? 0;
+
+  const start = Math.max(0, (page - 1) * pageSize);
+  const items = db
     .select()
     .from(backgroundJobs)
+    .where(where)
     .orderBy(desc(backgroundJobs.updatedAt))
+    .limit(pageSize)
+    .offset(start)
     .all()
     .map((job) => ({
       id: job.id,
@@ -827,15 +847,6 @@ export async function adminListJobs(opts: {
       createdAt: job.createdAt ? job.createdAt.getTime() : 0,
       updatedAt: job.updatedAt ? job.updatedAt.getTime() : 0,
     }));
-
-  const search = q.trim().toLowerCase();
-  const filtered = search
-    ? all.filter((j) => `${j.id} ${j.type} ${j.status} ${j.message}`.toLowerCase().includes(search))
-    : all;
-
-  const total = filtered.length;
-  const start = Math.max(0, (page - 1) * pageSize);
-  const items = filtered.slice(start, start + pageSize);
 
   return { items, total };
 }
@@ -1246,7 +1257,7 @@ export async function refreshMetadata(
   if (coverUrls.length > 0 && !book.coverPath) {
     for (const coverUrl of coverUrls) {
       try {
-        const coverResponse = await fetch(coverUrl);
+        const coverResponse = await fetch(coverUrl, { signal: AbortSignal.timeout(8000) });
         if (coverResponse.ok) {
           const coverBuffer = Buffer.from(await coverResponse.arrayBuffer());
           // Process with sharp for optimization (validates dimensions)
@@ -1413,70 +1424,67 @@ export async function applyMetadata(
     return { success: false, message: "Book not found" };
   }
 
-  // If the selected metadata is missing ISBN, try to look it up from other sources
-  let enrichedMetadata = metadata;
-  if (!metadata.isbn13 && !metadata.isbn10) {
-    // Try to find ISBN using the title/author from the selected result
-    const { searchGoogleBooks, searchBookMetadata } = await import("../lib/metadata");
-
-    // Search the other source for additional metadata
-    if (metadata.source === "openlibrary") {
-      // Selected Open Library, try Google Books for ISBN
+  // Optional gap-filling on top of the metadata the user already chose.
+  // BEST-EFFORT and TIME-BUDGETED: Google Books only — Open Library was
+  // dropped from this path because its search tail (5-30s) blew the budget.
+  // The user is waiting on this click; after the budget we save exactly what
+  // they selected and let the lookups die quietly.
+  const ENRICH_BUDGET_MS = 4000;
+  const enrich = async (): Promise<MetadataSearchResult> => {
+    let em = metadata;
+    if (!metadata.isbn13 && !metadata.isbn10) {
+      // Try to find ISBN via Google Books (Open Library search is too slow to
+      // cross-search here — its tail routinely blows the enrichment budget)
+      const { searchGoogleBooks } = await import("../lib/metadata");
       const googleResults = await searchGoogleBooks(
-        metadata.authors.length > 0 ? `${metadata.title} ${metadata.authors[0]}` : metadata.title,
+        metadata.authors.length > 0
+          ? `intitle:"${metadata.title}" inauthor:"${metadata.authors[0]}"`
+          : `intitle:"${metadata.title}"`,
       );
-      if (googleResults.length > 0 && (googleResults[0].isbn13 || googleResults[0].isbn10)) {
-        enrichedMetadata = {
+      const withIsbn = googleResults.find((r) => r.isbn13 || r.isbn10);
+      if (withIsbn) {
+        em = {
           ...metadata,
-          isbn: metadata.isbn || googleResults[0].isbn,
-          isbn13: metadata.isbn13 || googleResults[0].isbn13,
-          isbn10: metadata.isbn10 || googleResults[0].isbn10,
-        };
-      }
-    } else {
-      // Selected Google Books, try Open Library for ISBN
-      const olResults = await searchBookMetadata(metadata.title, metadata.authors[0]);
-      if (olResults.length > 0 && (olResults[0].isbn13 || olResults[0].isbn10)) {
-        enrichedMetadata = {
-          ...metadata,
-          isbn: metadata.isbn || olResults[0].isbn,
-          isbn13: metadata.isbn13 || olResults[0].isbn13,
-          isbn10: metadata.isbn10 || olResults[0].isbn10,
+          isbn: metadata.isbn || withIsbn.isbn,
+          isbn13: metadata.isbn13 || withIsbn.isbn13,
+          isbn10: metadata.isbn10 || withIsbn.isbn10,
           // Also grab other fields if missing
-          description: metadata.description || olResults[0].description,
+          description: metadata.description || withIsbn.description,
         };
       }
     }
-  }
 
-  // If we now have an ISBN but are missing other data, do a direct ISBN lookup
-  const isbnToLookup = enrichedMetadata.isbn13 || enrichedMetadata.isbn10 || enrichedMetadata.isbn;
-  if (isbnToLookup && !enrichedMetadata.description) {
-    const { lookupByISBN, lookupGoogleBooksByISBN } = await import("../lib/metadata");
-
-    // Try both sources for the most complete data
-    const [olData, googleData] = await Promise.all([
-      lookupByISBN(isbnToLookup),
-      lookupGoogleBooksByISBN(isbnToLookup),
-    ]);
-
-    if (olData || googleData) {
-      enrichedMetadata = {
-        ...enrichedMetadata,
-        description:
-          enrichedMetadata.description || olData?.description || googleData?.description || null,
-        series: enrichedMetadata.series || null,
-        seriesNumber: enrichedMetadata.seriesNumber || null,
-        publisher: enrichedMetadata.publisher || olData?.publisher || googleData?.publisher || null,
-        pageCount: enrichedMetadata.pageCount || olData?.pageCount || googleData?.pageCount || null,
-        language: enrichedMetadata.language || olData?.language || googleData?.language || null,
-        subjects:
-          enrichedMetadata.subjects.length > 0
-            ? enrichedMetadata.subjects
-            : olData?.subjects || googleData?.subjects || [],
-      };
+    // If we now have an ISBN but are missing other data, do a direct ISBN lookup
+    const isbnToLookup = em.isbn13 || em.isbn10 || em.isbn;
+    if (isbnToLookup && !em.description) {
+      const { lookupGoogleBooksByISBN } = await import("../lib/metadata");
+      const googleData = await lookupGoogleBooksByISBN(isbnToLookup).catch(() => null);
+      if (googleData) {
+        em = {
+          ...em,
+          description: em.description || googleData.description || null,
+          series: em.series || null,
+          seriesNumber: em.seriesNumber || null,
+          publisher: em.publisher || googleData.publisher || null,
+          pageCount: em.pageCount || googleData.pageCount || null,
+          language: em.language || googleData.language || null,
+          subjects: em.subjects.length > 0 ? em.subjects : googleData.subjects || [],
+        };
+      }
     }
-  }
+    return em;
+  };
+
+  const enrichedMetadata =
+    (await Promise.race([
+      enrich().catch((e) => {
+        console.warn(
+          `[applyMetadata] enrichment failed (${e instanceof Error ? e.message : e}) — applying selected metadata as-is`,
+        );
+        return metadata;
+      }),
+      new Promise<null>((r) => setTimeout(() => r(null), ENRICH_BUDGET_MS)),
+    ])) ?? metadata;
 
   // Generate new filename based on metadata
   const newTitle = enrichedMetadata.title || book.title;
@@ -1513,7 +1521,7 @@ export async function applyMetadata(
 
     for (const coverUrl of coverUrls) {
       try {
-        const coverResponse = await fetch(coverUrl);
+        const coverResponse = await fetch(coverUrl, { signal: AbortSignal.timeout(8000) });
 
         if (coverResponse.ok) {
           const coverBuffer = Buffer.from(await coverResponse.arrayBuffer());

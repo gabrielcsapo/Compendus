@@ -1,0 +1,1 @@
+ALTER TABLE `trails` ADD `audio_hash` text;

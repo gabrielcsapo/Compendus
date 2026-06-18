@@ -10,31 +10,31 @@
  * version. EPUB only for now (the source extractor is EPUB-based).
  */
 import { resolve as pathResolve } from "path";
-import { rmSync } from "fs";
+import { rmSync, readFileSync } from "fs";
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
-import {
-  db,
-  books,
-  passages,
-  entityMentions,
-  entityRelationships,
-  bookAnalysis,
-  bookImages,
-} from "../db";
+import { db, books, passages, entityMentions, entityRelationships, bookImages } from "../db";
 import { ensureEpub } from "../processing/ensure-epub";
 import { readCcdBundle } from "../storage";
 import type { ContentBundle } from "../content-ast/types";
-import { extractBookSource, bookSourceFromCcd, type BookSection } from "./book-source";
+import {
+  extractBookSource,
+  bookSourceFromCcd,
+  bookSourceFromTranscript,
+  type BookSection,
+} from "./book-source";
 import { chunkSections, type PassageChunk } from "./chunker";
 import { embedBatch, vectorToBuffer, EMBEDDING_MODEL } from "./embeddings";
-import { extractEntitiesBatch, ensureGlinerReady, isNoiseSpan } from "./gliner-extract";
-import { EntityResolver, recomputeStatsForBook, rebuildCanonicalMapping } from "./resolution";
-import { extractRelations, relationKey, type RelEntity, type ExtractedRelation } from "./relations";
-import { extractKeyphrases } from "./keyphrase";
-
-const PIPELINE_VERSION = "2.1.0";
-const EXTRACT_MODEL = "gliner_small-v2";
+import { linkBook, rebuildStructureIfDue } from "./substrate";
+import { extractEntitiesBatch, ensureGlinerReady, type GlinerEntity } from "./gliner-extract";
+import { enqueueWork, runtimeOnFleet, waitForWorkResult } from "../fabric";
+import "../fabric/kinds";
+import {
+  applyExtraction,
+  upsertStatus,
+  finalizeStatus,
+  recoverStaleAnalyses,
+} from "./extraction-apply";
 
 export interface AnalyzeOptions {
   onProgress?: (progress: number, message: string) => void;
@@ -61,6 +61,9 @@ export async function analyzeBook(
   bookId: string,
   opts: AnalyzeOptions = {},
 ): Promise<AnalyzeResult> {
+  // Fire-and-continue books finalize from the fleet apply hook; anything
+  // orphaned at "running" >2h flips to error here so the sweep re-picks it.
+  recoverStaleAnalyses();
   try {
     return await runAnalysis(bookId, opts);
   } catch (err) {
@@ -98,10 +101,20 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
   // format). Fall back to EPUB extraction for books not yet backfilled.
   onProgress?.(2, "Reading book text…");
   let src: Awaited<ReturnType<typeof extractBookSource>>;
+  let sourceKind: "text" | "transcript" = "text";
   const bundle = book.ccdPath ? readCcdBundle<ContentBundle>(book.ccdPath) : null;
   if (bundle) {
     log(`using CCD bundle (${bundle.chapters.length} chapters, ${bundle.sourceFormat})`);
     src = bookSourceFromCcd(bundle);
+  } else if (book.transcriptPath) {
+    // Audiobooks: the Whisper transcript IS the text. Sections split on long
+    // narration pauses; everything downstream (chunk → embed → link → GLiNER)
+    // is format-blind from here.
+    const transcriptFile = pathResolve(process.cwd(), book.transcriptPath);
+    const transcript = JSON.parse(readFileSync(transcriptFile, "utf8"));
+    src = bookSourceFromTranscript(transcript);
+    sourceKind = "transcript";
+    log(`using audiobook transcript (${transcript.segments?.length ?? 0} segments)`);
   } else {
     onProgress?.(1, "Preparing EPUB…");
     const epubPath = await ensureEpub(book, {
@@ -130,7 +143,11 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
     finalizeStatus(bookId, 0, 0, 0);
     return { passageCount: 0, entityCount: 0, relationshipCount: 0, imageCount: 0 };
   }
-  log(`chunked into ${chunks.length} passages; embedding…`);
+  // Breadcrumb: the worker has crashed here on large books before the first
+  // per-batch rss line lands, so stamp memory at the entry to the embed phase.
+  log(
+    `chunked into ${chunks.length} passages; embedding… (rss ${Math.round(process.memoryUsage().rss / 1048576)}MB)`,
+  );
 
   // 3. Insert ALL passages first (no embedding). Extraction must never be
   //    blocked by embedding, so passage rows are written up front.
@@ -165,221 +182,212 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
   const imageCount = persistImages(bookId, src.sections, passageRefs);
   log(`persisted ${imageCount} figures`);
 
-  // 5. Best-effort embeddings for semantic search. onnxruntime-node has
-  //    deadlocked mid-run in this container (CPU idle, blocked) regardless of
-  //    thread settings; a per-batch timeout + circuit breaker means a stall
-  //    degrades semantic wander but NEVER blocks the graph build.
+  // 5. Embeddings for semantic search — FLEET FIRST: this was the last heavy
+  //    inference still running on the box. If a device with the onnx-embed
+  //    runtime checked in recently, ship the passage ids (texts fetched by
+  //    ref) and wait briefly — a laptop embeds a book in seconds, and the
+  //    reembed-book apply hook writes the vectors straight into the substrate
+  //    embeddings table. Local best-effort inference stays the fallback
+  //    (per-batch timeout + circuit breaker — onnxruntime has deadlocked in
+  //    this container before; a stall degrades wander but never blocks).
   onProgress?.(15, "Embedding passages for semantic search…");
-  const embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress, aborted);
+  const payloadIds = chunks.map((_c, x) => passageRefs[x].id);
+  let embedded = 0;
+  if (runtimeOnFleet("onnx-embed")) {
+    try {
+      const { item } = enqueueWork({
+        project: "compendus",
+        kind: "reembed-book",
+        payload: { bookId, model: EMBEDDING_MODEL, passageIds: payloadIds },
+        requirements: { runtimes: ["onnx-embed"], estMinutes: 2 },
+      });
+      log(`embedding offered to the fleet (${chunks.length} passages)…`);
+      const beat = setInterval(() => onProgress?.(15, "Fleet is embedding…"), 20_000);
+      try {
+        const res = await waitForWorkResult(item.id, {
+          timeoutMs: 4 * 60 * 1000,
+          leaseWithinMs: 90 * 1000,
+          signal,
+        });
+        if (res) {
+          embedded = chunks.length;
+          log("fleet embedded the book — skipping local inference");
+        } else {
+          log("fleet didn't embed in time — embedding locally");
+        }
+      } finally {
+        clearInterval(beat);
+      }
+    } catch (e) {
+      log(`fleet embedding unavailable (${e instanceof Error ? e.message : e}); embedding locally`);
+    }
+  }
+  if (embedded === 0) {
+    embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress, aborted);
+  }
   log(`embedded ${embedded}/${chunks.length} passages`);
 
-  // 6. Load the GLiNER entity model (encoder — fast, light; can't lock up the
-  //    shared host the way an autoregressive LLM would).
-  onProgress?.(19, "Loading entity model…");
-  log("loading GLiNER…");
-  await ensureGlinerReady(onLog);
-  log("GLiNER ready; extracting entities…");
+  // 5b. Link into the semantic substrate (kNN graph, topics, centrality,
+  //     bridges, roles). This is the embed-first reorder: the book is
+  //     wanderable from here, before the slow GLiNER pass below — names and
+  //     provenance fill in when extraction catches up.
+  if (embedded > 0) {
+    onProgress?.(17, "Linking into your library…");
+    // The structure rebuild runs minutes on its worker thread with no job
+    // progress of its own — without a heartbeat the queue watchdog declares
+    // the job stuck at ~3 min, aborts it, and the re-run wastes a full
+    // re-analysis (the "running: N" zombie pile-up). Tick while we wait.
+    const linkBeat = setInterval(() => onProgress?.(17, "Linking into your library…"), 20_000);
+    try {
+      const stats = await linkBook(bookId, log);
+      if (stats) {
+        log(`substrate linked: ${stats.topicCount} topics, ${stats.bridgeCount} bridges`);
+        // A rebuild mints new/reshaped topics. Touch the atlas read-models so
+        // their lazy naming enqueues fire NOW — otherwise the fleet sits idle
+        // until someone happens to open /journeys.
+        try {
+          const atlas = await import("./atlas");
+          atlas.listRealms(undefined);
+          atlas.listTopics({ limit: 80 });
+          atlas.listTopics({ limit: 80, offset: 80 });
+        } catch (e) {
+          log(`naming sweep skipped: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    } catch (e) {
+      log(`substrate link failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    } finally {
+      clearInterval(linkBeat);
+    }
+  }
 
-  // 7. Extract entities in batches (one encoder forward pass per batch) and
-  //    persist mentions. Relationships are derived at query time from
-  //    co-occurrence + semantic neighbors (no generative model needed).
-  const resolver = new EntityResolver();
-  const touched = new Set<string>();
-  // Typed edges (the GLiREL substitute), deduped per book by relationKey; we keep
-  // the highest-confidence occurrence and its evidence passage.
-  const relations = new Map<string, ExtractedRelation & { passageId: string }>();
+  // 6. Entity extraction — FLEET FIRST, fire-and-continue. GLiNER inference is
+  //    the box's heaviest CPU; if a fleet device with the gliner runtime (the
+  //    Node harness on a charging laptop) checked in recently, enqueue the
+  //    passages and RETURN: the queue slot frees for the next book while the
+  //    fleet chews. The extract-entities apply hook runs the full
+  //    post-processing when the result lands and finalizes book_analysis —
+  //    until then the book stays "running"; onFailed (or the 2h stale-running
+  //    recovery) flips abandoned runs to error so the sweep re-picks them.
+  onProgress?.(19, "Extracting entities…");
+  let fleetEntities: GlinerEntity[][] | null = null;
+  if (runtimeOnFleet("gliner")) {
+    try {
+      const { item, deduped } = enqueueWork({
+        project: "compendus",
+        kind: "extract-entities",
+        payload: {
+          bookId,
+          // resultContract busts the content-addressed cache across contract
+          // changes (v2 added offsets; v3 dropped inline text for ids).
+          resultContract: 3,
+          sourceKind,
+          passageIds: payloadIds,
+        },
+        requirements: { runtimes: ["gliner"], estMinutes: 5 },
+      });
+      // Re-analysis mints new passage ids, so a dedupe hit is near-impossible —
+      // but if one lands on a done item, reuse its cached spans inline.
+      if (deduped && item.status === "done" && item.result) {
+        const cached = JSON.parse(item.result) as { entities?: GlinerEntity[][] };
+        if (Array.isArray(cached.entities) && cached.entities.length === chunks.length) {
+          fleetEntities = cached.entities;
+          log("fleet cache hit — reusing previous extraction result");
+        }
+      }
+      if (!fleetEntities) {
+        log(
+          `extraction offloaded to fleet (${chunks.length} passages) — analysis finishes in background`,
+        );
+        onProgress?.(100, "Entity extraction offloaded to the fleet");
+        return { passageCount: chunks.length, entityCount: 0, relationshipCount: 0, imageCount };
+      }
+    } catch (e) {
+      log(`fleet extraction unavailable (${e instanceof Error ? e.message : e}); running locally`);
+    }
+  }
+  if (!fleetEntities) {
+    onProgress?.(19, "Loading entity model…");
+    log("loading GLiNER…");
+    await ensureGlinerReady(onLog);
+    log("GLiNER ready; extracting entities…");
+  }
 
+  // 7. Run inference in batches (one encoder forward pass per batch). The
+  //    spans then go through the SAME post-processing module the fleet apply
+  //    hook uses, so both paths produce identical graphs.
+  const allEntities: GlinerEntity[][] = [];
   for (let i = 0; i < chunks.length; i += EXTRACT_BATCH) {
     if (aborted()) {
+      // Status stays "running"; the stale-running recovery flips it to a
+      // re-analyzable error if nothing finishes the book within 2h.
       return {
         passageCount: passageRefs.length,
-        entityCount: touched.size,
+        entityCount: 0,
         relationshipCount: 0,
         imageCount,
       };
     }
     const slice = chunks.slice(i, i + EXTRACT_BATCH);
-    let batch: Awaited<ReturnType<typeof extractEntitiesBatch>>;
-    try {
-      batch = await withTimeout(extractEntitiesBatch(slice.map((c) => c.text)), 60000);
-    } catch (e) {
-      log(
-        `extraction stalled at ${i}/${chunks.length} (${e instanceof Error ? e.message : "error"}); skipping batch`,
-      );
-      continue;
-    }
-
-    for (let j = 0; j < slice.length; j++) {
-      const passageId = passageRefs[i + j].id;
-      const relEnts: RelEntity[] = [];
-      for (const ent of batch[j]) {
-        const entityId = await resolver.resolve({ name: ent.name, type: ent.type });
-        touched.add(entityId);
-        db.insert(entityMentions)
-          .values({
-            id: randomUUID(),
-            entityId,
-            passageId,
-            bookId,
-            surfaceText: ent.surfaceText,
-            charStart: ent.charStart,
-            charEnd: ent.charEnd,
-            role: null,
-            confidence: ent.score,
-            createdAt: new Date(),
-          })
-          .run();
-        relEnts.push({
-          entityId,
-          type: ent.type,
-          name: ent.name,
-          charStart: ent.charStart,
-          charEnd: ent.charEnd,
-        });
-      }
-      // Derive typed relationships from the text between co-located entities.
-      for (const rel of extractRelations(slice[j].text, relEnts)) {
-        const key = relationKey(rel);
-        const prev = relations.get(key);
-        if (!prev || rel.confidence > prev.confidence) relations.set(key, { ...rel, passageId });
+    if (fleetEntities) {
+      allEntities.push(...fleetEntities.slice(i, i + EXTRACT_BATCH));
+    } else {
+      try {
+        const batch = await withTimeout(extractEntitiesBatch(slice.map((c) => c.text)), 60000);
+        allEntities.push(...batch);
+      } catch (e) {
+        log(
+          `extraction stalled at ${i}/${chunks.length} (${e instanceof Error ? e.message : "error"}); skipping batch`,
+        );
+        for (let j = 0; j < slice.length; j++) allEntities.push([]);
       }
     }
-
     onProgress?.(
-      20 + Math.round((i / chunks.length) * 75),
+      20 + Math.round((i / chunks.length) * 70),
       `Extracting ideas… ${Math.min(i + EXTRACT_BATCH, chunks.length)}/${chunks.length}`,
     );
     if (i % 80 === 0)
-      log(
-        `extracted ${Math.min(i + EXTRACT_BATCH, chunks.length)}/${chunks.length} — ${touched.size} entities`,
-      );
+      log(`extracted ${Math.min(i + EXTRACT_BATCH, chunks.length)}/${chunks.length}`);
   }
 
-  // 7b. Concept keyphrases (YAKE — pure JS, no model) for the distinctive
-  //     multi-word ideas GLiNER misses. Each becomes a grounded `concept` entity
-  //     anchored to up to a few passages that contain it verbatim.
-  onProgress?.(90, "Surfacing key concepts…");
-  const conceptMentions = await extractConcepts(
-    src.sections,
-    chunks,
-    passageRefs,
+  // 7b–8. Shared post-processing: mentions + cross-book resolution, typed
+  //       relationships, concept keyphrases, canonical rebuild, stats, and the
+  //       book_analysis finalize — one code path for local and fleet results.
+  onProgress?.(90, "Connecting people, places and ideas…");
+  const applied = await applyExtraction({
     bookId,
-    resolver,
-    touched,
-  );
-  log(`added concept keyphrases (${conceptMentions} grounded mentions)`);
+    passageIds: payloadIds,
+    entities: allEntities,
+    sourceKind,
+    log,
+  });
+  const entityCount = applied?.entityCount ?? 0;
+  const relationshipCount = applied?.relationshipCount ?? 0;
 
-  // 7c. Persist the typed relationship edges derived during extraction.
-  onProgress?.(94, "Connecting people, places and ideas…");
-  const relationshipCount = persistRelationships(bookId, relations);
-  log(`persisted ${relationshipCount} typed relationships`);
+  // 8b. Refresh substrate structure now that entities exist: topic labels
+  //     (NPMI-distinctive canonical entities) and role/bridge stats pick up the
+  //     freshly extracted names. Cheap (seconds) and idempotent.
+  if (embedded > 0) {
+    const refreshBeat = setInterval(
+      () => onProgress?.(96, "Refreshing library structure…"),
+      20_000,
+    );
+    try {
+      await rebuildStructureIfDue(log);
+    } catch (e) {
+      log(`substrate refresh failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    } finally {
+      clearInterval(refreshBeat);
+    }
+  }
 
-  // 8. Rebuild the canonical identity mapping (merges variants, flags noise) and
-  //    recompute canonical-level counts. Non-destructive: extraction rows are
-  //    untouched, only the derived mapping + count caches change.
-  onProgress?.(96, "Linking ideas across your library…");
-  rebuildCanonicalMapping();
-  recomputeStatsForBook();
-
-  finalizeStatus(bookId, chunks.length, touched.size, relationshipCount);
   onProgress?.(100, "Analysis complete");
   return {
     passageCount: chunks.length,
-    entityCount: touched.size,
+    entityCount,
     relationshipCount,
     imageCount,
   };
-}
-
-/** Max passages to anchor a single concept keyphrase to (provenance, not noise). */
-const CONCEPT_MAX_MENTIONS = 5;
-
-/**
- * Run YAKE over the whole book, keep the distinctive *multi-word* concepts, and
- * ground each to the passages that contain it. Single-word phrases are dropped:
- * they overlap GLiNER's named entities and are where its stopword noise lives.
- * Returns the number of grounded mentions written.
- */
-async function extractConcepts(
-  sections: BookSection[],
-  chunks: PassageChunk[],
-  refs: PassageRef[],
-  bookId: string,
-  resolver: EntityResolver,
-  touched: Set<string>,
-): Promise<number> {
-  const fullText = sections.map((s) => s.text).join("\n");
-  const keyphrases = extractKeyphrases(fullText, 60).filter(
-    // Multi-word only, and reject the same verb-fragment / titled-person noise we
-    // drop from GLiNER spans — YAKE surfaces "Father Kleinsorge said" too.
-    (k) => k.normalized.includes(" ") && !isNoiseSpan(k.phrase, "concept"),
-  );
-  let mentions = 0;
-  for (const kp of keyphrases.slice(0, 40)) {
-    // Ground FIRST: find passages containing the phrase verbatim. YAKE can build
-    // n-grams that cross punctuation/sentence boundaries (e.g. "park. Father
-    // Kleinsorge" → "park father kleinsorge"), which never match a contiguous
-    // substring — those are noise. Only create the entity if it actually grounds,
-    // so we never mint a zero-mention phantom concept.
-    const hits: Array<{ passageId: string; charStart: number; surfaceText: string }> = [];
-    for (let k = 0; k < chunks.length && hits.length < CONCEPT_MAX_MENTIONS; k++) {
-      const idx = chunks[k].text.toLowerCase().indexOf(kp.normalized);
-      if (idx < 0) continue;
-      hits.push({
-        passageId: refs[k].id,
-        charStart: idx,
-        surfaceText: chunks[k].text.slice(idx, idx + kp.normalized.length),
-      });
-    }
-    if (hits.length === 0) continue; // ungrounded phrase — skip entirely
-
-    const entityId = await resolver.resolve({ name: kp.phrase, type: "concept" });
-    touched.add(entityId);
-    for (const h of hits) {
-      db.insert(entityMentions)
-        .values({
-          id: randomUUID(),
-          entityId,
-          passageId: h.passageId,
-          bookId,
-          surfaceText: h.surfaceText,
-          charStart: h.charStart,
-          charEnd: h.charStart + kp.normalized.length,
-          role: "concept",
-          confidence: null,
-          createdAt: new Date(),
-        })
-        .run();
-      mentions++;
-    }
-  }
-  return mentions;
-}
-
-/** Insert the deduped typed edges; returns the count written. */
-function persistRelationships(
-  bookId: string,
-  relations: Map<string, ExtractedRelation & { passageId: string }>,
-): number {
-  if (relations.size === 0) return 0;
-  const now = new Date();
-  const rows = [...relations.values()].map((r) => ({
-    id: randomUUID(),
-    sourceEntityId: r.sourceEntityId,
-    targetEntityId: r.targetEntityId,
-    type: r.type,
-    description: r.description,
-    evidencePassageId: r.passageId,
-    bookId,
-    confidence: r.confidence,
-    createdAt: now,
-  }));
-  for (let i = 0; i < rows.length; i += 64) {
-    db.insert(entityRelationships)
-      .values(rows.slice(i, i + 64))
-      .run();
-  }
-  return rows.length;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -475,47 +483,8 @@ function persistImages(bookId: string, sections: BookSection[], refs: PassageRef
   return count;
 }
 
-// --- status + reset helpers ----------------------------------------------------
-
-function upsertStatus(bookId: string, status: string, error?: string): void {
-  const now = new Date();
-  db.insert(bookAnalysis)
-    .values({
-      bookId,
-      status,
-      error: error ?? null,
-      pipelineVersion: PIPELINE_VERSION,
-      model: EXTRACT_MODEL,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: bookAnalysis.bookId,
-      set: {
-        status,
-        error: error ?? null,
-        pipelineVersion: PIPELINE_VERSION,
-        model: EXTRACT_MODEL,
-        updatedAt: now,
-      },
-    })
-    .run();
-}
-
-function finalizeStatus(bookId: string, p: number, e: number, r: number): void {
-  db.update(bookAnalysis)
-    .set({
-      status: "completed",
-      passageCount: p,
-      entityCount: e,
-      relationshipCount: r,
-      error: null,
-      analyzedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(bookAnalysis.bookId, bookId))
-    .run();
-}
+// --- reset helper ----------------------------------------------------------------
+// (status helpers live in extraction-apply.ts — shared with the fleet apply hook)
 
 /** Clear a book's prior graph so re-analysis is idempotent. Deletes mentions
  *  explicitly (not relying on cascade) so it also cleans any orphans from runs

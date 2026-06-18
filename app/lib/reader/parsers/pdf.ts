@@ -33,6 +33,7 @@ export async function parsePdf(buffer: Buffer | Uint8Array, bookId: string): Pro
       data,
       useSystemFonts: true,
       disableFontFace: true,
+      verbosity: 0, // errors only — Type3 warnings flood the log per glyph
     });
 
     const pdfDoc = await loadingTask.promise;
@@ -44,7 +45,7 @@ export async function parsePdf(buffer: Buffer | Uint8Array, bookId: string): Pro
     const toc = await extractPdfToc(pdfDoc);
 
     // Clean up
-    await pdfDoc.destroy();
+    await loadingTask.destroy();
 
     return {
       bookId,

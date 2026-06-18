@@ -29,8 +29,11 @@ const SHARED_EXTERNALS = [
   "child_process",
   // Native modules that can't be bundled
   "better-sqlite3",
+  "onnxruntime-node",
+  "@huggingface/transformers",
   "canvas",
   "sharp",
+  "usearch",
   // CBR/RAR parsing - has dynamic requires that don't work when bundled
   "node-unrar-js",
   // PDF cover rendering via GraphicsMagick CLI wrapper - breaks when bundled
@@ -77,6 +80,20 @@ async function buildWorkers() {
       entryPoints: [join(rootDir, "app/lib/processing/processing-worker.ts")],
       outfile: join(rootDir, "dist/worker/processing-worker.mjs"),
     }).then(() => console.log("[Worker Build] Built processing-worker.mjs")),
+
+    // Substrate rebuild worker (off-main-thread O(N²) structure rebuilds)
+    build({
+      ...SHARED_OPTIONS,
+      entryPoints: [join(rootDir, "app/lib/knowledge/substrate-worker.ts")],
+      outfile: join(rootDir, "dist/worker/substrate-worker.mjs"),
+    }).then(() => console.log("[Worker Build] Built substrate-worker.mjs")),
+
+    // Concept ingest worker (off-main-thread backfill so it never blocks the UI)
+    build({
+      ...SHARED_OPTIONS,
+      entryPoints: [join(rootDir, "app/lib/concept/ingest-worker.ts")],
+      outfile: join(rootDir, "dist/worker/concept-ingest-worker.mjs"),
+    }).then(() => console.log("[Worker Build] Built concept-ingest-worker.mjs")),
   ]);
 
   // Copy pdf.worker.mjs to dist/worker directory

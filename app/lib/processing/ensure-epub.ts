@@ -69,18 +69,20 @@ export async function convertBookToEpub(
     language: book.language ?? undefined,
   };
 
-  let epubBuffer: Buffer;
-  if (book.format === "pdf") {
-    const { convertPdfToEpub } = await import("./pdf-to-epub");
-    epubBuffer = await convertPdfToEpub(buffer, metadata, { onProgress });
-  } else {
-    const { convertMobiToEpub } = await import("./mobi-to-epub");
-    epubBuffer = await convertMobiToEpub(buffer, metadata, { onProgress });
-  }
-
   const epubRel = `data/books/${book.id}.epub`;
   const epubPath = resolve(process.cwd(), epubRel);
-  writeFileSync(epubPath, epubBuffer);
+
+  if (book.format === "pdf") {
+    // PDFs can produce GB-scale image-heavy EPUBs — stream the ZIP straight
+    // to disk instead of materializing it (this OOM-killed the container).
+    const { convertPdfToEpub } = await import("./pdf-to-epub");
+    await convertPdfToEpub(buffer, metadata, { onProgress, streamToFile: epubPath });
+  } else {
+    const { convertMobiToEpub } = await import("./mobi-to-epub");
+    const epubBuffer = await convertMobiToEpub(buffer, metadata, { onProgress });
+    writeFileSync(epubPath, epubBuffer);
+  }
+
   const epubSize = statSync(epubPath).size;
 
   await db

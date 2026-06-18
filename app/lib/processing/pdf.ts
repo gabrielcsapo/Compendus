@@ -5,6 +5,10 @@ const PDFJS_OPTIONS: Partial<DocumentInitParameters> = {
   useWorkerFetch: false,
   isEvalSupported: false,
   useSystemFonts: false,
+  // Errors only: pdfjs emits one "Type3 font resource not available" warning
+  // PER GLYPH on some PDFs — thousands of console lines a second flooding the
+  // container log driver (real CPU) during conversions.
+  verbosity: 0,
 };
 
 export async function extractPdfMetadata(buffer: Buffer): Promise<BookMetadata> {
@@ -25,7 +29,7 @@ export async function extractPdfMetadata(buffer: Buffer): Promise<BookMetadata> 
       publishedDate: info?.CreationDate ? parsePdfDate(info.CreationDate as string) : null,
     };
   } finally {
-    await doc.destroy();
+    await task.destroy();
   }
 }
 
@@ -51,7 +55,7 @@ export async function extractPdfContent(buffer: Buffer): Promise<ExtractedConten
       toc: [],
     };
   } finally {
-    await doc.destroy();
+    await task.destroy();
   }
 }
 

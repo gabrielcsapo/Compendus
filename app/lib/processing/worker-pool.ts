@@ -164,12 +164,20 @@ class WorkerPool {
     });
     state.timer = setTimeout(() => this.handleTimeout(state, pending.task.id), TASK_TIMEOUT_MS);
 
-    // Send a copy via structured clone — do NOT use a transferList. A small
-    // Buffer is backed by Node's shared 8KB pool, whose ArrayBuffer is not
-    // transferable and makes postMessage throw "Cannot transfer object of
-    // unsupported type" (which then fails the conversion). The copy is cheap
-    // relative to the conversion and correct for every file size.
-    state.worker.postMessage({ ...pending.task, buffer: Buffer.from(pending.task.buffer) });
+    // Copy once, then TRANSFER the copy. Callers reuse their buffer across
+    // multiple worker calls (metadata + cover from the same bytes), so the
+    // caller's buffer must never be transferred/detached — but the copy is
+    // ours. Structured-cloning the copy used to make a SECOND full copy: for
+    // a 1GB comic archive that was a silent +2GB spike; transferring the copy
+    // halves it. Small Buffers come from Node's shared pool whose ArrayBuffer
+    // isn't transferable (postMessage throws) — those fall back to clone.
+    const copy = Buffer.from(pending.task.buffer);
+    const ownsBuffer = copy.byteOffset === 0 && copy.byteLength === copy.buffer.byteLength;
+    if (ownsBuffer) {
+      state.worker.postMessage({ ...pending.task, buffer: copy }, [copy.buffer]);
+    } else {
+      state.worker.postMessage({ ...pending.task, buffer: copy });
+    }
   }
 
   async runTask(type: WorkerTaskType, buffer: Buffer, format: BookFormat): Promise<unknown> {

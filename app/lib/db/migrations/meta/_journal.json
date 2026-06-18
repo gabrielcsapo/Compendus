@@ -134,6 +134,83 @@
       "when": 1780590876414,
       "tag": "0018_fat_supreme_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1781062173240,
+      "tag": "0019_clever_blue_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1781064765767,
+      "tag": "0020_amusing_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1781065273758,
+      "tag": "0021_unknown_otto_octavius",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1781110788152,
+      "tag": "0022_same_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1781118375039,
+      "tag": "0023_bouncy_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1781119531708,
+      "tag": "0024_hard_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1781150140407,
+      "tag": "0025_lazy_miek",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1781205202845,
+      "tag": "0026_medical_karen_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1781288118048,
+      "tag": "0027_productive_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1781535895679,
+      "tag": "0028_plain_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1781583094558,
+      "tag": "0029_minor_morbius",
+      "breakpoints": true
     }
   ]
 }

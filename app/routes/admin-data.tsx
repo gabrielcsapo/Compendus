@@ -1,11 +1,10 @@
 import { Suspense } from "react";
-import { adminDataStats, adminListFiles, adminListJobs } from "../actions/books";
+import { adminDataStats, adminListFiles } from "../actions/books";
 import { AdminDataClient } from "../components/AdminDataClient";
 
 const MATCHED_PAGE_SIZE = 50;
 const ORPHANED_PAGE_SIZE = 50;
 const MISSING_PAGE_SIZE = 50;
-const JOBS_PAGE_SIZE = 25;
 
 export default function AdminData() {
   return (
@@ -19,12 +18,11 @@ async function AdminDataContent() {
   // Load the summary stats and only the FIRST page of each section.
   // The full library is never serialized to the client; subsequent pages and
   // searches are fetched on demand via the admin* server actions.
-  const [stats, matched, orphaned, missing, jobs] = await Promise.all([
+  const [stats, matched, orphaned, missing] = await Promise.all([
     adminDataStats(),
     adminListFiles({ category: "matched", page: 1, pageSize: MATCHED_PAGE_SIZE }),
     adminListFiles({ category: "orphaned", page: 1, pageSize: ORPHANED_PAGE_SIZE }),
     adminListFiles({ category: "missing", page: 1, pageSize: MISSING_PAGE_SIZE }),
-    adminListJobs({ page: 1, pageSize: JOBS_PAGE_SIZE }),
   ]);
 
   return (
@@ -33,7 +31,6 @@ async function AdminDataContent() {
       initialMatched={{ ...matched, pageSize: MATCHED_PAGE_SIZE }}
       initialOrphaned={{ ...orphaned, pageSize: ORPHANED_PAGE_SIZE }}
       initialMissing={{ ...missing, pageSize: MISSING_PAGE_SIZE }}
-      initialJobs={{ ...jobs, pageSize: JOBS_PAGE_SIZE }}
     />
   );
 }

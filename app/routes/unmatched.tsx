@@ -11,8 +11,8 @@ export default function Unmatched() {
 }
 
 async function UnmatchedData() {
-  const [books, count] = await Promise.all([getUnmatchedBooks(1), getUnmatchedBooksCount()]);
-  return <UnmatchedClient initialBook={books[0] ?? null} initialCount={count} />;
+  const [books, count] = await Promise.all([getUnmatchedBooks(12), getUnmatchedBooksCount()]);
+  return <UnmatchedClient initialBooks={books} initialCount={count} />;
 }
 
 function UnmatchedSkeleton() {

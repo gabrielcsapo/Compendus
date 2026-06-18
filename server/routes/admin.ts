@@ -5,7 +5,15 @@ import { streamFileResponse } from "../lib/file-serving";
 import { db, rawDb, bookSubjects, backgroundJobs } from "../../app/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { findBestMetadata } from "../../app/lib/metadata";
-import { enqueueJob, getJob, cancelJob, cancelAllJobs } from "../../app/lib/queue";
+import {
+  enqueueJob,
+  getJob,
+  cancelJob,
+  cancelAllJobs,
+  pauseQueue,
+  resumeQueue,
+  queuePauseState,
+} from "../../app/lib/queue";
 import { CCD_VERSION } from "../../app/lib/content-ast/types";
 import { randomUUID } from "crypto";
 
@@ -273,6 +281,78 @@ app.post("/api/admin/backfill-ccd/cancel", (c) => {
 // extract/backfill that's pegging the host.
 app.post("/api/admin/jobs/cancel-all", (c) => {
   return c.json(cancelAllJobs());
+});
+
+// POST /api/admin/jobs/:id/cancel — surgically park ONE job (pending → deleted,
+// running → aborted + error). The scalpel next to cancel-all's hammer: a single
+// poison job (e.g. a convert that OOMs the container and resurrects at every
+// boot) can be removed without dropping the rest of the queue.
+app.post("/api/admin/jobs/:id/cancel", (c) => {
+  return c.json(cancelJob(c.req.param("id")));
+});
+
+// POST /api/admin/jobs/pause {minutes?} — reclaim the box: stop claiming queue
+// jobs and abort+requeue the current one. Auto-resumes (default 60min, max 24h)
+// so a forgotten pause can't freeze the grind forever.
+app.post("/api/admin/jobs/pause", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const minutes = typeof body?.minutes === "number" ? body.minutes : 60;
+  return c.json({ success: true, ...pauseQueue(minutes) });
+});
+
+// POST /api/admin/jobs/resume — end a pause early.
+app.post("/api/admin/jobs/resume", (c) => {
+  return c.json({ success: true, ...resumeQueue() });
+});
+
+// GET /api/admin/jobs/pause — current pause state.
+app.get("/api/admin/jobs/pause", (c) => {
+  return c.json({ success: true, ...queuePauseState() });
+});
+
+// --- admin workspace REST (the new sidebar/Overview/jobs UI) ----------------------
+// Server-action calls hang client-side under react-flight-router (the action
+// executes, the response stream never completes — affects the fleet page's
+// polling too); these endpoints keep the admin UI on plain fetch() until the
+// framework bug is fixed.
+
+app.get("/api/admin/workspace/summary", async (c) => {
+  const { adminJobsSummary } = await import("../../app/lib/admin-workspace");
+  return c.json(await adminJobsSummary());
+});
+
+app.get("/api/admin/workspace/counts", async (c) => {
+  const { adminSidebarCounts } = await import("../../app/lib/admin-workspace");
+  return c.json(await adminSidebarCounts());
+});
+
+app.get("/api/admin/workspace/jobs", async (c) => {
+  const { adminJobsList } = await import("../../app/lib/admin-workspace");
+  const view = (c.req.query("view") ?? "active") as "attention" | "active" | "history";
+  const page = parseInt(c.req.query("page") ?? "1", 10);
+  const pageSize = Math.min(100, parseInt(c.req.query("pageSize") ?? "25", 10));
+  const q = c.req.query("q") ?? "";
+  return c.json(await adminJobsList({ view, page, pageSize, q }));
+});
+
+app.get("/api/admin/workspace/job-logs/:id", async (c) => {
+  const { adminGetJobLogs } = await import("../../app/lib/admin-workspace");
+  return c.json({ logs: await adminGetJobLogs(c.req.param("id")) });
+});
+
+app.post("/api/admin/workspace/jobs/:id/retry", async (c) => {
+  const { adminRetryJob } = await import("../../app/lib/admin-workspace");
+  return c.json(await adminRetryJob(c.req.param("id")));
+});
+
+app.post("/api/admin/workspace/jobs/retry-all-errors", async (c) => {
+  const { adminRetryAllErrors } = await import("../../app/lib/admin-workspace");
+  return c.json(await adminRetryAllErrors());
+});
+
+app.post("/api/admin/workspace/jobs/clear-completed", async (c) => {
+  const { adminClearCompleted } = await import("../../app/lib/admin-workspace");
+  return c.json(await adminClearCompleted());
 });
 
 export const adminRoutes = app;

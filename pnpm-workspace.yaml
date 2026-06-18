@@ -1,3 +1,63 @@
 packages:
   - "."
   - "docs"
+# One onnxruntime for the whole tree: gliner pins 1.19.2 while
+# @huggingface/transformers wants 1.24.x, and on Linux both share the soname
+# libonnxruntime.so.1 — loading both in one process crashes GLiNER with
+# "version VERS_1.19.2 not found". gliner's JS works fine against 1.24.x.
+overrides:
+  pdfjs-dist: ^5.4.530
+  onnxruntime-node: 1.24.3
+  sharp: ^0.34.5
+
+allowBuilds:
+  better-sqlite3: true
+  core-js: true
+  es5-ext: true
+  canvas: true
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
+  puppeteer: true
+  sharp: true
+  workerd: true
+  # node-gyp-build postinstall: resolves the bundled prebuilt binary (darwin +
+  # linux ship inside the package); compiles from source only if none matches.
+  usearch: true
+minimumReleaseAgeExclude:
+  - "@img/sharp-darwin-arm64@0.35.0"
+  - "@img/sharp-darwin-x64@0.35.0"
+  - "@img/sharp-freebsd-wasm32@0.35.0"
+  - "@img/sharp-libvips-darwin-arm64@1.3.0"
+  - "@img/sharp-libvips-darwin-x64@1.3.0"
+  - "@img/sharp-libvips-linux-arm64@1.3.0"
+  - "@img/sharp-libvips-linux-arm@1.3.0"
+  - "@img/sharp-libvips-linux-ppc64@1.3.0"
+  - "@img/sharp-libvips-linux-riscv64@1.3.0"
+  - "@img/sharp-libvips-linux-s390x@1.3.0"
+  - "@img/sharp-libvips-linux-x64@1.3.0"
+  - "@img/sharp-libvips-linuxmusl-arm64@1.3.0"
+  - "@img/sharp-libvips-linuxmusl-x64@1.3.0"
+  - "@img/sharp-linux-arm64@0.35.0"
+  - "@img/sharp-linux-arm@0.35.0"
+  - "@img/sharp-linux-ppc64@0.35.0"
+  - "@img/sharp-linux-riscv64@0.35.0"
+  - "@img/sharp-linux-s390x@0.35.0"
+  - "@img/sharp-linux-x64@0.35.0"
+  - "@img/sharp-linuxmusl-arm64@0.35.0"
+  - "@img/sharp-linuxmusl-x64@0.35.0"
+  - "@img/sharp-wasm32@0.35.0"
+  - "@img/sharp-webcontainers-wasm32@0.35.0"
+  - "@img/sharp-win32-arm64@0.35.0"
+  - "@img/sharp-win32-ia32@0.35.0"
+  - "@img/sharp-win32-x64@0.35.0"
+  - "@typescript/native-preview-darwin-arm64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-darwin-x64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-linux-arm64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-linux-arm@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-linux-x64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-win32-arm64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview-win32-x64@7.0.0-dev.20260610.1"
+  - "@typescript/native-preview@7.0.0-dev.20260610.1"
+  - react-flight-router@0.10.0
+  - sharp@0.35.0

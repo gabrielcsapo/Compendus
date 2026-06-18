@@ -290,6 +290,39 @@ async function getModel(onLog?: (line: string) => void): Promise<GlinerModel> {
       const xenova = await import("@xenova/transformers");
       xenova.env.allowRemoteModels = false;
       xenova.env.localModelPath = MODELS_DIR;
+      // gliner/node creates its ORT session with NO options, so onnxruntime
+      // spawns a thread pool sized to the HOST's cores — on the shared box
+      // that oversubscribes the container (observed 280%+ CPU), starves the
+      // HTTP server, and crowds sibling apps. The library doesn't expose
+      // session options, so wrap InferenceSession.create to inject the same
+      // proven-safe threading we use for the embedding session. Tunable via
+      // GLINER_INTRA_OP_THREADS (default 2: ~half the box, server stays alive).
+      // pnpm's strict layout hides gliner's onnxruntime-node from app code;
+      // resolve it THROUGH gliner so we patch the exact module instance the
+      // library will import (CJS exports object is shared with ESM import).
+      const { createRequire } = await import("node:module");
+      const requireFromHere = createRequire(import.meta.url);
+      const requireFromGliner = createRequire(requireFromHere.resolve("gliner/node"));
+      const ort = requireFromGliner("onnxruntime-node") as typeof import("onnxruntime-common");
+      const sessionFactory = ort.InferenceSession as unknown as {
+        create: (path: unknown, opts?: Record<string, unknown>) => Promise<unknown>;
+        __compendusPinned?: boolean;
+      };
+      if (!sessionFactory.__compendusPinned) {
+        const origCreate = sessionFactory.create.bind(ort.InferenceSession);
+        sessionFactory.create = (path: unknown, opts?: Record<string, unknown>) =>
+          origCreate(path, {
+            // Default 1: the deploy container has a 2-core cgroup quota, and
+            // 2 inference threads + the event loop exhaust it — CFS throttling
+            // then freezes ALL threads (the "box unreachable" blackouts).
+            // Raise via env when the container gets more cores.
+            intraOpNumThreads: parseInt(process.env.GLINER_INTRA_OP_THREADS || "1", 10),
+            interOpNumThreads: 1,
+            executionMode: "sequential",
+            ...opts,
+          });
+        sessionFactory.__compendusPinned = true;
+      }
       const { Gliner } = await import("gliner/node");
       const model = new Gliner({
         tokenizerPath: GLINER_TOKENIZER,

@@ -46,6 +46,63 @@ export interface BookSource {
   totalCharacters: number;
 }
 
+// --- audiobook transcripts (A1) ---------------------------------------------------
+
+interface TranscriptLike {
+  segments: Array<{ start: number; end: number; text: string }>;
+}
+
+/** Split sections on long narration pauses, capped so passages chunk sanely. */
+const TRANSCRIPT_PAUSE_S = 4;
+const TRANSCRIPT_SECTION_MAX_CHARS = 8000;
+
+/**
+ * Build a BookSource from a Whisper transcript so audiobooks join the
+ * substrate: sections split on long pauses (chapter-ish boundaries) and the
+ * standard chunk → embed → link path does the rest. Word timestamps are not
+ * needed here — alignment (A2) consumes the raw transcript separately.
+ */
+export function bookSourceFromTranscript(transcript: TranscriptLike): BookSource {
+  const sections: BookSection[] = [];
+  let current: string[] = [];
+  let lastEnd = 0;
+  let chars = 0;
+  let total = 0;
+
+  const flush = () => {
+    const text = current.join(" ").replace(/\s+/g, " ").trim();
+    if (text.length > 0) {
+      sections.push({
+        title: `Part ${sections.length + 1}`,
+        spineIndex: sections.length,
+        text,
+        images: [],
+      });
+      total += text.length;
+    }
+    current = [];
+    chars = 0;
+  };
+
+  for (const seg of transcript.segments ?? []) {
+    const text = (seg.text || "").trim();
+    if (!text) continue;
+    const pause = seg.start - lastEnd;
+    if (
+      current.length > 0 &&
+      (pause >= TRANSCRIPT_PAUSE_S || chars >= TRANSCRIPT_SECTION_MAX_CHARS)
+    ) {
+      flush();
+    }
+    current.push(text);
+    chars += text.length + 1;
+    lastEnd = seg.end;
+  }
+  flush();
+
+  return { sections, totalCharacters: total };
+}
+
 const IMAGE_EXT_MIME: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",

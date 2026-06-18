@@ -261,7 +261,11 @@ export async function searchBookMetadata(
 
   const encodedQuery = encodeURIComponent(query);
 
-  const response = await fetch(`https://openlibrary.org/search.json?q=${encodedQuery}&limit=10`);
+  // Open Library's search endpoint routinely takes 5-30s (or hangs); without
+  // a timeout every metadata search in the app inherits that tail.
+  const response = await fetch(`https://openlibrary.org/search.json?q=${encodedQuery}&limit=10`, {
+    signal: AbortSignal.timeout(6000),
+  });
 
   if (!response.ok) {
     console.error("Open Library search failed:", response.statusText);
@@ -316,7 +320,9 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
     return cached;
   }
 
-  const response = await fetch(`https://openlibrary.org/isbn/${cleanIsbn}.json`);
+  const response = await fetch(`https://openlibrary.org/isbn/${cleanIsbn}.json`, {
+    signal: AbortSignal.timeout(6000),
+  });
 
   if (!response.ok) {
     console.error("Open Library ISBN lookup failed:", response.statusText);
@@ -327,19 +333,20 @@ export async function lookupByISBN(isbn: string): Promise<MetadataSearchResult |
 
   const book: OpenLibraryBook = await response.json();
 
-  // Fetch authors if available
+  // Fetch authors if available — in PARALLEL with a short per-request timeout:
+  // this used to be a sequential un-timed N+1 loop, adding seconds per author
+  // to every ISBN lookup.
   const authors: string[] = [];
   if (book.authors) {
-    for (const authorRef of book.authors) {
-      try {
-        const authorResponse = await fetch(`https://openlibrary.org${authorRef.key}.json`);
-        if (authorResponse.ok) {
-          const author: OpenLibraryAuthor = await authorResponse.json();
-          authors.push(author.name);
-        }
-      } catch {
-        // Skip this author if fetch fails
-      }
+    const fetched = await Promise.allSettled(
+      book.authors.map((authorRef) =>
+        fetch(`https://openlibrary.org${authorRef.key}.json`, {
+          signal: AbortSignal.timeout(3000),
+        }).then((r) => (r.ok ? (r.json() as Promise<OpenLibraryAuthor>) : null)),
+      ),
+    );
+    for (const f of fetched) {
+      if (f.status === "fulfilled" && f.value?.name) authors.push(f.value.name);
     }
   }
 
@@ -566,14 +573,20 @@ export async function searchAllSources(
   // Regular title/author search
   const query = author ? `${title} ${author}` : title;
 
-  // Search Google Books and Open Library in parallel
-  const results = await Promise.allSettled([
-    searchGoogleBooks(query),
-    searchBookMetadata(title, author),
-  ]);
+  // Search Google Books and Open Library in parallel — but don't make the
+  // user wait out Open Library's slow tail: once Google has answered, OL gets
+  // a short grace and then we ship what we have. The abandoned OL request
+  // still completes and populates its cache, so an immediate re-search gets
+  // both sources instantly.
+  const googleP = searchGoogleBooks(query).catch(() => [] as MetadataSearchResult[]);
+  const olP = searchBookMetadata(title, author).catch(() => [] as MetadataSearchResult[]);
 
-  const googleResults = results[0].status === "fulfilled" ? results[0].value : [];
-  const olResults = results[1].status === "fulfilled" ? results[1].value : [];
+  const googleResults = await googleP;
+  const olResults =
+    (await Promise.race([
+      olP,
+      new Promise<null>((r) => setTimeout(() => r(null), googleResults.length > 0 ? 2500 : 6000)),
+    ])) ?? [];
 
   // Interleave Google and Open Library results
   const combined: MetadataSearchResult[] = [];

@@ -30,7 +30,10 @@ enum APIError: LocalizedError {
         case .decodingError(let error):
             return "Failed to parse response: \(error.localizedDescription)"
         case .serverError(let code, let message):
-            return "Server error (\(code)): \(message ?? "Unknown error")"
+            if code == 502 || code == 503 || code == 504 {
+                return "The library server is starting up or busy. Give it a moment and try again."
+            }
+            return message.map { "Server error (\(code)): \($0)" } ?? "Server error (\(code))."
         case .profileRequired:
             return "Your profile is no longer available on the server. Please select a new profile."
         }
@@ -80,51 +83,80 @@ class APIService {
         return try await fetch(url)
     }
 
-    // MARK: - Living Library (knowledge graph)
+    // MARK: - Semantic substrate (wander v2, topics, study, trails)
 
-    /// Browse graph entities, ranked by cross-library reach.
-    func fetchEntities(type: String? = nil, query: String? = nil, limit: Int = 60) async throws -> EntitiesResponse {
+    /// Start a wander: serendipitous, aimed at a free-text query, or from a book.
+    func fetchWanderStart(query: String? = nil, bookId: String? = nil) async throws -> WanderStopResponse {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
-        var urlString = "/api/graph/entities?limit=\(limit)"
-        if let type = type {
-            urlString += "&type=\(type)"
-        }
-        if let query = query {
-            urlString += "&q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)"
+        var urlString = "/api/wander2/start?mode=random"
+        if let query, !query.isEmpty {
+            let q = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+            urlString = "/api/wander2/start?mode=query&q=\(q)"
+        } else if let bookId {
+            urlString = "/api/wander2/start?mode=book&bookId=\(bookId)"
         }
         guard let url = config.apiURL(urlString) else { throw APIError.invalidURL }
         return try await fetch(url)
     }
 
-    /// Fetch one entity with its cross-book mentions.
-    func fetchEntity(id: String) async throws -> EntityDetailResponse {
+    /// Fetch one wander stop with grounded steps, excluding already-visited passages.
+    /// Also records the passage as seen for coverage/learning.
+    func fetchWanderStop(passageId: String, visited: [String]) async throws -> WanderStopResponse {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
-        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        guard let url = config.apiURL("/api/graph/entities/\(encoded)") else { throw APIError.invalidURL }
+        let encoded = passageId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? passageId
+        let visitedParam = visited.suffix(60).joined(separator: ",")
+        guard let url = config.apiURL("/api/wander2/stop/\(encoded)?visited=\(visitedParam)") else {
+            throw APIError.invalidURL
+        }
         return try await fetch(url)
     }
 
-    /// Grounded next steps to wander to from an entity.
-    func fetchWander(entityId: String, limit: Int = 6) async throws -> WanderResponse {
+    /// Topics across the library with this profile's coverage.
+    func fetchTopics(minSize: Int = 10) async throws -> TopicsResponse {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
-        let encoded = entityId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entityId
-        guard let url = config.apiURL("/api/graph/entities/\(encoded)/wander?limit=\(limit)") else { throw APIError.invalidURL }
+        guard let url = config.apiURL("/api/topics?minSize=\(minSize)") else { throw APIError.invalidURL }
         return try await fetch(url)
+    }
+
+    /// The sequenced study path through a topic (built on demand server-side).
+    func fetchCurriculum(topicId: String) async throws -> CurriculumResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let encoded = topicId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? topicId
+        guard let url = config.apiURL("/api/topics/\(encoded)/curriculum") else { throw APIError.invalidURL }
+        return try await fetch(url)
+    }
+
+    /// Save a wander path as a replayable trail.
+    func saveTrail(path: [String], title: String? = nil) async throws -> TrailSaveResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        guard let url = config.apiURL("/api/trails") else { throw APIError.invalidURL }
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = ["path": path]
+        if let title { body["title"] = title }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, _) = try await session.data(for: request)
+        return try JSONDecoder().decode(TrailSaveResponse.self, from: data)
     }
 
     /// Log a completed wander session for activity tracking (best-effort, never throws).
     /// `startedAt` is the session start; `ideasVisited` is how many ideas were surfaced.
-    func logWanderSession(startedAt: Date, ideasVisited: Int) async {
+    func logWanderSession(
+        startedAt: Date, ideasVisited: Int, path: [String] = [], stepsTaken: [String] = []
+    ) async {
         guard config.isConfigured else { return }
         guard let url = config.apiURL("/api/wander/sessions") else { return }
 
         var request = buildRequest(url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "startedAt": startedAt.timeIntervalSince1970 * 1000,
             "ideasVisited": max(1, ideasVisited),
         ]
+        if !path.isEmpty { body["path"] = path }
+        if !stepsTaken.isEmpty { body["stepsTaken"] = stepsTaken }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         _ = try? await session.data(for: request)
@@ -268,7 +300,19 @@ class APIService {
                 throw APIError.invalidResponse
             }
             guard (200...299).contains(httpResponse.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
+                // Never surface a raw error body to the reader: a 5xx is usually
+                // the proxy's HTML "Starting Up" page. Keep a JSON {error} message
+                // if present; otherwise let errorDescription give a clean,
+                // status-based phrase.
+                let body = (String(data: data, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var message: String?
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let err = json["error"] as? String {
+                    message = err
+                } else if !body.isEmpty && !body.hasPrefix("<") {
+                    message = String(body.prefix(140))
+                }
                 throw APIError.serverError(httpResponse.statusCode, message)
             }
             return try JSONDecoder().decode(ConversionResponse.self, from: data)
@@ -305,7 +349,19 @@ class APIService {
                 throw APIError.invalidResponse
             }
             guard (200...299).contains(httpResponse.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
+                // Never surface a raw error body to the reader: a 5xx is usually
+                // the proxy's HTML "Starting Up" page. Keep a JSON {error} message
+                // if present; otherwise let errorDescription give a clean,
+                // status-based phrase.
+                let body = (String(data: data, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var message: String?
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let err = json["error"] as? String {
+                    message = err
+                } else if !body.isEmpty && !body.hasPrefix("<") {
+                    message = String(body.prefix(140))
+                }
                 throw APIError.serverError(httpResponse.statusCode, message)
             }
             return try JSONDecoder().decode(TranscribeResponse.self, from: data)
@@ -385,7 +441,19 @@ class APIService {
                 throw APIError.invalidResponse
             }
             guard (200...299).contains(httpResponse.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
+                // Never surface a raw error body to the reader: a 5xx is usually
+                // the proxy's HTML "Starting Up" page. Keep a JSON {error} message
+                // if present; otherwise let errorDescription give a clean,
+                // status-based phrase.
+                let body = (String(data: data, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var message: String?
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let err = json["error"] as? String {
+                    message = err
+                } else if !body.isEmpty && !body.hasPrefix("<") {
+                    message = String(body.prefix(140))
+                }
                 throw APIError.serverError(httpResponse.statusCode, message)
             }
             return try JSONDecoder().decode(BookResponse.self, from: data)
@@ -423,7 +491,19 @@ class APIService {
                 throw APIError.invalidResponse
             }
             guard (200...299).contains(httpResponse.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
+                // Never surface a raw error body to the reader: a 5xx is usually
+                // the proxy's HTML "Starting Up" page. Keep a JSON {error} message
+                // if present; otherwise let errorDescription give a clean,
+                // status-based phrase.
+                let body = (String(data: data, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var message: String?
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let err = json["error"] as? String {
+                    message = err
+                } else if !body.isEmpty && !body.hasPrefix("<") {
+                    message = String(body.prefix(140))
+                }
                 throw APIError.serverError(httpResponse.statusCode, message)
             }
             return try JSONDecoder().decode(AddTagResponse.self, from: data)
@@ -769,7 +849,19 @@ class APIService {
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
+                // Never surface a raw error body to the reader: a 5xx is usually
+                // the proxy's HTML "Starting Up" page. Keep a JSON {error} message
+                // if present; otherwise let errorDescription give a clean,
+                // status-based phrase.
+                let body = (String(data: data, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                var message: String?
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let err = json["error"] as? String {
+                    message = err
+                } else if !body.isEmpty && !body.hasPrefix("<") {
+                    message = String(body.prefix(140))
+                }
                 throw APIError.serverError(httpResponse.statusCode, message)
             }
 

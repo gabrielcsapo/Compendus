@@ -5,6 +5,7 @@ import { etag } from "hono/etag";
 import { createMiddleware } from "hono/factory";
 
 import { profileMiddleware, requireProfile, requireAdmin } from "./middleware/profile";
+import { registerKernels } from "../app/lib/fabric/kernels";
 import { profileRoutes } from "./routes/profiles";
 import { syncRoutes } from "./routes/sync";
 import { searchRoutes } from "./routes/search";
@@ -25,9 +26,20 @@ import { adminRoutes } from "./routes/admin";
 import { statsRoutes } from "./routes/stats";
 import { exploreRoutes } from "./routes/explore";
 import { knowledgeRoutes } from "./routes/knowledge";
+import { fabricRoutes } from "./routes/fabric";
+import { substrateRoutes } from "./routes/substrate";
+import { conceptRoutes } from "./routes/concept";
+import { reckoningRoutes } from "./routes/reckoning";
 import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
+
+// Content-address the built fleet kernels (code mobility — see fabric/kernels.ts).
+try {
+  registerKernels();
+} catch (e) {
+  console.warn("[Fabric] kernel registration failed:", e instanceof Error ? e.message : e);
+}
 
 // Pre-compiled regex for static asset detection (used in profileGateMiddleware)
 const STATIC_ASSET_RE = /\.\w+$/;
@@ -106,6 +118,10 @@ app.use("/api/jobs*", requireProfile);
 app.use("/api/stats*", requireProfile);
 app.use("/api/explore*", requireProfile);
 app.use("/api/graph*", requireProfile);
+app.use("/api/wander2*", requireProfile);
+app.use("/api/topics*", requireProfile);
+app.use("/api/frontier*", requireProfile);
+app.use("/api/trails*", requireProfile);
 
 // Admin-only routes
 app.use("/api/upload*", requireAdmin);
@@ -128,6 +144,11 @@ app.route("/", adminRoutes);
 app.route("/", statsRoutes);
 app.route("/", exploreRoutes);
 app.route("/", knowledgeRoutes);
+app.route("/", substrateRoutes);
+app.route("/", conceptRoutes);
+app.route("/", reckoningRoutes);
+// Fabric routes authenticate workers by device token (not profile) — see routes/fabric.ts
+app.route("/", fabricRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);

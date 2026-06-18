@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import { db, books, bookAnalysis, wanderSessions } from "../../app/lib/db";
+import { db, rawDb, books, bookAnalysis, wanderSessions } from "../../app/lib/db";
 import { enqueueJob, getJob } from "../../app/lib/queue";
-import { listEntities, getEntityDetail, wander } from "../../app/lib/knowledge/graph";
+import { listEntities, getEntityDetail } from "../../app/lib/knowledge/graph";
 import {
   rebuildCanonicalMapping,
   listCandidateLinks,
@@ -96,6 +96,28 @@ app.get("/api/books/:id/analysis", async (c) => {
   return c.json({ success: true, analysis: row ?? null });
 });
 
+/**
+ * GET /api/graph/analysis/summary — corpus-wide analysis progress (drives the
+ * bulk-analyze monitor): counts by status + completed book ids.
+ */
+app.get("/api/graph/analysis/summary", (c) => {
+  const byStatus = Object.fromEntries(
+    (
+      rawDb.prepare("SELECT status, COUNT(*) AS n FROM book_analysis GROUP BY status").all() as {
+        status: string;
+        n: number;
+      }[]
+    ).map((r) => [r.status, r.n]),
+  );
+  const completedIds = (
+    rawDb.prepare("SELECT book_id AS id FROM book_analysis WHERE status = 'completed'").all() as {
+      id: string;
+    }[]
+  ).map((r) => r.id);
+  const passages = (rawDb.prepare("SELECT COUNT(*) AS n FROM passages").get() as { n: number }).n;
+  return c.json({ success: true, byStatus, completedIds, passages });
+});
+
 // --- knowledge graph (read) ----------------------------------------------------
 
 /** GET /api/graph/entities?type=&q=&limit=&offset= — entity browser, ranked by reach. */
@@ -112,12 +134,6 @@ app.get("/api/graph/entities/:id", (c) => {
   const detail = getEntityDetail(c.req.param("id"));
   if (!detail) return c.json({ success: false, error: "Entity not found" }, 404);
   return c.json({ success: true, entity: detail });
-});
-
-/** GET /api/graph/entities/:id/wander — grounded next steps, each with a reason. */
-app.get("/api/graph/entities/:id/wander", (c) => {
-  const limit = parseInt(c.req.query("limit") || "8", 10);
-  return c.json({ success: true, steps: wander(c.req.param("id"), limit) });
 });
 
 /**
@@ -138,6 +154,14 @@ app.post("/api/wander/sessions", async (c) => {
       ? new Date(startedMs)
       : new Date(now);
   const ideasVisited = Math.max(1, Math.min(10_000, Math.floor(Number(body?.ideasVisited) || 1)));
+  // Wander v2 interaction log: the visited path and which step kinds were
+  // clicked — the data that lets step ranking be tuned from real behavior.
+  const path = Array.isArray(body?.path)
+    ? body.path.filter((x: unknown) => typeof x === "string").slice(0, 500)
+    : null;
+  const stepsTaken = Array.isArray(body?.stepsTaken)
+    ? body.stepsTaken.filter((x: unknown) => typeof x === "string").slice(0, 500)
+    : null;
 
   db.insert(wanderSessions)
     .values({
@@ -146,6 +170,8 @@ app.post("/api/wander/sessions", async (c) => {
       startedAt,
       endedAt: new Date(now),
       ideasVisited,
+      pathJson: path ? JSON.stringify(path) : null,
+      stepsTakenJson: stepsTaken ? JSON.stringify(stepsTaken) : null,
     })
     .run();
 
