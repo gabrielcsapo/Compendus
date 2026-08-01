@@ -27,6 +27,7 @@ final class DownloadedBook {
     var readingProgress: Double     // 0.0 - 1.0
     var lastPosition: String?       // Format-specific position (page number, CFI, timestamp)
     var isRead: Bool = false        // Explicitly marked as read/completed
+    var isSetAside: Bool = false    // Deliberately removed from Today; progress remains intact
     var rating: Int?                // 1-5 star rating, nil = unrated
     var review: String?             // Free-text review
     var series: String?
@@ -36,6 +37,9 @@ final class DownloadedBook {
     var chaptersData: Data?         // JSON encoded chapters for audiobooks
     var pageCount: Int?             // Comics page count (cached)
     var epubLocalPath: String?       // Local path for converted EPUB version
+    var epubArtifactSHA256: String = ""
+    var epubArtifactByteLength: Int64 = 0
+    var epubVerificationStatus: String?
     var transcriptData: Data?        // JSON encoded transcript for audiobooks
     var ttsTranscriptData: Data?      // JSON encoded transcript from TTS generation
     var ttsVoiceId: Int?              // Voice index used for TTS generation (cache invalidation key)
@@ -50,6 +54,13 @@ final class DownloadedBook {
     /// and downloads seed from server metadata), this is never written by sync,
     /// so local reading always pushes even if `lastReadAt` is stale.
     var localProgressUpdatedAt: Date?
+    /// Immutable offline artifact identity and last local verification result.
+    var artifactId: String = ""
+    var artifactSHA256: String = ""
+    var artifactVersion: Int = 0
+    var ccdVersion: String?
+    var verificationStatus: String = "unverified" // verified | unverified | missing | corrupt
+    var verifiedAt: Date?
 
     init(
         id: String,
@@ -88,6 +99,7 @@ final class DownloadedBook {
         self.readingProgress = 0.0
         self.lastPosition = nil
         self.isRead = false
+        self.isSetAside = false
         self.rating = nil
         self.review = nil
         self.series = series
@@ -246,9 +258,12 @@ final class DownloadedBook {
             chaptersData = try? JSONEncoder().encode(chapters)
         }
 
-        // Sync read status, rating, and review from server
+        // Sync reading intent, read status, rating, and review from server
         if let serverIsRead = book.isRead {
             isRead = serverIsRead
+        }
+        if let serverIsSetAside = book.isSetAside {
+            isSetAside = serverIsSetAside
         }
         if let serverRating = book.rating {
             rating = serverRating
@@ -296,6 +311,7 @@ final class DownloadedBook {
             pageCount: book.pageCount
         )
         downloaded.isRead = book.isRead ?? false
+        downloaded.isSetAside = book.isSetAside ?? false
         downloaded.rating = book.rating
         downloaded.review = book.review
         downloaded.ccdStatus = book.ccdStatus

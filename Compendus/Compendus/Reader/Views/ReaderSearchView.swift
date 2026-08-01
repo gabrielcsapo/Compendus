@@ -146,8 +146,6 @@ struct ReaderSearchView: View {
         let matchText = String(snippet[matchRange])
         let afterMatch = String(snippet[matchRange.upperBound..<snippet.endIndex])
 
-        (Text(beforeMatch) +
-         Text(matchText).bold().foregroundColor(themeManager.accentColor) +
-         Text(afterMatch))
+        Text("\(Text(beforeMatch))\(Text(matchText).bold().foregroundColor(themeManager.accentColor))\(Text(afterMatch))")
     }
 }

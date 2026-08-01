@@ -39,10 +39,16 @@ app.use("/api/sync/*", requireProfile);
 // --- Reading Progress ---
 
 // GET /api/sync/reading-progress — Get all reading progress for current profile
-// Includes full book metadata so clients can display books not yet downloaded
+// Includes book metadata so clients can display books not yet downloaded. New
+// clients may request only active unfinished-book metadata to keep sync small.
 app.get("/api/sync/reading-progress", (c) => {
   const profileId = c.get("profileId");
   const since = c.req.query("since");
+  // Older clients expect a complete book object on every row, so `all` remains
+  // the default. Newer clients can request `active`, which only attaches book
+  // metadata to rows they may show as an unfinished remote book. Progress and
+  // per-device positions are never filtered by this option.
+  const bookMetadata = c.req.query("bookMetadata") === "active" ? "active" : "all";
   const limit = Math.min(parseInt(c.req.query("limit") || "500", 10), 1000);
   const offset = parseInt(c.req.query("offset") || "0", 10);
   const baseUrl = new URL(c.req.url).origin;
@@ -88,33 +94,45 @@ app.get("/api/sync/reading-progress", (c) => {
 
   return c.json({
     success: true,
-    data: results.map(({ state: row, book }) => ({
-      bookId: row.bookId,
-      readingProgress: row.readingProgress,
-      lastPosition: row.lastPosition,
-      lastReadAt: tsToISOOrNull(row.lastReadAt),
-      isRead: row.isRead ?? false,
-      rating: row.rating,
-      review: row.review,
-      updatedAt: tsToISO(row.updatedAt),
-      devices: (devicesByBook.get(row.bookId) ?? []).map((d) => ({
-        deviceId: d.deviceId,
-        deviceName: d.deviceName,
-        deviceType: d.deviceType,
-        readingProgress: d.readingProgress,
-        lastPosition: d.lastPosition,
-        lastReadAt: tsToISOOrNull(d.lastReadAt),
-        updatedAt: tsToISO(d.updatedAt),
-      })),
-      book: toApiBook(book, baseUrl, {
-        isRead: row.isRead,
+    data: results.map(({ state: row, book }) => {
+      const includeBook =
+        bookMetadata === "all" ||
+        ((row.readingProgress ?? 0) > 0 && !(row.isRead ?? false) && !(row.isSetAside ?? false));
+
+      return {
+        bookId: row.bookId,
+        readingProgress: row.readingProgress,
+        lastPosition: row.lastPosition,
+        lastReadAt: tsToISOOrNull(row.lastReadAt),
+        isRead: row.isRead ?? false,
+        isSetAside: row.isSetAside ?? false,
         rating: row.rating,
         review: row.review,
-        readingProgress: row.readingProgress,
-        lastReadAt: row.lastReadAt as Date | null,
-        lastPosition: row.lastPosition,
-      }),
-    })),
+        updatedAt: tsToISO(row.updatedAt),
+        devices: (devicesByBook.get(row.bookId) ?? []).map((d) => ({
+          deviceId: d.deviceId,
+          deviceName: d.deviceName,
+          deviceType: d.deviceType,
+          readingProgress: d.readingProgress,
+          lastPosition: d.lastPosition,
+          lastReadAt: tsToISOOrNull(d.lastReadAt),
+          updatedAt: tsToISO(d.updatedAt),
+        })),
+        ...(includeBook
+          ? {
+              book: toApiBook(book, baseUrl, {
+                isRead: row.isRead,
+                isSetAside: row.isSetAside,
+                rating: row.rating,
+                review: row.review,
+                readingProgress: row.readingProgress,
+                lastReadAt: row.lastReadAt as Date | null,
+                lastPosition: row.lastPosition,
+              }),
+            }
+          : {}),
+      };
+    }),
   });
 });
 
@@ -131,6 +149,7 @@ app.put("/api/sync/reading-progress", async (c) => {
     lastPosition?: string;
     lastReadAt?: string;
     isRead?: boolean;
+    isSetAside?: boolean;
     rating?: number | null;
     review?: string | null;
     updatedAt?: string;
@@ -180,6 +199,7 @@ app.put("/api/sync/reading-progress", async (c) => {
       if (refreshed && bookLevelWins) {
         const updates: Record<string, unknown> = {};
         if (body.isRead !== undefined) updates.isRead = body.isRead;
+        if (body.isSetAside !== undefined) updates.isSetAside = body.isSetAside;
         if (body.rating !== undefined) updates.rating = body.rating;
         if (body.review !== undefined) updates.review = body.review;
         if (Object.keys(updates).length > 0) {
@@ -203,6 +223,7 @@ app.put("/api/sync/reading-progress", async (c) => {
             readingProgress: existing.readingProgress,
             lastPosition: existing.lastPosition,
             isRead: existing.isRead ?? false,
+            isSetAside: existing.isSetAside ?? false,
             rating: existing.rating,
             review: existing.review,
           },
@@ -216,6 +237,7 @@ app.put("/api/sync/reading-progress", async (c) => {
       if (body.lastPosition !== undefined) updates.lastPosition = body.lastPosition;
       if (body.lastReadAt !== undefined) updates.lastReadAt = new Date(body.lastReadAt);
       if (body.isRead !== undefined) updates.isRead = body.isRead;
+      if (body.isSetAside !== undefined) updates.isSetAside = body.isSetAside;
       if (body.rating !== undefined) updates.rating = body.rating;
       if (body.review !== undefined) updates.review = body.review;
 
@@ -230,6 +252,7 @@ app.put("/api/sync/reading-progress", async (c) => {
           lastPosition: body.lastPosition ?? null,
           lastReadAt: body.lastReadAt ? new Date(body.lastReadAt) : null,
           isRead: body.isRead ?? false,
+          isSetAside: body.isSetAside ?? false,
           rating: body.rating ?? null,
           review: body.review ?? null,
           updatedAt: now,

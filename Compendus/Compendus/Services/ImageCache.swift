@@ -18,7 +18,9 @@ class ImageCache {
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
-        return URLSession(configuration: config, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+        let session = URLSession(configuration: config, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+        NetworkSessionRegistry.shared.registerDataSession(session)
+        return session
     }()
 
     /// Cover cache directory URL
@@ -68,6 +70,7 @@ class ImageCache {
             defer { inFlightRequests.removeValue(forKey: bookId) }
 
             do {
+                guard ConnectivityMonitor.shared.permitsNetworkRequests else { return nil }
                 let (data, _) = try await session.data(from: url)
                 guard let image = UIImage(data: data) else { return nil }
 
@@ -104,10 +107,12 @@ class ImageCache {
         }
 
         guard inFlightRequests[bookId] == nil else { return }
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { return }
 
         let task = Task<UIImage?, Never> {
             defer { inFlightRequests.removeValue(forKey: bookId) }
             do {
+                guard ConnectivityMonitor.shared.permitsNetworkRequests else { return nil }
                 let (data, _) = try await session.data(from: url)
                 guard let image = UIImage(data: data) else { return nil }
                 try? data.write(to: diskURL)

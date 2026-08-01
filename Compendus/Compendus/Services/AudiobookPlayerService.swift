@@ -32,12 +32,14 @@ class AudiobookPlayer: NSObject {
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var playerItemObserver: Any?
     @ObservationIgnored private var chapters: [Chapter] = []
-    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var timeObserverToken: Any?
+    @ObservationIgnored private var currentChapterIndex: Int?
     @ObservationIgnored private var progressSaveTimer: Timer?
     @ObservationIgnored private var currentSession: ReadingSession?
     @ObservationIgnored private var sessionContext: ModelContext?
     @ObservationIgnored private var lifecycleObserver: Any?
     @ObservationIgnored private var interruptionObserver: Any?
+    @ObservationIgnored private var lastWidgetReloadProgress: Double = -1
 
     override init() {
         super.init()
@@ -57,6 +59,7 @@ class AudiobookPlayer: NSObject {
         }
 
         currentBook = book
+        lastWidgetReloadProgress = -1
         setupAudioSession()
 
         guard let fileURL = book.fileURL else { return }
@@ -132,7 +135,7 @@ class AudiobookPlayer: NSObject {
             object: item,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.isPlaying = false
                 self?.stopTimer()
                 self?.saveProgress()
@@ -148,12 +151,14 @@ class AudiobookPlayer: NSObject {
         player?.rate = playbackRate
         isPlaying = true
         startTimer()
+        updateNowPlayingTime()
     }
 
     func pause() {
         player?.pause()
         isPlaying = false
         stopTimer()
+        updateNowPlayingTime()
     }
 
     func seek(to time: Double) {
@@ -242,7 +247,14 @@ class AudiobookPlayer: NSObject {
             lastReadAt: Date()
         )
         WidgetDataManager.shared.saveCurrentBook(widgetBook)
-        WidgetCenter.shared.reloadAllTimelines()
+        // Persist listening position every 30 seconds, but avoid waking every
+        // widget timeline unless the displayed whole-percent progress changes.
+        let displayedProgress = floor(progress * 100)
+        let lastDisplayedProgress = floor(lastWidgetReloadProgress * 100)
+        if lastWidgetReloadProgress < 0 || displayedProgress != lastDisplayedProgress {
+            WidgetCenter.shared.reloadAllTimelines()
+            lastWidgetReloadProgress = progress
+        }
     }
 
     // MARK: - Now Playing
@@ -321,7 +333,7 @@ class AudiobookPlayer: NSObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.saveProgress()
             }
         }
@@ -336,7 +348,7 @@ class AudiobookPlayer: NSObject {
             guard let info = notification.userInfo,
                   let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 if type == .began {
                     self?.isPlaying = false
                     self?.stopTimer()
@@ -359,27 +371,29 @@ class AudiobookPlayer: NSObject {
     // MARK: - Timers
 
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, let player = self.player else { return }
-                let t = player.currentTime().seconds
+        guard timeObserverToken == nil, let player else { return }
+        let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let t = time.seconds
                 guard !t.isNaN && !t.isInfinite else { return }
                 self.currentTime = t
                 self.updateCurrentChapter()
-                self.updateNowPlayingTime()
             }
         }
     }
 
     private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
+        guard let token = timeObserverToken else { return }
+        player?.removeTimeObserver(token)
+        timeObserverToken = nil
     }
 
     private func startProgressSaveTimer() {
         progressSaveTimer?.invalidate()
         progressSaveTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.saveProgress()
                 self?.updateListeningSession()
             }
@@ -397,17 +411,25 @@ class AudiobookPlayer: NSObject {
     private func updateCurrentChapter() {
         guard !chapters.isEmpty else {
             currentChapter = nil
+            currentChapterIndex = nil
             return
         }
 
-        for (index, chapter) in chapters.enumerated() {
+        // Ordinary playback stays inside the cached chapter, so the 4 Hz time
+        // observer avoids scanning the complete chapter list on every tick.
+        if let index = currentChapterIndex, chapters.indices.contains(index) {
+            let chapter = chapters[index]
             let nextStart = index + 1 < chapters.count ? chapters[index + 1].startTime : Double.infinity
             if currentTime >= chapter.startTime && currentTime < nextStart {
-                if currentChapter?.id != chapter.id {
-                    currentChapter = chapter
-                }
                 return
             }
+        }
+
+        let index = chapters.lastIndex { $0.startTime <= currentTime } ?? 0
+        currentChapterIndex = index
+        let chapter = chapters[index]
+        if currentChapter?.id != chapter.id {
+            currentChapter = chapter
         }
     }
 
@@ -462,11 +484,11 @@ class AudiobookPlayer: NSObject {
             playerItemObserver = nil
         }
         player?.pause()
+        stopTimer()
         player = nil
         isPlaying = false
         currentTime = 0
         duration = 0
-        stopTimer()
+        currentChapterIndex = nil
     }
 }
-

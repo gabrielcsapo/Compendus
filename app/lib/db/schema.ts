@@ -46,6 +46,7 @@ export const userBookState = sqliteTable(
     lastReadAt: integer("last_read_at", { mode: "timestamp" }),
     lastPosition: text("last_position"), // JSON: {type, spineIndex, charOffset, progress} or {type, page, progress}
     isRead: integer("is_read", { mode: "boolean" }).default(false),
+    isSetAside: integer("is_set_aside", { mode: "boolean" }).notNull().default(false),
     rating: integer("rating"), // 1-5, null = unrated
     review: text("review"), // free-text, null = no review
     updatedAt: integer("updated_at", { mode: "timestamp" })
@@ -421,6 +422,26 @@ export const wantedBooks = sqliteTable(
     uniqueIndex("idx_wanted_books_source").on(table.source, table.sourceId),
     index("idx_wanted_books_profile").on(table.profileId),
   ],
+);
+
+// Last-known-good discovery payload for each profile. Recommendation generation
+// is deliberately server-side and asynchronous: clients always receive this
+// persisted snapshot (or a deterministic fallback) even when Lemonade or the
+// wider internet is unavailable.
+export const curatedDiscovery = sqliteTable(
+  "curated_discovery",
+  {
+    profileId: text("profile_id")
+      .primaryKey()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    payload: text("payload").notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    modelId: text("model_id"),
+    generatedAt: integer("generated_at", { mode: "timestamp" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_curated_discovery_expires").on(table.expiresAt)],
 );
 
 // Background jobs queue (persistent job tracking for long-running tasks)
@@ -934,6 +955,31 @@ export const curriculumItems = sqliteTable(
   (table) => [uniqueIndex("idx_curriculum_items_pk").on(table.curriculumId, table.ordinal)],
 );
 
+// Provenance-first recall history. Questions themselves are deterministic read
+// models over lg_passage_concepts, so only attempts need durable storage. The
+// evidence passage is stored on every attempt to preserve the source chain even
+// if a Pod is recompiled into a later revision.
+export const podQuizAttempts = sqliteTable(
+  "pod_quiz_attempts",
+  {
+    id: text("id").primaryKey(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    podId: text("pod_id").notNull(),
+    questionId: text("question_id").notNull(),
+    evidencePassageId: text("evidence_passage_id")
+      .notNull()
+      .references(() => passages.id, { onDelete: "cascade" }),
+    selectedChoiceId: text("selected_choice_id").notNull(),
+    isCorrect: integer("is_correct", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index("idx_pod_attempts_profile").on(table.profileId, table.createdAt)],
+);
+
 // Saved wander paths — exploration that can be resumed, replayed, or narrated.
 export const trails = sqliteTable(
   "trails",
@@ -980,91 +1026,6 @@ export const topicLabels = sqliteTable("topic_labels", {
     .default(sql`(unixepoch())`),
 });
 
-// --- Idle Fleet compute fabric (wander-semantic-substrate-proposal.md §12) -----
-//
-// A generic, schema-blind work queue. Charging/idle devices (and an optional
-// guarded server worker) lease typed jobs, compute, and post validated results.
-// Payloads are opaque JSON; per-kind validators live in app/lib/fabric. The
-// fabric is an accelerator, never a dependency: nothing user-facing waits on it.
-
-export const workItems = sqliteTable(
-  "work_items",
-  {
-    id: text("id").primaryKey(),
-    project: text("project").notNull(), // 'compendus' | other tenants later
-    kind: text("kind").notNull(),
-    payload: text("payload").notNull(), // JSON, kind-specific, opaque to the queue
-    requirements: text("requirements").notNull().default("{}"), // JSON: {runtimes?, minRamClass?, estMinutes?}
-    priority: integer("priority").notNull().default(0), // higher leases first
-    deadline: integer("deadline", { mode: "timestamp" }),
-    status: text("status", { enum: ["queued", "leased", "done", "failed"] })
-      .notNull()
-      .default("queued"),
-    leaseOwner: text("lease_owner").references(() => fabricDevices.id, { onDelete: "set null" }),
-    leaseUntil: integer("lease_until", { mode: "timestamp" }),
-    /** When the current/last lease began — processing time = completedAt - leasedAt. */
-    leasedAt: integer("leased_at", { mode: "timestamp" }),
-    /** Permanent attribution: which device completed this item (leaseOwner clears). */
-    completedBy: text("completed_by"),
-    attempts: integer("attempts").notNull().default(0),
-    // sha256(kind \n stable(payload)) — dedupe key; completed artifacts add model_id
-    idempotencyKey: text("idempotency_key").notNull(),
-    result: text("result"), // JSON, validated by the kind's registered validator
-    error: text("error"), // last failure reason (validation or worker-reported)
-    artifactHash: text("artifact_hash").references(() => fabricArtifacts.hash, {
-      onDelete: "set null",
-    }),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(sql`(unixepoch())`),
-    completedAt: integer("completed_at", { mode: "timestamp" }),
-  },
-  (table) => [
-    index("idx_work_items_status").on(table.status, table.priority),
-    index("idx_work_items_idempotency").on(table.idempotencyKey),
-    index("idx_work_items_kind").on(table.kind),
-    // reapExpiredLeases runs on every device lease poll — without this it
-    // walks every leased row evaluating lease_until in memory.
-    index("idx_work_items_lease_expiry").on(table.status, table.leaseUntil),
-  ],
-);
-
-// Enrolled workers: identity (token), capability, and contribution counters.
-export const fabricDevices = sqliteTable(
-  "fabric_devices",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    platform: text("platform", { enum: ["macos", "ios", "ipados", "server"] }).notNull(),
-    capabilities: text("capabilities").notNull().default("{}"), // JSON: {runtimes: [...], ramClass}
-    tokenHash: text("token_hash").notNull(), // sha256 of the bearer token (shown once at enroll)
-    lastSeen: integer("last_seen", { mode: "timestamp" }),
-    jobsDone: integer("jobs_done").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(sql`(unixepoch())`),
-  },
-  (table) => [
-    // deviceByToken authenticates EVERY fabric request — keep it off a scan.
-    index("idx_fabric_devices_token_hash").on(table.tokenHash),
-  ],
-);
-
-// Content-addressed shared results: compute once, serve every device. Small
-// results inline in work_items.result; large ones live as blobs under
-// data/fabric/ with this row as the index.
-export const fabricArtifacts = sqliteTable("fabric_artifacts", {
-  hash: text("hash").primaryKey(), // sha256(kind | payloadHash | modelId)
-  kind: text("kind").notNull(),
-  modelId: text("model_id").notNull(), // pinned model name, or OS version for AFM
-  mime: text("mime").notNull(),
-  bytes: integer("bytes").notNull(),
-  path: text("path"), // relative blob path; NULL = result is inline on the work item
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
-
 // Type exports
 export type Profile = typeof profiles.$inferSelect;
 export type NewProfile = typeof profiles.$inferInsert;
@@ -1104,12 +1065,6 @@ export type BookImage = typeof bookImages.$inferSelect;
 export type NewBookImage = typeof bookImages.$inferInsert;
 export type WanderSession = typeof wanderSessions.$inferSelect;
 export type NewWanderSession = typeof wanderSessions.$inferInsert;
-export type WorkItem = typeof workItems.$inferSelect;
-export type NewWorkItem = typeof workItems.$inferInsert;
-export type FabricDevice = typeof fabricDevices.$inferSelect;
-export type NewFabricDevice = typeof fabricDevices.$inferInsert;
-export type FabricArtifact = typeof fabricArtifacts.$inferSelect;
-export type NewFabricArtifact = typeof fabricArtifacts.$inferInsert;
 export type Embedding = typeof embeddings.$inferSelect;
 export type PassageNeighbor = typeof passageNeighbors.$inferSelect;
 export type Topic = typeof topics.$inferSelect;

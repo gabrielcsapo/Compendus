@@ -11,6 +11,8 @@ import { ReadAloudBar } from "./ReadAloudBar";
 import { PageJumpSlider } from "./PageJumpSlider";
 import { PdfReaderView, type PdfReaderViewHandle } from "./PdfReaderView";
 import { THEMES } from "@/lib/reader/settings";
+import { useAudiobook, type AudiobookTrack } from "../audio/AudiobookProvider";
+import { AudioFAB } from "../audio/AudioFAB";
 
 interface ReaderShellProps {
   bookId: string;
@@ -20,6 +22,12 @@ interface ReaderShellProps {
   returnUrl?: string;
   formatOverride?: string;
   bookFormat?: string;
+  /** Audiobooks: the track handed to the global AudiobookProvider. */
+  audioTrack?: AudiobookTrack;
+  /** Exact resume second (iOS-compatible audio lastPosition, or deep link). */
+  initialAudioTime?: number;
+  /** True when a ?position= deep link should override an in-flight session. */
+  forceAudioSeek?: boolean;
 }
 
 /**
@@ -32,8 +40,21 @@ export function ReaderShell({
   returnUrl = "/",
   formatOverride: formatOverrideProp,
   bookFormat,
+  audioTrack,
+  initialAudioTime = 0,
+  forceAudioSeek = false,
 }: ReaderShellProps) {
   const { navigate } = useRouter();
+  const audiobook = useAudiobook();
+
+  // CLAIM the global player for this audiobook. load() is idempotent by bookId
+  // (same book already playing = adopt, keep position); nothing is released on
+  // unmount — closing the reader is exactly what keeps audio alive in the bar.
+  useEffect(() => {
+    if (!audioTrack) return;
+    audiobook.load(audioTrack, { startAt: initialAudioTime, forceSeek: forceAudioSeek });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioTrack?.bookId]);
   const [searchParams] = useSearchParams();
   const formatOverride = formatOverrideProp || searchParams.get("format") || undefined;
 
@@ -692,6 +713,11 @@ export function ReaderShell({
           {reader.currentPage} / {reader.totalPages}
         </div>
       </div>
+
+      {/* Read-while-listening: floating audio control when an audiobook plays
+          behind a text/comic/PDF reader (the audiobook's own reader shows the
+          full player instead). */}
+      {!audioTrack && <AudioFAB />}
     </div>
   );
 }

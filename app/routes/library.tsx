@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { getRequest } from "react-flight-router/server";
 import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
 import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
@@ -29,18 +28,18 @@ function getSortParams(sort: SortOption): {
   }
 }
 
-export default function Library() {
-  return (
-    <Suspense fallback={<LibrarySkeleton />}>
-      <LibraryData />
-    </Suspense>
-  );
+export default async function Library() {
+  // Await route data before handing a new segment to the client. During
+  // filter/sort navigations the router can keep the useful current grid on
+  // screen instead of replacing it with a full-page fallback.
+  return LibraryData();
 }
 
 async function LibraryData() {
   const request = getRequest()!;
   const url = new URL(request.url);
   const searchParams = url.searchParams;
+  const isHomePath = url.pathname === "/";
 
   const view = searchParams.get("view");
   const seriesFilter = searchParams.get("series");
@@ -54,10 +53,11 @@ async function LibraryData() {
   const { orderBy, order } = getSortParams(sort);
   const typeFilter = type !== "all" ? type : undefined;
 
-  // Default view (no view param and no series filter) → curated explore view.
+  // The root route is the calm, curated Home surface. `/library` is the
+  // complete catalog, even when it has no explicit `view` query parameter.
   // Only the two cheap counts are awaited here so the header paints immediately;
   // each curated section streams in via its own Suspense boundary in the slot.
-  if (!view && !seriesFilter) {
+  if (isHomePath && !view && !seriesFilter) {
     const [totalCount, unmatchedCount] = await Promise.all([
       getBooksCount(typeFilter),
       getUnmatchedBooksCount(),
@@ -81,7 +81,6 @@ async function LibraryData() {
         exploreSlot={
           totalCount === 0 ? <EmptyLibrary /> : <ExploreSections typeFilter={typeFilter} />
         }
-        initialSearchParamsKey={searchParams.toString()}
       />
     );
   }
@@ -110,7 +109,6 @@ async function LibraryData() {
           formatCounts: [],
           otherFormatBooks: [],
         }}
-        initialSearchParamsKey={searchParams.toString()}
       />
     );
   }
@@ -148,31 +146,6 @@ async function LibraryData() {
         formatCounts,
         otherFormatBooks,
       }}
-      initialSearchParamsKey={searchParams.toString()}
     />
-  );
-}
-
-function LibrarySkeleton() {
-  return (
-    <main className="container my-8 px-6 mx-auto">
-      <div className="animate-pulse">
-        <div className="h-8 bg-surface-elevated rounded w-32 mb-2" />
-        <div className="h-4 bg-surface-elevated rounded w-24 mb-8" />
-        <div className="flex gap-3 mb-8">
-          <div className="h-10 bg-surface-elevated rounded w-24" />
-          <div className="h-10 bg-surface-elevated rounded w-24" />
-          <div className="h-10 bg-surface-elevated rounded w-24" />
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i}>
-              <div className="aspect-[2/3] bg-surface-elevated rounded-lg" />
-              <div className="h-3 bg-surface-elevated rounded w-20 mt-2" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </main>
   );
 }

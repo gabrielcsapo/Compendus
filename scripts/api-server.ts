@@ -1,6 +1,6 @@
 /**
  * Standalone API server — the Hono app without the flight router. Used by the
- * fabric/substrate E2E flows and as a dev workaround while `pnpm dev`'s SSR
+ * substrate E2E flows and as a dev workaround while `pnpm dev`'s SSR
  * environment has the react-server condition issue.
  *
  * Usage: [COMPENDUS_DATA_DIR=...] pnpm tsx scripts/api-server.ts [--port 3002]

@@ -11,13 +11,29 @@ import SwiftUI
 
 struct ExploreViewModel: Codable {
     let sections: [ExploreSection]
+    let purchases: [ExplorePurchaseIdea]?
+    let curatedAt: String?
+    let curationSource: String?
 }
 
 struct ExploreSection: Codable, Identifiable {
     let id: String
     let title: String
+    let subtitle: String?
     let books: [Book]
+    let reasons: [String: String]?
     let action: ExploreAction?
+}
+
+struct ExplorePurchaseIdea: Codable, Identifiable {
+    let id: String
+    let title: String
+    let authors: [String]
+    let formatHint: String
+    let reason: String
+    let coverUrl: String?
+    let isbn13: String?
+    let purchaseUrl: String
 }
 
 struct ExploreAction: Codable {
@@ -69,6 +85,9 @@ struct ExploreView: View {
                         onBookTap: onBookTap,
                         onSeeAll: seeAllAction(for: section)
                     )
+                }
+                if let purchases = vm.purchases, !purchases.isEmpty {
+                    ExplorePurchaseSection(items: purchases)
                 }
             }
             .padding(.vertical, 16)
@@ -142,10 +161,18 @@ private struct ExploreSectionView: View {
         VStack(alignment: .leading, spacing: 10) {
             // Header
             HStack(alignment: .firstTextBaseline) {
-                Text(section.title)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(section.title)
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                    if let subtitle = section.subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 20)
 
                 Spacer()
 
@@ -161,8 +188,14 @@ private struct ExploreSectionView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(section.books) { book in
-                        ExploreBookCard(book: book)
-                            .onTapGesture { onBookTap(book) }
+                        Button {
+                            onBookTap(book)
+                        } label: {
+                            ExploreBookCard(book: book, reason: section.reasons?[book.id])
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(book.title), by \(book.authorsDisplay)")
+                        .accessibilityHint("Opens book details")
                     }
                 }
                 .padding(.horizontal, 20)
@@ -175,6 +208,7 @@ private struct ExploreSectionView: View {
 
 private struct ExploreBookCard: View {
     let book: Book
+    let reason: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -217,10 +251,75 @@ private struct ExploreBookCard: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if let reason {
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundStyle(.tint)
+                        .lineLimit(3)
+                        .padding(.top, 2)
+                }
             }
         }
         .frame(width: cardWidth)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+    }
+}
+
+// MARK: - Verified purchase ideas
+
+private struct ExplorePurchaseSection: View {
+    let items: [ExplorePurchaseIdea]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Consider Adding")
+                    .font(.title3.weight(.semibold))
+                Text("Verified titles you do not currently own. Buying requires internet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(items) { item in
+                        if let url = URL(string: item.purchaseUrl) {
+                            Link(destination: url) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(.tint.opacity(0.12))
+                                        Image(systemName: item.formatHint == "audiobook" ? "headphones" : item.formatHint == "comic" ? "text.bubble" : "book.closed")
+                                            .font(.title)
+                                            .foregroundStyle(.tint)
+                                    }
+                                    .frame(width: 132, height: 92)
+                                    Text(item.title)
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                    Text(item.authors.first ?? "Unknown author")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Text(item.reason)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tint)
+                                        .lineLimit(3)
+                                }
+                                .frame(width: 132, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Opens a purchase search in your browser")
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
     }
 }
 

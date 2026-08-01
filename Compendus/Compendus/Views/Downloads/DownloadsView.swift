@@ -73,7 +73,7 @@ struct DownloadsView: View {
     private var allBooks: [DownloadedBook]
 
     @Query(
-        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil && !$0.isRead },
+        filter: #Predicate<DownloadedBook> { $0.lastReadAt != nil && !$0.isRead && !$0.isSetAside },
         sort: \DownloadedBook.lastReadAt,
         order: .reverse
     )
@@ -107,7 +107,7 @@ struct DownloadsView: View {
     @State private var deleteError: String?
     @State private var navigationPath = NavigationPath()
     @State private var selectedRemoteBook: Book? = nil
-    @State private var greetingText: String = ""
+    @State private var suggestedBooks: [Book] = []
     @FocusState private var isSearchFocused: Bool
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -178,11 +178,15 @@ struct DownloadsView: View {
         }
 
         let progressRemoteItems = syncService.remoteBooksWithProgress
-            .filter { !localIds.contains($0.id) }
+            .filter { !localIds.contains($0.id) && $0.isSetAside != true }
             .map(item(for:))
 
         let highlightOnlyRemoteItems = syncService.remoteBooksWithHighlights
-            .filter { !localIds.contains($0.id) && !progressIds.contains($0.id) }
+            .filter {
+                !localIds.contains($0.id) &&
+                !progressIds.contains($0.id) &&
+                $0.isSetAside != true
+            }
             .map(item(for:))
 
         return (localItems + progressRemoteItems + highlightOnlyRemoteItems)
@@ -190,7 +194,6 @@ struct DownloadsView: View {
     }
 
     var body: some View {
-        @Bindable var nav = appNavigation
         NavigationStack(path: $navigationPath) {
             mainContent
                 #if targetEnvironment(macCatalyst)
@@ -198,50 +201,6 @@ struct DownloadsView: View {
                 .navigationTitle("")
                 #else
                 .toolbar(.hidden, for: .navigationBar)
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundStyle(.secondary)
-                                .font(.subheadline)
-                            TextField(searchPrompt, text: $searchText)
-                                .textFieldStyle(.plain)
-                                .font(.subheadline)
-                                .submitLabel(.search)
-                                .focused($isSearchFocused)
-                            if !searchText.isEmpty || isSearchFocused {
-                                Button("Cancel") {
-                                    searchText = ""
-                                    isSearchFocused = false
-                                }
-                                .font(.subheadline)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color(.secondarySystemFill))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .animation(.easeInOut(duration: 0.2), value: isSearchFocused || !searchText.isEmpty)
-
-                        if downloadManager.isSyncingMetadata {
-                            HStack(spacing: 4) {
-                                ProgressView().controlSize(.mini)
-                                Text("Syncing...").font(.caption2).foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 4)
-                        }
-
-                        FilterChipBar(chips: homeChips, selectedId: $nav.homeFilterChipId)
-                            .padding(.vertical, 4)
-                        Divider()
-                    }
-                    .background(.ultraThinMaterial)
-                }
                 #endif
                 .navigationDestination(for: DownloadedBook.self) { book in
                     DownloadedBookDetailView(book: book) { seriesName in
@@ -306,12 +265,12 @@ struct DownloadsView: View {
                 .task {
                     recomputeFilteredBooks()
                     recomputeSeriesItems()
-                    await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
+                    if ConnectivityMonitor.shared.permitsNetworkRequests {
+                        await loadSuggestions()
+                        await downloadManager.syncDownloadedBooksMetadata(modelContext: modelContext)
+                    }
                     // Clean up stale failed download entries on launch
                     downloadManager.cleanupStaleFailedDownloads()
-                    // Set greeting
-                    let hour = Calendar.current.component(.hour, from: Date())
-                    greetingText = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
                 }
                 .onChange(of: searchText) { _, _ in recomputeFilteredBooks() }
                 .onChange(of: appNavigation.homeFilterChipId) { _, _ in
@@ -327,7 +286,9 @@ struct DownloadsView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Retry failed downloads when app returns to foreground (network may have recovered)
-                    downloadManager.retryFailedDownloads(modelContext: modelContext)
+                    if ConnectivityMonitor.shared.permitsNetworkRequests {
+                        downloadManager.retryFailedDownloads(modelContext: modelContext)
+                    }
                 }
                 .alert("Delete Failed", isPresented: $showingDeleteError) {
                     Button("OK", role: .cancel) { }
@@ -355,15 +316,19 @@ struct DownloadsView: View {
         !continueReadingItems.isEmpty && searchText.isEmpty && effectiveFilter == .all && !isSeriesMode
     }
 
+    private var showsSuggestions: Bool {
+        !suggestedBooks.isEmpty && searchText.isEmpty && effectiveFilter == .all && !isSeriesMode
+    }
+
     @ViewBuilder
     private var mainContent: some View {
-        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty {
+        if books.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && syncService.remoteBooksWithProgress.isEmpty && syncService.remoteBooksWithHighlights.isEmpty && suggestedBooks.isEmpty {
             DownloadsEmptyStateView {
                 appNavigation.selectedTab = 1
             }
         } else if isSeriesMode {
             seriesGridContent
-        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && !showsContinueReading {
+        } else if cachedFilteredBooks.isEmpty && !hasActiveDownloads && !transcriptionService.isActive && !showsContinueReading && !showsSuggestions {
             filteredEmptyState
         } else {
             booksScrollContent
@@ -372,14 +337,17 @@ struct DownloadsView: View {
 
     @ViewBuilder
     private var filteredEmptyState: some View {
-        if !searchText.isEmpty {
-            SearchEmptyStateView(query: searchText)
-        } else {
-            EmptyStateView(
-                icon: effectiveFilter.icon,
-                title: "No \(effectiveFilter.rawValue)",
-                description: "No \(effectiveFilter.rawValue.lowercased()) found in your downloads."
-            )
+        VStack(spacing: 0) {
+            deviceBrowseControls
+            if !searchText.isEmpty {
+                SearchEmptyStateView(query: searchText)
+            } else {
+                EmptyStateView(
+                    icon: effectiveFilter.icon,
+                    title: "No \(effectiveFilter.rawValue)",
+                    description: "No \(effectiveFilter.rawValue.lowercased()) found in your downloads."
+                )
+            }
         }
     }
 
@@ -388,17 +356,22 @@ struct DownloadsView: View {
     @ViewBuilder
     private var seriesGridContent: some View {
         if filteredSeriesItems.isEmpty {
-            if !searchText.isEmpty {
-                SearchEmptyStateView(query: searchText)
-            } else {
-                EmptyStateView(
-                    icon: "books.vertical",
-                    title: "No Series",
-                    description: "Downloaded books with series metadata will appear here."
-                )
+            VStack(spacing: 0) {
+                deviceBrowseControls
+                if !searchText.isEmpty {
+                    SearchEmptyStateView(query: searchText)
+                } else {
+                    EmptyStateView(
+                        icon: "books.vertical",
+                        title: "No Series",
+                        description: "Downloaded books with series metadata will appear here."
+                    )
+                }
             }
         } else {
             ScrollView {
+                deviceBrowseControls
+
                 LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(filteredSeriesItems) { series in
                         DownloadedSeriesGridItem(series: series)
@@ -437,11 +410,14 @@ struct DownloadsView: View {
                     },
                     onDownloadBook: { book in
                         Task {
-                            try? await downloadManager.downloadBook(book, modelContext: modelContext)
+                            _ = try? await downloadManager.downloadBook(book, modelContext: modelContext)
                         }
                     },
                     onMarkAsRead: { book in
                         toggleReadStatus(for: book)
+                    },
+                    onSetAside: { item in
+                        setAside(item)
                     },
                     onViewDetails: { book in
                         navigationPath.append(book)
@@ -449,6 +425,10 @@ struct DownloadsView: View {
                 )
                 .padding(.top, 16)
                 .padding(.bottom, 8)
+            }
+
+            if showsSuggestions {
+                maybeNextSection
             }
 
             // Active downloads section
@@ -460,6 +440,13 @@ struct DownloadsView: View {
             if transcriptionService.isActive {
                 activeTranscriptionSection
             }
+
+            if !books.isEmpty {
+                OfflineReadinessCard(books: books)
+                    .padding(.top, 12)
+            }
+
+            deviceBrowseControls
 
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(cachedFilteredBooks) { book in
@@ -479,6 +466,14 @@ struct DownloadsView: View {
                             )
                         }
 
+                        if book.isSetAside {
+                            Button {
+                                restoreToToday(book)
+                            } label: {
+                                Label("Return to Today", systemImage: "arrow.uturn.backward.circle")
+                            }
+                        }
+
                         Button(role: .destructive) {
                             bookToDelete = book
                             showingDeleteConfirmation = true
@@ -495,6 +490,81 @@ struct DownloadsView: View {
     }
 
     // MARK: - Toolbar
+
+    private var homeFilterBinding: Binding<String> {
+        Binding(
+            get: { appNavigation.homeFilterChipId },
+            set: { appNavigation.homeFilterChipId = $0 }
+        )
+    }
+
+    private var deviceBrowseControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("On This Device")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                if downloadManager.isSyncingMetadata {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 20)
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                TextField(searchPrompt, text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline)
+                    .submitLabel(.search)
+                    .focused($isSearchFocused)
+                if !searchText.isEmpty || isSearchFocused {
+                    Button("Cancel") {
+                        searchText = ""
+                        isSearchFocused = false
+                    }
+                    .font(.subheadline)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemFill))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 20)
+
+            FilterChipBar(chips: homeChips, selectedId: homeFilterBinding)
+        }
+        .padding(.top, 16)
+    }
+
+    private var maybeNextSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Maybe Next")
+                    .font(.title3.weight(.semibold))
+                Text("A few gentle possibilities from your library")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(suggestedBooks) { book in
+                        Button {
+                            openSuggestedBook(book)
+                        } label: {
+                            TodaySuggestionCard(book: book)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+        .padding(.vertical, 8)
+    }
 
     // MARK: - Active Downloads Section
 
@@ -667,6 +737,76 @@ struct DownloadsView: View {
         }
     }
 
+    private func setAside(_ item: ContinueReadingItem) {
+        switch item {
+        case .downloaded(let book):
+            book.isSetAside = true
+            book.localProgressUpdatedAt = Date()
+            queueSetAsideEdit(bookId: book.id, isSetAside: true)
+        case .remote(let book):
+            syncService.hideRemoteBookFromToday(bookId: book.id)
+            queueSetAsideEdit(bookId: book.id, isSetAside: true)
+        }
+    }
+
+    private func restoreToToday(_ book: DownloadedBook) {
+        book.isSetAside = false
+        book.localProgressUpdatedAt = Date()
+        queueSetAsideEdit(bookId: book.id, isSetAside: false)
+    }
+
+    private func queueSetAsideEdit(bookId: String, isSetAside: Bool) {
+        guard let edit = PendingBookEdit.setAside(bookId: bookId, isSetAside: isSetAside) else {
+            return
+        }
+        edit.profileId = serverConfig.selectedProfileId ?? ""
+        modelContext.insert(edit)
+        do {
+            try modelContext.save()
+        } catch {
+            print("[DownloadsView] Failed to queue Set Aside edit: \(error)")
+        }
+    }
+
+    private func loadSuggestions() async {
+        guard let explore = try? await apiService.fetchExplore() else { return }
+        let activeIds = Set(continueReadingItems.map(\.id))
+        let preferredSections = ["read_next_in_series", "recently_added"]
+        var seen = Set<String>()
+        var result: [Book] = []
+
+        for sectionId in preferredSections {
+            guard let section = explore.sections.first(where: { $0.id == sectionId }) else { continue }
+            for book in section.books where
+                !activeIds.contains(book.id) &&
+                book.isRead != true &&
+                book.isSetAside != true &&
+                (book.readingProgress ?? 0) == 0 &&
+                seen.insert(book.id).inserted {
+                result.append(book)
+                if result.count == 6 { break }
+            }
+            if result.count == 6 { break }
+        }
+
+        suggestedBooks = result
+    }
+
+    private func openSuggestedBook(_ book: Book) {
+        if let downloaded = books.first(where: { $0.id == book.id }) {
+            if downloaded.isAudiobook {
+                Task {
+                    await audiobookPlayer.loadBook(downloaded)
+                    audiobookPlayer.isFullPlayerPresented = true
+                }
+            } else {
+                bookToRead = downloaded
+            }
+        } else {
+            selectedRemoteBook = book
+        }
+    }
+
     private func recomputeFilteredBooks() {
         var result = books
         if effectiveFilter != .all {
@@ -708,6 +848,38 @@ struct DownloadsView: View {
             showingDeleteError = true
         }
         bookToDelete = nil
+    }
+}
+
+private struct TodaySuggestionCard: View {
+    let book: Book
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var width: CGFloat { LibraryLayout.carouselCoverWidth(horizontalSizeClass) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
+                .aspectRatio(LibraryLayout.coverAspect, contentMode: .fit)
+                .frame(width: width)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(color: .black.opacity(0.14), radius: 3, y: 2)
+
+            Text(book.title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+
+            Text(book.authorsDisplay)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: width, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title), by \(book.authorsDisplay)")
+        .accessibilityHint("Opens book details")
     }
 }
 

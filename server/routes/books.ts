@@ -86,6 +86,7 @@ app.put("/api/books/:id", async (c) => {
     "seriesNumber",
     "bookTypeOverride",
     "isRead",
+    "isSetAside",
     "rating",
     "review",
   ];

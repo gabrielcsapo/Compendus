@@ -27,8 +27,6 @@ import { chunkSections, type PassageChunk } from "./chunker";
 import { embedBatch, vectorToBuffer, EMBEDDING_MODEL } from "./embeddings";
 import { linkBook, rebuildStructureIfDue } from "./substrate";
 import { extractEntitiesBatch, ensureGlinerReady, type GlinerEntity } from "./gliner-extract";
-import { enqueueWork, runtimeOnFleet, waitForWorkResult } from "../fabric";
-import "../fabric/kinds";
 import {
   applyExtraction,
   upsertStatus,
@@ -61,8 +59,8 @@ export async function analyzeBook(
   bookId: string,
   opts: AnalyzeOptions = {},
 ): Promise<AnalyzeResult> {
-  // Fire-and-continue books finalize from the fleet apply hook; anything
-  // orphaned at "running" >2h flips to error here so the sweep re-picks it.
+  // Anything orphaned at "running" >2h flips to error here so the sweep
+  // re-picks it (crash/abort mid-analysis).
   recoverStaleAnalyses();
   try {
     return await runAnalysis(bookId, opts);
@@ -182,49 +180,12 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
   const imageCount = persistImages(bookId, src.sections, passageRefs);
   log(`persisted ${imageCount} figures`);
 
-  // 5. Embeddings for semantic search — FLEET FIRST: this was the last heavy
-  //    inference still running on the box. If a device with the onnx-embed
-  //    runtime checked in recently, ship the passage ids (texts fetched by
-  //    ref) and wait briefly — a laptop embeds a book in seconds, and the
-  //    reembed-book apply hook writes the vectors straight into the substrate
-  //    embeddings table. Local best-effort inference stays the fallback
-  //    (per-batch timeout + circuit breaker — onnxruntime has deadlocked in
-  //    this container before; a stall degrades wander but never blocks).
+  // 5. Embeddings for semantic search — local best-effort inference (per-batch
+  //    timeout + circuit breaker — onnxruntime has deadlocked under cgroup CPU
+  //    limits before; a stall degrades wander but never blocks).
   onProgress?.(15, "Embedding passages for semantic search…");
   const payloadIds = chunks.map((_c, x) => passageRefs[x].id);
-  let embedded = 0;
-  if (runtimeOnFleet("onnx-embed")) {
-    try {
-      const { item } = enqueueWork({
-        project: "compendus",
-        kind: "reembed-book",
-        payload: { bookId, model: EMBEDDING_MODEL, passageIds: payloadIds },
-        requirements: { runtimes: ["onnx-embed"], estMinutes: 2 },
-      });
-      log(`embedding offered to the fleet (${chunks.length} passages)…`);
-      const beat = setInterval(() => onProgress?.(15, "Fleet is embedding…"), 20_000);
-      try {
-        const res = await waitForWorkResult(item.id, {
-          timeoutMs: 4 * 60 * 1000,
-          leaseWithinMs: 90 * 1000,
-          signal,
-        });
-        if (res) {
-          embedded = chunks.length;
-          log("fleet embedded the book — skipping local inference");
-        } else {
-          log("fleet didn't embed in time — embedding locally");
-        }
-      } finally {
-        clearInterval(beat);
-      }
-    } catch (e) {
-      log(`fleet embedding unavailable (${e instanceof Error ? e.message : e}); embedding locally`);
-    }
-  }
-  if (embedded === 0) {
-    embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress, aborted);
-  }
+  const embedded = await embedPassagesBestEffort(chunks, passageRefs, log, onProgress, aborted);
   log(`embedded ${embedded}/${chunks.length} passages`);
 
   // 5b. Link into the semantic substrate (kNN graph, topics, centrality,
@@ -243,8 +204,7 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
       if (stats) {
         log(`substrate linked: ${stats.topicCount} topics, ${stats.bridgeCount} bridges`);
         // A rebuild mints new/reshaped topics. Touch the atlas read-models so
-        // their lazy naming enqueues fire NOW — otherwise the fleet sits idle
-        // until someone happens to open /journeys.
+        // their lazy label synthesis runs NOW instead of on first /journeys open.
         try {
           const atlas = await import("./atlas");
           atlas.listRealms(undefined);
@@ -261,61 +221,13 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
     }
   }
 
-  // 6. Entity extraction — FLEET FIRST, fire-and-continue. GLiNER inference is
-  //    the box's heaviest CPU; if a fleet device with the gliner runtime (the
-  //    Node harness on a charging laptop) checked in recently, enqueue the
-  //    passages and RETURN: the queue slot frees for the next book while the
-  //    fleet chews. The extract-entities apply hook runs the full
-  //    post-processing when the result lands and finalizes book_analysis —
-  //    until then the book stays "running"; onFailed (or the 2h stale-running
-  //    recovery) flips abandoned runs to error so the sweep re-picks them.
-  onProgress?.(19, "Extracting entities…");
-  let fleetEntities: GlinerEntity[][] | null = null;
-  if (runtimeOnFleet("gliner")) {
-    try {
-      const { item, deduped } = enqueueWork({
-        project: "compendus",
-        kind: "extract-entities",
-        payload: {
-          bookId,
-          // resultContract busts the content-addressed cache across contract
-          // changes (v2 added offsets; v3 dropped inline text for ids).
-          resultContract: 3,
-          sourceKind,
-          passageIds: payloadIds,
-        },
-        requirements: { runtimes: ["gliner"], estMinutes: 5 },
-      });
-      // Re-analysis mints new passage ids, so a dedupe hit is near-impossible —
-      // but if one lands on a done item, reuse its cached spans inline.
-      if (deduped && item.status === "done" && item.result) {
-        const cached = JSON.parse(item.result) as { entities?: GlinerEntity[][] };
-        if (Array.isArray(cached.entities) && cached.entities.length === chunks.length) {
-          fleetEntities = cached.entities;
-          log("fleet cache hit — reusing previous extraction result");
-        }
-      }
-      if (!fleetEntities) {
-        log(
-          `extraction offloaded to fleet (${chunks.length} passages) — analysis finishes in background`,
-        );
-        onProgress?.(100, "Entity extraction offloaded to the fleet");
-        return { passageCount: chunks.length, entityCount: 0, relationshipCount: 0, imageCount };
-      }
-    } catch (e) {
-      log(`fleet extraction unavailable (${e instanceof Error ? e.message : e}); running locally`);
-    }
-  }
-  if (!fleetEntities) {
-    onProgress?.(19, "Loading entity model…");
-    log("loading GLiNER…");
-    await ensureGlinerReady(onLog);
-    log("GLiNER ready; extracting entities…");
-  }
+  // 6. Entity extraction — GLiNER, in-process.
+  onProgress?.(19, "Loading entity model…");
+  log("loading GLiNER…");
+  await ensureGlinerReady(onLog);
+  log("GLiNER ready; extracting entities…");
 
-  // 7. Run inference in batches (one encoder forward pass per batch). The
-  //    spans then go through the SAME post-processing module the fleet apply
-  //    hook uses, so both paths produce identical graphs.
+  // 7. Run inference in batches (one encoder forward pass per batch).
   const allEntities: GlinerEntity[][] = [];
   for (let i = 0; i < chunks.length; i += EXTRACT_BATCH) {
     if (aborted()) {
@@ -329,18 +241,14 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
       };
     }
     const slice = chunks.slice(i, i + EXTRACT_BATCH);
-    if (fleetEntities) {
-      allEntities.push(...fleetEntities.slice(i, i + EXTRACT_BATCH));
-    } else {
-      try {
-        const batch = await withTimeout(extractEntitiesBatch(slice.map((c) => c.text)), 60000);
-        allEntities.push(...batch);
-      } catch (e) {
-        log(
-          `extraction stalled at ${i}/${chunks.length} (${e instanceof Error ? e.message : "error"}); skipping batch`,
-        );
-        for (let j = 0; j < slice.length; j++) allEntities.push([]);
-      }
+    try {
+      const batch = await withTimeout(extractEntitiesBatch(slice.map((c) => c.text)), 60000);
+      allEntities.push(...batch);
+    } catch (e) {
+      log(
+        `extraction stalled at ${i}/${chunks.length} (${e instanceof Error ? e.message : "error"}); skipping batch`,
+      );
+      for (let j = 0; j < slice.length; j++) allEntities.push([]);
     }
     onProgress?.(
       20 + Math.round((i / chunks.length) * 70),
@@ -352,7 +260,7 @@ async function runAnalysis(bookId: string, opts: AnalyzeOptions): Promise<Analyz
 
   // 7b–8. Shared post-processing: mentions + cross-book resolution, typed
   //       relationships, concept keyphrases, canonical rebuild, stats, and the
-  //       book_analysis finalize — one code path for local and fleet results.
+  //       book_analysis finalize.
   onProgress?.(90, "Connecting people, places and ideas…");
   const applied = await applyExtraction({
     bookId,
@@ -484,7 +392,7 @@ function persistImages(bookId: string, sections: BookSection[], refs: PassageRef
 }
 
 // --- reset helper ----------------------------------------------------------------
-// (status helpers live in extraction-apply.ts — shared with the fleet apply hook)
+// (status helpers live in extraction-apply.ts)
 
 /** Clear a book's prior graph so re-analysis is idempotent. Deletes mentions
  *  explicitly (not relying on cascade) so it also cleans any orphans from runs

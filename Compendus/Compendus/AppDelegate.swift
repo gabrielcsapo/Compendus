@@ -35,6 +35,14 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // onAppear to wire these up.
         audiobookPlayer = AppServices.audiobookPlayer
         modelContainer = AppServices.modelContainer
+        AppServices.downloadManager.appDelegate = self
+        AppServices.downloadManager.modelContainer = AppServices.modelContainer
+        if AppServices.modelContainerRecoveryError == nil {
+            AppServices.downloadManager.recoverInterruptedInstalls()
+            AppServices.downloadManager.reconnectBackgroundSession()
+        } else {
+            AppServices.downloadManager.suspendAllTransfersForDatabaseRecovery()
+        }
         return true
     }
 
@@ -45,6 +53,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         print("[AppDelegate] Background session events for: \(identifier)")
         backgroundSessionCompletionHandler = completionHandler
+        AppServices.downloadManager.appDelegate = self
+        AppServices.downloadManager.modelContainer = AppServices.modelContainer
+        if AppServices.modelContainerRecoveryError == nil {
+            AppServices.downloadManager.reconnectBackgroundSession()
+        } else {
+            AppServices.downloadManager.suspendAllTransfersForDatabaseRecovery()
+            completionHandler()
+            backgroundSessionCompletionHandler = nil
+        }
     }
 
     func application(
@@ -75,7 +92,17 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 /// UI and CarPlay drive one model container and one audiobook player.
 @MainActor
 enum AppServices {
-    static let modelContainer: ModelContainer = makeModelContainer()
+    private static let modelContainerResult = makeModelContainer()
+    static let modelContainer: ModelContainer = modelContainerResult.container
+    static let modelContainerRecoveryError: String? = modelContainerResult.error
+
+    static let serverConfig = ServerConfig()
+    static let apiService = APIService(config: serverConfig)
+    static let downloadManager: DownloadManager = {
+        let manager = DownloadManager(config: serverConfig, apiService: apiService)
+        manager.modelContainer = modelContainer
+        return manager
+    }()
 
     static let audiobookPlayer: AudiobookPlayer = {
         let player = AudiobookPlayer()
@@ -83,7 +110,7 @@ enum AppServices {
         return player
     }()
 
-    private static func makeModelContainer() -> ModelContainer {
+    private static func makeModelContainer() -> (container: ModelContainer, error: String?) {
         let schema = Schema([
             DownloadedBook.self,
             ReadingMark.self,
@@ -95,21 +122,18 @@ enum AppServices {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [configuration])
+            return (try ModelContainer(for: schema, configurations: [configuration]), nil)
         } catch {
-            // Pre-release destructive migration: BookHighlight / BookBookmark
-            // were consolidated into ReadingMark in May 2026. Old stores from
-            // that schema can't be migrated automatically — wipe and rebuild.
-            // Safe to do solo pre-release; remove this fallback once shipped.
-            print("ModelContainer init failed (\(error)); attempting destructive reset.")
-            let storeURL = URL.applicationSupportDirectory.appending(path: "default.store")
-            try? FileManager.default.removeItem(at: storeURL)
-            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("shm"))
-            try? FileManager.default.removeItem(at: storeURL.appendingPathExtension("wal"))
+            // Keep the original store untouched and boot a temporary container so
+            // SwiftUI can present recovery/export controls instead of terminating.
+            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             do {
-                return try ModelContainer(for: schema, configurations: [configuration])
+                return (
+                    try ModelContainer(for: schema, configurations: [fallback]),
+                    error.localizedDescription
+                )
             } catch {
-                fatalError("Could not create ModelContainer after reset: \(error)")
+                fatalError("Could not create an in-memory recovery container: \(error)")
             }
         }
     }

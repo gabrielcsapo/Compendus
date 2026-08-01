@@ -14,9 +14,9 @@ import {
   conceptStartRandom,
   conceptTopics,
   refreshJourneyReadModel,
-  enqueueTopicNaming,
+  runTopicNaming,
 } from "../../app/lib/concept/wander";
-import "../../app/lib/fabric/kinds"; // side-effect: register name-topic kind
+import { startPass, passStatus } from "../../app/lib/llm/lane";
 
 const app = new Hono();
 
@@ -163,14 +163,9 @@ app.post("/api/admin/concept/journeys/refresh", (c) => {
 });
 app.get("/api/admin/concept/journeys/refresh/status", (c) => c.json(journeyRefresh));
 
-// Enqueue fleet `name-topic` jobs to give journeys human shelf-card names.
-let journeyNaming: { running: boolean; result: unknown; error: string | null } = {
-  running: false,
-  result: null,
-  error: null,
-};
+// Name journeys with the local LLM (human shelf-card names). Runs detached on
+// the serial LLM lane — poll /name/status.
 app.post("/api/admin/concept/journeys/name", async (c) => {
-  if (journeyNaming.running) return c.json({ started: false, reason: "already running" });
   let body: { limit?: number } = {};
   try {
     body = await c.req.json();
@@ -178,20 +173,11 @@ app.post("/api/admin/concept/journeys/name", async (c) => {
     /* empty body fine */
   }
   const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 600;
-  journeyNaming = { running: true, result: null, error: null };
-  void enqueueTopicNaming({ limit })
-    .then((r) => {
-      journeyNaming.result = r;
-    })
-    .catch((e) => {
-      journeyNaming.error = e instanceof Error ? e.message : String(e);
-    })
-    .finally(() => {
-      journeyNaming.running = false;
-    });
+  const started = startPass("name-topics", (status) => runTopicNaming({ limit }, status));
+  if (!started.started) return c.json({ started: false, reason: started.reason });
   return c.json({ started: true });
 });
-app.get("/api/admin/concept/journeys/name/status", (c) => c.json(journeyNaming));
+app.get("/api/admin/concept/journeys/name/status", (c) => c.json(passStatus("name-topics")));
 
 app.get("/api/admin/concept/stats", (c) =>
   c.json({

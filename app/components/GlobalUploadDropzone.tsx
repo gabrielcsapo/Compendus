@@ -532,7 +532,7 @@ export function GlobalUploadDropzone() {
     <>
       {/* Drop hint indicator - bottom left corner */}
       {!isDragging && !showToast && (
-        <label className="fixed bottom-4 left-4 z-40 flex items-center gap-2 px-3 py-2 bg-surface/80 backdrop-blur-sm border border-border rounded-lg text-xs text-foreground-muted opacity-60 hover:opacity-100 hover:border-primary hover:text-primary transition-all cursor-pointer">
+        <label className="fixed bottom-4 left-4 z-40 hidden md:flex items-center gap-2 px-3 py-2 bg-surface/80 backdrop-blur-sm border border-border rounded-lg text-xs text-foreground-muted opacity-60 hover:opacity-100 hover:border-primary hover:text-primary transition-all cursor-pointer">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"

@@ -1,19 +1,20 @@
 /**
- * Reckoning — book fiction/nonfiction classification (the fleet-offloaded step).
+ * Reckoning — book fiction/nonfiction classification (server-side Ollama).
  *
  * The Reckoning adjudicates cross-book CLAIMS, so it must run over nonfiction
  * only. The library's `book_subjects` metadata is empty (the OpenLibrary/Google
  * enrichment never populated it), so we can't tell fiction from nonfiction by
- * subject. Instead a one-time fleet job classifies every book: the box samples
- * a few prose passages per book and enqueues a `classify-book` job; an idle Mac
- * with a local LLM decides fiction|nonfiction and posts it back. The verdicts
- * land in `cs_book_class`, which `mine.ts` reads as its nonfiction allowlist.
+ * subject. Instead this pass samples a few prose passages per book and asks the
+ * local LLM to decide fiction|nonfiction. Verdicts land in `cs_book_class`,
+ * which `mine.ts` reads as its nonfiction allowlist — and which also gates
+ * journeys, curriculum, and wander's nonfiction start.
  *
- * No model inference happens here — this module only samples text, enqueues
- * work, and reports progress. The classification itself is the fleet's job.
+ * Run detached on the LLM lane (see server/routes/reckoning.ts); resumable —
+ * books with a class row are skipped, so a restart just continues.
  */
 import { rawDb } from "../db";
-import { enqueueWork } from "../fabric";
+import { classifyBook } from "../llm/ollama";
+import { tick, type PassStatus } from "../llm/lane";
 
 /** Idempotent table creation — avoids a hand-authored drizzle migration. */
 export function ensureBookClassTable(): void {
@@ -40,12 +41,7 @@ function firstAuthor(authorsJson: string | null): string {
   return "";
 }
 
-/** Hand control back to the event loop so the box keeps answering requests. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-
-/** Per-book counts by category (fiction / nonfiction / pending). */
+/** Per-book counts by category (fiction / nonfiction). */
 export function classifySummary(): {
   totalBooks: number;
   classified: number;
@@ -64,33 +60,32 @@ export function classifySummary(): {
 }
 
 /**
- * Enqueue `classify-book` fleet jobs for books that don't yet have a class row.
- * Inserts a 'pending' placeholder per book so repeated calls don't double-enqueue
- * in-flight work. Bounded by `limit`; call repeatedly to drain the whole library.
- * Async + yields so enqueuing thousands of jobs doesn't block the web thread.
+ * Classify unclassified books with the local LLM, one at a time. Bounded by
+ * `limit`; call repeatedly to drain the whole library. `reset` re-classifies
+ * everything (drops all existing rows first).
+ *
+ * Each iteration is a real multi-second inference, so we yield every book.
+ * A per-book failure (Ollama hiccup) is logged and skipped — the book has no
+ * row, so the next run retries it.
  */
-export async function enqueueBookClassification(opts?: {
-  limit?: number;
-  reset?: boolean;
-}): Promise<{
-  enqueued: number;
-  totalBooks: number;
+export async function runBookClassification(
+  opts: { limit?: number; reset?: boolean },
+  status?: PassStatus,
+): Promise<{
   classified: number;
+  failed: number;
+  totalBooks: number;
   byCategory: Record<string, number>;
 }> {
   ensureBookClassTable();
-  const limit = opts?.limit ?? 1000;
+  const limit = opts?.limit ?? 3000;
 
-  // reset: re-issue still-pending jobs so they pick up the current requirements
-  // (e.g. after broadening the runtime from ollama-judge to llm so iOS can help).
-  // Drops only un-leased queued jobs + their pending placeholders; classified
-  // books and in-flight leases are untouched.
   if (opts?.reset) {
-    rawDb
-      .prepare("DELETE FROM work_items WHERE kind = 'classify-book' AND status = 'queued'")
-      .run();
-    rawDb.prepare("DELETE FROM cs_book_class WHERE category = 'pending'").run();
+    rawDb.prepare("DELETE FROM cs_book_class").run();
   }
+  // Legacy fleet-era 'pending' placeholder rows would exclude their books from
+  // the NOT EXISTS selection forever — purge unconditionally.
+  rawDb.prepare("DELETE FROM cs_book_class WHERE category = 'pending'").run();
 
   const books = rawDb
     .prepare(
@@ -110,26 +105,41 @@ export async function enqueueBookClassification(opts?: {
       ORDER BY s.salience DESC
       LIMIT 3`,
   );
-  const placeholder = rawDb.prepare(
-    `INSERT OR IGNORE INTO cs_book_class (book_id, category, confidence, created_at)
-     VALUES (?, 'pending', NULL, unixepoch())`,
+  const upsert = rawDb.prepare(
+    `INSERT INTO cs_book_class (book_id, category, confidence, reason, model_id, created_at)
+     VALUES (?, ?, ?, ?, ?, unixepoch())
+     ON CONFLICT(book_id) DO UPDATE SET
+       category=excluded.category, confidence=excluded.confidence,
+       reason=excluded.reason, model_id=excluded.model_id, created_at=excluded.created_at`,
   );
 
-  let enqueued = 0;
+  if (status) status.total = books.length;
+  let classified = 0;
+  let failed = 0;
   for (const b of books) {
-    if (++enqueued % 100 === 0) await tick();
     const samples = (sampleStmt.all(b.id) as Array<{ text: string }>).map((r) => r.text);
     const sample = samples.join("\n\n").replace(/\s+/g, " ").trim().slice(0, 1600);
-    placeholder.run(b.id);
-    enqueueWork({
-      project: "compendus",
-      kind: "classify-book",
-      payload: { bookId: b.id, title: b.title ?? "", author: firstAuthor(b.authors), sample },
-      // Generic local-LLM runtime: Mac (Ollama) and iOS (Foundation Models) both
-      // advertise "llm", so any capable device in the fleet can classify.
-      requirements: { runtimes: ["llm"] },
-    });
+    try {
+      const r = await classifyBook({
+        title: b.title ?? "",
+        author: firstAuthor(b.authors),
+        sample,
+      });
+      upsert.run(b.id, r.category, r.confidence, r.reason.slice(0, 500), r.modelId);
+      classified++;
+    } catch (e) {
+      failed++;
+      console.warn(
+        `[classify] ${(b.title ?? b.id).slice(0, 60)}: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+    if (status) {
+      status.processed++;
+      status.note = b.title ?? b.id;
+    }
+    await tick();
   }
 
-  return { enqueued, ...classifySummary() };
+  const summary = classifySummary();
+  return { classified, failed, totalBooks: summary.totalBooks, byCategory: summary.byCategory };
 }

@@ -1,15 +1,13 @@
 /**
  * The atlas — shared read-model over the substrate for topics ("roads"),
  * realms (categorical clusters of topic centroids), search, and adjacency.
- * Used by BOTH the Hono API routes (iOS app, fabric workers) and the web's
- * server actions, so there is exactly one implementation of naming fallbacks,
- * collision-driven re-naming, quality filtering, and realm caching.
+ * Used by BOTH the Hono API routes (iOS app) and the web's server actions, so
+ * there is exactly one implementation of naming fallbacks, quality filtering,
+ * and realm caching.
  */
 import { createHash } from "node:crypto";
 import { rawDb } from "../db";
 import { getEmbedding, topicCoverage, substrateReady } from "./substrate";
-import { enqueueWork } from "../fabric";
-import "../fabric/kinds";
 
 export { substrateReady };
 
@@ -61,50 +59,10 @@ function topicKeyOf(topicId: string): string {
   return key;
 }
 
-const LABEL_STOPWORDS = new Set([
-  "and",
-  "the",
-  "of",
-  "a",
-  "an",
-  "&",
-  "to",
-  "in",
-  "for",
-  "his",
-  "her",
-  "its",
-  "with",
-]);
-function labelStems(label: string): Set<string> {
-  return new Set(
-    label
-      .toLowerCase()
-      .replace(/['\u2019]s\b/g, "")
-      .split(/[^a-z0-9]+/)
-      .filter((w) => w.length > 1 && !LABEL_STOPWORDS.has(w))
-      .map((w) => w.replace(/s$/, "")),
-  );
-}
-/** Two names are confusable when they share ≥2 content words with Jaccard ≥ 0.4. */
-function labelsCollide(a: string, b: string): boolean {
-  const sa = labelStems(a);
-  const sb = labelStems(b);
-  let shared = 0;
-  for (const w of sa) if (sb.has(w)) shared++;
-  if (shared < 2) return false;
-  const union = new Set([...sa, ...sb]).size || 1;
-  return shared / union >= 0.4;
-}
-
-/** Cap naming-job enqueues per request so a cold 118-road listing doesn't flood the queue. */
-const TOPIC_NAME_JOBS_PER_REQUEST = 16;
-
 /**
- * Best display name for a road, by rung: device-authored → GLiNER entity label
- * → book-derived fallback. Unnamed roads (idempotently) queue a naming job —
- * without this, single-book topics collapse into indistinguishable
- * "Inside <Book>" entries.
+ * Best display name for a road, by rung: previously-authored label → GLiNER
+ * entity label → book-derived fallback. Without the synthesized names,
+ * single-book topics collapse into indistinguishable "Inside <Book>" entries.
  */
 function shapeTopics(rows: TopicRow[], profileId: string | undefined) {
   const topBooks = rawDb.prepare(
@@ -113,14 +71,6 @@ function shapeTopics(rows: TopicRow[], profileId: string | undefined) {
      WHERE pt.topic_id = ? GROUP BY p.book_id ORDER BY n DESC LIMIT 2`,
   );
   const authoredStmt = rawDb.prepare("SELECT label, blurb FROM topic_labels WHERE topic_key = ?");
-  const sampleStmt2 = rawDb.prepare(
-    `SELECT p.text FROM passage_topics pt
-     JOIN passages p ON p.id = pt.passage_id
-     JOIN passage_rank pr ON pr.passage_id = pt.passage_id
-     WHERE pt.topic_id = ? AND pr.prose >= 0.5
-     ORDER BY pr.book_norm DESC LIMIT 3`,
-  );
-  let enqueueBudget = TOPIC_NAME_JOBS_PER_REQUEST;
   // First pass: resolve display labels + book sets.
   const resolved = rows.map((t) => {
     const topicKey = topicKeyOf(t.id);
@@ -141,31 +91,10 @@ function shapeTopics(rows: TopicRow[], profileId: string | undefined) {
     return { t, topicKey, authored, books: names, label };
   });
 
-  // Collision pass: among authored road names sharing a book, the first keeps
-  // its name (anchor); later ones re-name with the anchor in their avoid list.
-  const renameAvoid = new Map<string, string[]>();
-  for (let i = 0; i < resolved.length; i++) {
-    const a = resolved[i];
-    if (!a.authored || !a.label) continue;
-    for (let j = 0; j < i; j++) {
-      const b = resolved[j];
-      if (!b.label) continue;
-      const shareBook = a.books.some((bk) => b.books.includes(bk));
-      if (shareBook && labelsCollide(a.label, b.label)) {
-        renameAvoid.set(a.topicKey, [...(renameAvoid.get(a.topicKey) ?? []), b.label]);
-      }
-    }
-  }
-
-  // Refusal fallback: the on-device model declines some content outright
-  // ("Detected content likely to be unsafe" — war/crime/romance passages), so
-  // those naming jobs fail permanently and would otherwise re-enqueue forever
-  // as sibling sets shift. Synthesize a deterministic name from the topic's
-  // own canonical entities, persist it as authored, and move on.
-  const failedStmt = rawDb.prepare(
-    `SELECT 1 FROM work_items WHERE kind = 'topic-label' AND status = 'failed'
-     AND payload LIKE ? LIMIT 1`,
-  );
+  // Unnamed topics get a deterministic name synthesized from the topic's own
+  // canonical entities. (The LLM-authored naming ran on retired fleet devices;
+  // this old-substrate atlas is being replaced by the learning graph, so the
+  // deterministic label is now the only tier.)
   const topEntitiesStmt = rawDb.prepare(
     `SELECT e.canonical_name AS name, COUNT(*) AS n FROM canonical_mentions cm
      JOIN entities e ON e.id = cm.entity_id
@@ -177,10 +106,8 @@ function shapeTopics(rows: TopicRow[], profileId: string | undefined) {
      ON CONFLICT(topic_key) DO NOTHING`,
   );
 
-  return resolved.map(({ t, topicKey, authored, books, label }) => {
-    let needsName = !authored;
-    const needsRename = renameAvoid.has(topicKey);
-    if (needsName && failedStmt.get(`%"topicKey":"${topicKey}"%`)) {
+  return resolved.map(({ t, topicKey, authored, label }) => {
+    if (!authored) {
       const ents = (topEntitiesStmt.all(t.id) as { name: string }[]).map((r) => r.name);
       const synth =
         ents.length >= 2
@@ -195,37 +122,6 @@ function shapeTopics(rows: TopicRow[], profileId: string | undefined) {
           `Passages woven around ${ents.join(" and ") || "this thread"}.`,
         );
         label = synth;
-        needsName = false;
-      }
-    }
-    if ((needsName || needsRename) && enqueueBudget > 0) {
-      enqueueBudget--;
-      try {
-        const samples = (sampleStmt2.all(t.id) as { text: string }[])
-          .map((r) => r.text.replace(/\s+/g, " ").slice(0, 300))
-          .filter(Boolean);
-        const siblings = resolved
-          .filter(
-            (o) => o.topicKey !== topicKey && o.label && o.books.some((bk) => books.includes(bk)),
-          )
-          .map((o) => o.label as string)
-          .slice(0, 6);
-        if (samples.length > 0) {
-          enqueueWork({
-            project: "compendus",
-            kind: "topic-label",
-            payload: {
-              topicKey,
-              books: books.slice(0, 3),
-              samples,
-              siblings,
-              ...(needsRename ? { avoid: renameAvoid.get(topicKey) } : {}),
-            },
-            requirements: { runtimes: ["foundation-models"], estMinutes: 1 },
-          });
-        }
-      } catch {
-        // naming is optional polish
       }
     }
     return {
@@ -246,12 +142,6 @@ interface CachedRealm {
   topicIds: string[];
   roadCount: number;
   passages: number;
-  /** Evidence payload for the naming job, built once at cluster time. */
-  namePayload: {
-    realmKey: string;
-    topics: Array<{ label: string; books: string[] }>;
-    samples: string[];
-  };
 }
 let realmCache: { version: string; realms: CachedRealm[] } | null = null;
 
@@ -321,19 +211,6 @@ export function listRealms(profileId: string | undefined) {
   const titleCase = (s: string) =>
     s.replace(/\b\w/g, (ch) => ch.toUpperCase()).replace(/ & /g, " & ");
 
-  const sampleStmt = rawDb.prepare(
-    `SELECT p.text FROM passage_topics pt
-     JOIN passages p ON p.id = pt.passage_id
-     JOIN passage_rank pr ON pr.passage_id = pt.passage_id
-     WHERE pt.topic_id = ? AND pr.prose >= 0.5
-     ORDER BY pr.book_norm DESC LIMIT 1`,
-  );
-  const bookStmt = rawDb.prepare(
-    `SELECT b.title, COUNT(*) AS n FROM passage_topics pt
-     JOIN passages p ON p.id = pt.passage_id JOIN books b ON b.id = p.book_id
-     WHERE pt.topic_id = ? GROUP BY p.book_id ORDER BY n DESC LIMIT 3`,
-  );
-
   const cached: CachedRealm[] = [];
   for (let ci = 0; ci < k; ci++) {
     const members = withVecs.filter((_, i) => assign[i] === ci).map((x) => x.t);
@@ -365,18 +242,6 @@ export function listRealms(profileId: string | undefined) {
       topicIds: members.map((m) => m.id),
       roadCount: members.length,
       passages: members.reduce((n, m) => n + m.size, 0),
-      namePayload: {
-        realmKey,
-        topics: members.slice(0, 10).map((m) => ({
-          label: m.label ?? "",
-          books: (bookStmt.all(m.id) as { title: string }[]).map((b) => b.title),
-        })),
-        samples: members
-          .slice(0, 5)
-          .map((m) => (sampleStmt.get(m.id) as { text: string } | undefined)?.text ?? "")
-          .filter(Boolean)
-          .map((t) => t.replace(/\s+/g, " ").slice(0, 300)),
-      },
     });
   }
   realmCache = { version, realms: cached };
@@ -384,54 +249,21 @@ export function listRealms(profileId: string | undefined) {
 }
 
 /**
- * Per-request finish over the cached clustering: authored names appear the
- * moment the fleet lands them, coverage is always the caller's own, and
- * unnamed realms (idempotently) queue a naming job for the fleet.
+ * Per-request finish over the cached clustering: previously-authored names
+ * (realm_labels) are preferred, coverage is always the caller's own. Unnamed
+ * realms serve their deterministic fallbackLabel — the LLM naming tier ran on
+ * retired fleet devices, and this old-substrate atlas is superseded by the
+ * learning graph.
  */
 function serveRealms(cached: CachedRealm[], profileId: string | undefined) {
   const labelStmt = rawDb.prepare("SELECT label, blurb FROM realm_labels WHERE realm_key = ?");
-  // Resolve current names first so naming jobs can see their siblings, and
-  // colliding authored names trigger a re-name (first keeps it, later avoids).
   const current = cached.map((r) => {
     const authored = labelStmt.get(r.realmKey) as
       | { label: string; blurb: string | null }
       | undefined;
     return { r, authored, label: authored?.label ?? r.fallbackLabel };
   });
-  const realmAvoid = new Map<string, string[]>();
-  for (let i = 0; i < current.length; i++) {
-    if (!current[i].authored) continue;
-    for (let j = 0; j < i; j++) {
-      if (labelsCollide(current[i].label, current[j].label)) {
-        realmAvoid.set(current[i].r.realmKey, [
-          ...(realmAvoid.get(current[i].r.realmKey) ?? []),
-          current[j].label,
-        ]);
-      }
-    }
-  }
   return current.map(({ r, authored }, ci) => {
-    const needsRename = realmAvoid.has(r.realmKey);
-    if (!authored || needsRename) {
-      try {
-        const siblings = current
-          .filter((o) => o.r.realmKey !== r.realmKey)
-          .map((o) => o.label)
-          .slice(0, 7);
-        enqueueWork({
-          project: "compendus",
-          kind: "realm-label",
-          payload: {
-            ...r.namePayload,
-            siblings,
-            ...(needsRename ? { avoid: realmAvoid.get(r.realmKey) } : {}),
-          },
-          requirements: { runtimes: ["foundation-models"], estMinutes: 1 },
-        });
-      } catch {
-        // naming is optional polish; never block the listing
-      }
-    }
     const coverage = r.topicIds.reduce(
       (acc, topicId) => {
         if (profileId) {

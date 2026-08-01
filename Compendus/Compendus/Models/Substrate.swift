@@ -2,10 +2,9 @@
 //  Substrate.swift
 //  Compendus
 //
-//  Models for the semantic substrate APIs (/api/wander2, /api/topics,
-//  /api/trails): passage-centric wander stops, topics with coverage, and
-//  curriculum study paths. Every step and study item IS a passage — real
-//  author's words, grounded and openable in the reader.
+//  Models for the semantic substrate APIs. Wander remains passage-centric;
+//  Pods are the one shared learning contract used by web and native clients.
+//  Every Pod card and recall question resolves to an exact source locator.
 //
 
 import Foundation
@@ -62,41 +61,51 @@ struct WanderStopResponse: Codable {
     let stop: WanderStop?
 }
 
-/// An emergent theme spanning books, with this profile's coverage.
-struct TopicSummary: Codable, Identifiable, Hashable {
-    let id: String
-    let label: String?
-    let size: Int
-    let bookCount: Int
-    let coverage: TopicCoverage?
+enum PodSource: String, Codable, Hashable {
+    case learningGraph = "learning-graph"
+    case conceptFallback = "concept-fallback"
+}
 
-    var displayLabel: String { label ?? "An unnamed thread" }
-    var coverageFraction: Double {
-        guard let coverage, coverage.total > 0 else { return 0 }
-        return Double(coverage.seen) / Double(coverage.total)
+/// Canonical source anchor shared with the web reader.
+struct SourceLocator: Codable, Hashable {
+    let passageId: String
+    let bookId: String
+    let bookTitle: String
+    let chapterTitle: String?
+    let spineIndex: Int?
+    let page: Int?
+    let charStart: Int?
+    let charEnd: Int?
+
+    var locationLabel: String? {
+        if let chapterTitle, !chapterTitle.isEmpty { return chapterTitle }
+        if let page { return "Page \(page + 1)" }
+        return nil
     }
 }
 
-struct TopicCoverage: Codable, Hashable {
-    let seen: Int
+struct PodSummary: Codable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let description: String?
+    let passageCount: Int
+    let bookCount: Int
+    let questionCount: Int?
+    let source: PodSource
+}
+
+struct PodsResponse: Codable {
+    let success: Bool
+    let pods: [PodSummary]
     let total: Int
 }
 
-struct TopicsResponse: Codable {
+struct PodSearchResponse: Codable {
     let success: Bool
-    let topics: [TopicSummary]
+    let pods: [PodSummary]
 }
 
-/// A sequenced study path through a topic (curriculum Tier A/B).
-struct StudyCurriculum: Codable, Identifiable, Hashable {
-    let id: String
-    let topicId: String
-    let title: String
-    let builder: String
-    let items: [StudyItem]
-}
-
-struct StudyItem: Codable, Identifiable, Hashable {
+struct PodSessionItem: Codable, Identifiable, Hashable {
     let ordinal: Int
     let passageId: String
     let bookId: String
@@ -106,13 +115,97 @@ struct StudyItem: Codable, Identifiable, Hashable {
     let role: String
     let transition: String
     let seen: Bool
+    let source: SourceLocator
 
-    var id: Int { ordinal }
+    var id: String { passageId }
 }
 
-struct CurriculumResponse: Codable {
+struct PodQuestionChoice: Codable, Identifiable, Hashable {
+    let id: String
+    let text: String
+}
+
+struct PodSavedAnswer: Codable, Hashable {
+    let selectedChoiceId: String
+    let result: PodAttemptResult
+}
+
+struct PodEvidence: Codable, Hashable {
+    let passageId: String
+    let bookId: String
+    let bookTitle: String
+    let chapterTitle: String?
+    let spineIndex: Int?
+    let page: Int?
+    let charStart: Int?
+    let charEnd: Int?
+    let excerpt: String
+
+    var source: SourceLocator {
+        SourceLocator(
+            passageId: passageId,
+            bookId: bookId,
+            bookTitle: bookTitle,
+            chapterTitle: chapterTitle,
+            spineIndex: spineIndex,
+            page: page,
+            charStart: charStart,
+            charEnd: charEnd
+        )
+    }
+}
+
+struct PodQuestion: Codable, Identifiable, Hashable {
+    let id: String
+    let kind: String
+    let prompt: String
+    let choices: [PodQuestionChoice]
+    let afterOrdinal: Int
+    let evidence: PodEvidence
+    let savedAnswer: PodSavedAnswer?
+}
+
+struct PodSession: Codable, Identifiable, Hashable {
+    let id: String
+    let podId: String
+    let title: String
+    let revision: String
+    let source: PodSource
+    let items: [PodSessionItem]
+    let questions: [PodQuestion]
+
+    var seenCount: Int {
+        let answeredPassages = Set(
+            questions.compactMap { question in
+                question.savedAnswer?.result.correct == true ? question.evidence.passageId : nil
+            }
+        )
+        return items.lazy.filter { $0.seen || answeredPassages.contains($0.passageId) }.count
+    }
+}
+
+struct PodSessionResponse: Codable {
     let success: Bool
-    let curriculum: StudyCurriculum?
+    let session: PodSession
+    let adjacent: [PodSummary]
+}
+
+struct PodAttemptRequest: Codable {
+    let revision: String
+    let questionId: String
+    let selectedChoiceId: String
+    let attemptId: String
+}
+
+struct PodAttemptResult: Codable, Hashable {
+    let correct: Bool
+    let feedback: String
+    let evidence: PodEvidence
+}
+
+struct PodAttemptResponse: Codable {
+    let success: Bool
+    let result: PodAttemptResult
 }
 
 struct TrailSaveResponse: Codable {

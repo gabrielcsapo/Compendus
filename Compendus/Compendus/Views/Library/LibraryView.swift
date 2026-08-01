@@ -144,6 +144,9 @@ struct LibraryView: View {
 
     private var isExploreChipSelected: Bool { appNavigation.libraryFilterChipId == "explore" }
     private var isSeriesChipSelected: Bool { appNavigation.libraryFilterChipId == "series" }
+    private var hasSearchQuery: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var chipDrivenFilter: BookFilter {
         switch appNavigation.libraryFilterChipId {
@@ -156,7 +159,7 @@ struct LibraryView: View {
 
     private var libraryChips: [FilterChip] {
         [
-            FilterChip(id: "explore", label: "Explore", systemImage: "sparkles"),
+            FilterChip(id: "explore", label: "For You", systemImage: "sparkles"),
             FilterChip(id: "all", label: "All", systemImage: nil),
             FilterChip(id: "ebooks", label: "Ebooks", systemImage: "book.closed"),
             FilterChip(id: "audiobooks", label: "Audiobooks", systemImage: "headphones"),
@@ -292,10 +295,6 @@ struct LibraryView: View {
                             Button("Cancel") {
                                 searchText = ""
                                 isSearchFocused = false
-                                // Return to explore if we left it to search
-                                if appNavigation.libraryFilterChipId == "all" {
-                                    appNavigation.libraryFilterChipId = "explore"
-                                }
                             }
                             .font(.subheadline)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -319,13 +318,13 @@ struct LibraryView: View {
             .onChange(of: searchText) { _, newValue in
                 searchTask?.cancel()
                 guard !isSeriesChipSelected else { return }
-                // When typing from explore, switch to all-books view to show results
-                if isExploreChipSelected && !newValue.isEmpty {
-                    appNavigation.libraryFilterChipId = "all"
-                }
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
-                    searchTask = Task { await loadBooks() }
+                    // Clearing a search while For You is selected reveals the
+                    // existing ExploreView again; no server reload is needed.
+                    if !isExploreChipSelected {
+                        searchTask = Task { await loadBooks() }
+                    }
                     return
                 }
                 searchTask = Task {
@@ -361,7 +360,10 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if isExploreChipSelected {
+        // Search results temporarily replace For You without changing the
+        // selected chip. Mutating the chip on the first keystroke recreated the
+        // search field hierarchy and caused iOS to dismiss the keyboard.
+        if isExploreChipSelected && !hasSearchQuery {
             ExploreView(
                 onBookTap: { book in selectedBook = book },
                 onSeriesTap: { name in seriesSheet = SeriesSheet(id: name) },

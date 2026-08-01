@@ -7,6 +7,9 @@
 
 import Foundation
 import CCReader
+import OSLog
+
+private let apiLogger = Logger(subsystem: "com.compendus.network", category: "API")
 
 enum APIError: LocalizedError {
     case serverNotConfigured
@@ -16,6 +19,7 @@ enum APIError: LocalizedError {
     case decodingError(Error)
     case serverError(Int, String?)
     case profileRequired
+    case offline
 
     var errorDescription: String? {
         switch self {
@@ -36,6 +40,8 @@ enum APIError: LocalizedError {
             return message.map { "Server error (\(code)): \($0)" } ?? "Server error (\(code))."
         case .profileRequired:
             return "Your profile is no longer available on the server. Please select a new profile."
+        case .offline:
+            return "Compendus is in Offline Mode. Turn it off when you want to contact the server."
         }
     }
 }
@@ -50,8 +56,17 @@ class APIService {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 120
-        configuration.waitsForConnectivity = true
-        self.session = URLSession(configuration: configuration, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+        configuration.waitsForConnectivity = false
+        let session = URLSession(configuration: configuration, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+        self.session = session
+        NetworkSessionRegistry.shared.registerDataSession(session)
+    }
+
+    /// The single gate for API traffic. Checking immediately before URLSession
+    /// prevents queued actions from opening a connection after Offline Mode is enabled.
+    func performDataRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { throw APIError.offline }
+        return try await session.data(for: request)
     }
 
     // MARK: - Books
@@ -83,7 +98,7 @@ class APIService {
         return try await fetch(url)
     }
 
-    // MARK: - Semantic substrate (wander v2, topics, study, trails)
+    // MARK: - Semantic substrate (wander v2, Pods, trails)
 
     /// Start a wander: serendipitous, aimed at a free-text query, or from a book.
     func fetchWanderStart(query: String? = nil, bookId: String? = nil) async throws -> WanderStopResponse {
@@ -111,19 +126,62 @@ class APIService {
         return try await fetch(url)
     }
 
-    /// Topics across the library with this profile's coverage.
-    func fetchTopics(minSize: Int = 10) async throws -> TopicsResponse {
+    /// The shared learning collection used by both web and iOS.
+    func fetchPods(limit: Int = 60, offset: Int = 0) async throws -> PodsResponse {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
-        guard let url = config.apiURL("/api/topics?minSize=\(minSize)") else { throw APIError.invalidURL }
+        guard let url = config.apiURL("/api/pods?limit=\(limit)&offset=\(offset)") else {
+            throw APIError.invalidURL
+        }
         return try await fetch(url)
     }
 
-    /// The sequenced study path through a topic (built on demand server-side).
-    func fetchCurriculum(topicId: String) async throws -> CurriculumResponse {
+    /// Search Pods without reloading the full collection.
+    func searchPods(query: String) async throws -> PodSearchResponse {
         guard config.isConfigured else { throw APIError.serverNotConfigured }
-        let encoded = topicId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? topicId
-        guard let url = config.apiURL("/api/topics/\(encoded)/curriculum") else { throw APIError.invalidURL }
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+?")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
+        guard let url = config.apiURL("/api/pods/search?q=\(encoded)") else {
+            throw APIError.invalidURL
+        }
         return try await fetch(url)
+    }
+
+    /// A compact, revision-stable source session plus already-resolved adjacent Pods.
+    func fetchPodSession(podId: String) async throws -> PodSessionResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let encoded = podId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? podId
+        guard let url = config.apiURL("/api/pods/\(encoded)/session") else {
+            throw APIError.invalidURL
+        }
+        return try await fetch(url)
+    }
+
+    /// Submit one source-recall choice. The response always returns canonical evidence.
+    func submitPodAttempt(
+        podId: String,
+        revision: String,
+        questionId: String,
+        selectedChoiceId: String,
+        attemptId: String
+    ) async throws -> PodAttemptResponse {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let encoded = podId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? podId
+        guard let url = config.apiURL("/api/pods/\(encoded)/attempts") else {
+            throw APIError.invalidURL
+        }
+        var request = buildRequest(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            PodAttemptRequest(
+                revision: revision,
+                questionId: questionId,
+                selectedChoiceId: selectedChoiceId,
+                attemptId: attemptId
+            )
+        )
+        return try await send(request)
     }
 
     /// Save a wander path as a replayable trail.
@@ -136,7 +194,7 @@ class APIService {
         var body: [String: Any] = ["path": path]
         if let title { body["title"] = title }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, _) = try await session.data(for: request)
+        let (data, _) = try await performDataRequest(request)
         return try JSONDecoder().decode(TrailSaveResponse.self, from: data)
     }
 
@@ -159,7 +217,7 @@ class APIService {
         if !stepsTaken.isEmpty { body["stepsTaken"] = stepsTaken }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        _ = try? await session.data(for: request)
+        _ = try? await performDataRequest(request)
     }
 
     /// Fetch all series with cover data for fan-out display
@@ -185,7 +243,53 @@ class APIService {
             throw APIError.invalidURL
         }
 
-        return try await fetch(url)
+        do {
+            let model: ExploreViewModel = try await fetch(url)
+            cacheExplore(model)
+            return model
+        } catch {
+            // Discovery is useful while travelling precisely when the server is
+            // not reachable. Keep the last server-curated snapshot profile-scoped
+            // and return it without attempting another connection.
+            if let cached = loadCachedExplore() {
+                return cached
+            }
+            throw error
+        }
+    }
+
+    private func exploreCacheURL() -> URL? {
+        guard let profileId = config.selectedProfileId else { return nil }
+        guard let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        guard let safeProfileId = profileId.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
+            return nil
+        }
+        let directory = root.appendingPathComponent("ExploreCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("\(safeProfileId).json")
+    }
+
+    private func cacheExplore(_ model: ExploreViewModel) {
+        guard let url = exploreCacheURL(), let data = try? JSONEncoder().encode(model) else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: url.path
+            )
+        } catch {
+            apiLogger.warning("Could not persist Explore cache: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func loadCachedExplore() -> ExploreViewModel? {
+        guard let url = exploreCacheURL(),
+              let data = try? Data(contentsOf: url),
+              let model = try? JSONDecoder().decode(ExploreViewModel.self, from: data)
+        else { return nil }
+        return model
     }
 
     /// Fetch a single book by ID
@@ -295,7 +399,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -344,7 +448,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -400,7 +504,7 @@ class APIService {
         let body = ["transcript": transcript]
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8)
@@ -416,7 +520,7 @@ class APIService {
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
@@ -436,7 +540,7 @@ class APIService {
         request.httpBody = try JSONEncoder().encode(updates)
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -486,7 +590,7 @@ class APIService {
         request.httpBody = try JSONEncoder().encode(["name": name])
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -524,7 +628,7 @@ class APIService {
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
@@ -557,7 +661,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["collectionId": collectionId])
 
-        let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             let message = String(data: data, encoding: .utf8)
@@ -573,7 +677,7 @@ class APIService {
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
@@ -581,6 +685,20 @@ class APIService {
     }
 
     // MARK: - Downloads
+
+    func fetchDownloadManifest(bookId: String, variant: String? = nil) async throws -> DownloadArtifactManifest {
+        guard config.isConfigured else { throw APIError.serverNotConfigured }
+        let suffix = variant.map { "?variant=\($0)" } ?? ""
+        guard let url = config.apiURL("/api/downloads/\(bookId)/manifest\(suffix)") else {
+            throw APIError.invalidURL
+        }
+        return try await fetch(url)
+    }
+
+    /// Build an authenticated request suitable for a background URLSession.
+    func authenticatedRequest(for url: URL) -> URLRequest {
+        buildRequest(url)
+    }
 
     /// Get URL for downloading a book file
     func bookDownloadURL(bookId: String, format: String) -> URL? {
@@ -596,7 +714,7 @@ class APIService {
         }
         // Don't add profile header for this endpoint (it's pre-auth)
         let request = URLRequest(url: url)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -618,7 +736,7 @@ class APIService {
         } else {
             request.httpBody = "{}".data(using: .utf8)
         }
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -638,7 +756,7 @@ class APIService {
             throw APIError.invalidURL
         }
         let request = buildRequest(url)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -668,7 +786,7 @@ class APIService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = ["dailyGoalMinutes": minutes]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -692,7 +810,7 @@ class APIService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(ProfileCreateRequest(name: name, avatar: avatar, pin: pin))
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -730,7 +848,7 @@ class APIService {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -761,7 +879,7 @@ class APIService {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -780,7 +898,7 @@ class APIService {
         }
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -799,7 +917,7 @@ class APIService {
         }
         var request = buildRequest(url)
         request.httpMethod = "DELETE"
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performDataRequest(request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
             throw APIError.invalidResponse
@@ -811,6 +929,7 @@ class APIService {
     /// Build a URLRequest for the given URL, automatically adding the X-Profile-Id header
     private func buildRequest(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-Id")
         if let profileId = config.selectedProfileId {
             request.setValue(profileId, forHTTPHeaderField: "X-Profile-Id")
         }
@@ -828,14 +947,52 @@ class APIService {
         }
     }
 
+    /// Typed non-GET request with the same status/profile handling as `fetchData`.
+    private func send<T: Decodable>(_ request: URLRequest) async throws -> T {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { throw APIError.offline }
+        do {
+            let (data, response) = try await performDataRequest(request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            if httpResponse.statusCode == 401,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               json["code"] as? String == "NO_PROFILE" {
+                await MainActor.run { config.invalidateProfile() }
+                throw APIError.profileRequired
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+                throw APIError.serverError(httpResponse.statusCode, message)
+            }
+            do {
+                return try JSONDecoder().decode(T.self, from: data)
+            } catch {
+                throw APIError.decodingError(error)
+            }
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw APIError.networkError(error)
+        }
+    }
+
     private func fetchData(_ url: URL) async throws -> Data {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { throw APIError.offline }
+        let startedAt = Date()
         do {
             let request = buildRequest(url)
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await performDataRequest(request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
+
+            let durationMs = Date().timeIntervalSince(startedAt) * 1_000
+            let requestId = httpResponse.value(forHTTPHeaderField: "X-Request-Id") ?? "unknown"
+            apiLogger.info(
+                "GET \(url.path, privacy: .public) request_id=\(requestId, privacy: .public) status=\(httpResponse.statusCode) duration_ms=\(durationMs, format: .fixed(precision: 1)) bytes=\(data.count)"
+            )
 
             // Detect stale profile: server says NO_PROFILE → invalidate and preserve old ID for migration
             if httpResponse.statusCode == 401 {
@@ -867,11 +1024,32 @@ class APIService {
 
             return data
         } catch let error as APIError {
+            let durationMs = Date().timeIntervalSince(startedAt) * 1_000
+            apiLogger.error(
+                "GET \(url.path, privacy: .public) failed duration_ms=\(durationMs, format: .fixed(precision: 1)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw error
         } catch {
+            let durationMs = Date().timeIntervalSince(startedAt) * 1_000
+            apiLogger.error(
+                "GET \(url.path, privacy: .public) failed duration_ms=\(durationMs, format: .fixed(precision: 1)) error=\(error.localizedDescription, privacy: .public)"
+            )
             throw APIError.networkError(error)
         }
     }
+}
+
+struct DownloadArtifactManifest: Codable {
+    let artifactId: String
+    let bookId: String
+    let url: String
+    let format: String
+    let originalFormat: String
+    let byteLength: Int64
+    let sha256: String
+    let artifactVersion: Int
+    let ccdVersion: String?
+    let peakDiskBytes: Int64
 }
 
 struct ComicInfo: Codable {
@@ -897,7 +1075,7 @@ struct JobProgressResponse: Codable {
 // MARK: - Book Editing Types
 
 /// Request body for updating book metadata (only encodes non-nil fields)
-struct UpdateBookRequest: Codable {
+nonisolated struct UpdateBookRequest: Codable {
     var title: String? = nil
     var subtitle: String? = nil
     var authors: [String]? = nil
@@ -910,6 +1088,7 @@ struct UpdateBookRequest: Codable {
     var series: String? = nil
     var seriesNumber: String? = nil
     var isRead: Bool? = nil
+    var isSetAside: Bool? = nil
     var rating: Int? = nil
     var review: String? = nil
     var source: String = "ios"
@@ -917,7 +1096,7 @@ struct UpdateBookRequest: Codable {
     enum CodingKeys: String, CodingKey {
         case title, subtitle, authors, publisher, publishedDate
         case description, isbn, language, pageCount, series, seriesNumber
-        case isRead, rating, review, source
+        case isRead, isSetAside, rating, review, source
     }
 
     func encode(to encoder: Encoder) throws {
@@ -934,6 +1113,7 @@ struct UpdateBookRequest: Codable {
         try container.encodeIfPresent(series, forKey: .series)
         try container.encodeIfPresent(seriesNumber, forKey: .seriesNumber)
         try container.encodeIfPresent(isRead, forKey: .isRead)
+        try container.encodeIfPresent(isSetAside, forKey: .isSetAside)
         try container.encodeIfPresent(rating, forKey: .rating)
         try container.encodeIfPresent(review, forKey: .review)
         try container.encode(source, forKey: .source)

@@ -1,7 +1,22 @@
-import { spawn, execSync } from "child_process";
+/**
+ * Audiobook transcription — chunked ffmpeg preprocessing + Lemonade ASR.
+ *
+ * The container does no speech inference itself: audio is split into 30-minute
+ * 16kHz WAV chunks (ffmpeg) and each chunk is transcribed by the host's
+ * Lemonade server (Whisper on the NPU — see app/lib/llm/audio.ts). Self-hosters
+ * stand up Lemonade and pull an ASR model; there is no in-container fallback.
+ *
+ * Output contract (unchanged from the whisper-cli era): a transcript JSON of
+ * {duration, language, segments: [{start, end, text, words}]} with word-level
+ * timings — the read-along and the knowledge substrate both consume it.
+ */
+import { spawn } from "child_process";
 import { resolve, dirname } from "path";
-import { existsSync, mkdirSync } from "fs";
-import { readFile, writeFile, unlink, readdir } from "fs/promises";
+import { mkdirSync } from "fs";
+import { writeFile, unlink, readdir } from "fs/promises";
+import { lemonadeTranscribe, isTranscriptionAvailable, LEMONADE_ASR_MODEL } from "../llm/audio";
+
+export { isTranscriptionAvailable };
 
 interface TranscriptWord {
   word: string;
@@ -25,31 +40,6 @@ interface Transcript {
 interface TranscribeOptions {
   onProgress?: (progress: number, message: string) => void;
   onLog?: (line: string) => void;
-}
-
-/** whisper.cpp full JSON output format */
-interface WhisperCppOutput {
-  result: { language: string };
-  transcription: Array<{
-    offsets: { from: number; to: number };
-    text: string;
-    tokens: Array<{
-      text: string;
-      offsets: { from: number; to: number };
-      p: number;
-    }>;
-  }>;
-}
-
-/**
- * Check if whisper-cli (whisper.cpp) is available on PATH
- */
-export async function isWhisperAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const proc = spawn("whisper-cli", ["--help"]);
-    proc.on("close", (code) => resolve(code === 0));
-    proc.on("error", () => resolve(false));
-  });
 }
 
 /**
@@ -77,56 +67,6 @@ async function getAudioDuration(audioPath: string): Promise<number> {
     });
     proc.on("error", () => resolve(0));
   });
-}
-
-/**
- * Resolve the path where a GGML model should be stored
- */
-function resolveModelPath(model: string): string {
-  const modelsDir = resolve(process.cwd(), "data", "models");
-  return resolve(modelsDir, `ggml-${model}.bin`);
-}
-
-/**
- * Download a whisper.cpp GGML model from HuggingFace if not present
- */
-async function ensureModelDownloaded(
-  model: string,
-  modelPath: string,
-  onProgress?: (progress: number, message: string) => void,
-): Promise<void> {
-  if (existsSync(modelPath)) return;
-
-  const modelsDir = resolve(process.cwd(), "data", "models");
-  mkdirSync(modelsDir, { recursive: true });
-
-  const url = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${model}.bin`;
-
-  onProgress?.(1, `Downloading model ${model}...`);
-
-  try {
-    execSync(`curl -L -o "${modelPath}" "${url}"`, {
-      stdio: "pipe",
-      timeout: 600000, // 10 minutes
-    });
-  } catch {
-    // Clean up partial download
-    if (existsSync(modelPath)) {
-      try {
-        execSync(`rm "${modelPath}"`);
-      } catch {}
-    }
-    throw new Error(
-      `Failed to download whisper model '${model}'. ` +
-        `Download manually from ${url} and place at ${modelPath}`,
-    );
-  }
-
-  if (!existsSync(modelPath)) {
-    throw new Error(`Model download completed but file not found at ${modelPath}`);
-  }
-
-  onProgress?.(4, "Model downloaded");
 }
 
 /**
@@ -197,145 +137,6 @@ async function splitAudioToChunks(
   return chunks;
 }
 
-/** Timeout per chunk: 30 minutes of audio should not take more than 2 hours */
-const CHUNK_TIMEOUT_MS = 2 * 60 * 60 * 1000;
-
-/**
- * Run whisper-cli on a single WAV chunk and return parsed segments.
- */
-async function transcribeChunk(
-  chunkPath: string,
-  modelPath: string,
-  threads: number,
-  onLog?: (line: string) => void,
-): Promise<WhisperCppOutput> {
-  const tempOutputBase = chunkPath.replace(/\.wav$/, ".whisper");
-
-  const args = [
-    "-m",
-    modelPath,
-    "-f",
-    chunkPath,
-    "-ojf",
-    "-of",
-    tempOutputBase,
-    "-pp",
-    "--max-len",
-    "1",
-    "-t",
-    String(threads),
-    "-bs",
-    "1",
-    "--best-of",
-    "1",
-  ];
-
-  onLog?.(`[whisper-cli] ${args.join(" ")}`);
-
-  await new Promise<void>((resolvePromise, reject) => {
-    let settled = false;
-    let stderrBuffer = "";
-    let stderrLineBuffer = "";
-    let spawnError: Error | null = null;
-    let lastOutputTime = Date.now();
-
-    const proc = spawn("whisper-cli", args, {
-      env: { ...process.env },
-    });
-
-    // Timeout check — kill the process if no output for too long
-    const timeoutCheck = setInterval(() => {
-      const elapsed = Date.now() - lastOutputTime;
-      if (elapsed > CHUNK_TIMEOUT_MS) {
-        clearInterval(timeoutCheck);
-        onLog?.(`[timeout] No output for ${Math.round(elapsed / 60000)}min, killing process`);
-        proc.kill("SIGKILL");
-      }
-    }, 30000);
-
-    proc.stderr.on("data", (data: Buffer) => {
-      const text = data.toString();
-      stderrBuffer += text;
-      lastOutputTime = Date.now();
-
-      // Stream stderr line-by-line to the log callback
-      stderrLineBuffer += text;
-      const lines = stderrLineBuffer.split("\n");
-      stderrLineBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.trim()) onLog?.(line);
-      }
-    });
-
-    proc.stdout.on("data", (data: Buffer) => {
-      lastOutputTime = Date.now();
-      const text = data.toString();
-      const lines = text.split("\n");
-      for (const line of lines) {
-        if (line.trim()) onLog?.(`[stdout] ${line}`);
-      }
-    });
-
-    proc.on("error", (err) => {
-      spawnError = err;
-    });
-
-    proc.on("close", (code) => {
-      clearInterval(timeoutCheck);
-      // Flush remaining stderr
-      if (stderrLineBuffer.trim()) onLog?.(stderrLineBuffer);
-
-      if (settled) return;
-      settled = true;
-
-      onLog?.(`[whisper-cli] exited with code ${code}`);
-
-      if (code === 0) {
-        resolvePromise();
-        return;
-      }
-
-      if (spawnError) {
-        reject(
-          new Error(
-            `Failed to start whisper-cli: ${spawnError.message}. Is whisper.cpp installed?`,
-          ),
-        );
-        return;
-      }
-
-      const errorLines = stderrBuffer
-        .split("\n")
-        .filter((l) => l.trim())
-        .slice(-5)
-        .join("\n")
-        .slice(-500);
-
-      if (errorLines) {
-        reject(new Error(`Transcription failed (exit code ${code}): ${errorLines}`));
-      } else if (code === null) {
-        reject(
-          new Error(
-            "Transcription process was killed (out of memory or signal). Check server resources.",
-          ),
-        );
-      } else {
-        reject(new Error(`Transcription failed with exit code ${code}.`));
-      }
-    });
-  });
-
-  const whisperJsonPath = `${tempOutputBase}.json`;
-  try {
-    const rawJson = await readFile(whisperJsonPath, "utf-8");
-    return JSON.parse(rawJson) as WhisperCppOutput;
-  } finally {
-    try {
-      await unlink(whisperJsonPath);
-    } catch {}
-  }
-}
-
 /**
  * Clean up a temp directory and all files inside it
  */
@@ -353,28 +154,17 @@ async function cleanupTempDir(tempDir: string): Promise<void> {
 }
 
 /**
- * Transcribe an audio file using whisper.cpp.
- * Splits long audio into 30-minute chunks to avoid OOM, then merges results.
+ * Transcribe an audio file via Lemonade ASR.
+ * Splits long audio into 30-minute chunks, transcribes each, merges results.
  */
 export async function transcribeAudio(
   audioPath: string,
   outputPath: string,
   options: TranscribeOptions = {},
 ): Promise<void> {
-  const model = process.env.WHISPER_MODEL || "small";
-  const modelPath = resolveModelPath(model);
-
-  // Download model if needed
-  await ensureModelDownloaded(model, modelPath, options.onProgress);
-
   // Get audio duration via ffprobe
   options.onProgress?.(5, "Analyzing audio...");
   const duration = await getAudioDuration(audioPath);
-
-  const threads = Math.max(
-    2,
-    (process.env.WHISPER_THREADS ? parseInt(process.env.WHISPER_THREADS) : 0) || 4,
-  );
 
   // Create temp directory for chunks
   const tempDir = resolve(dirname(outputPath), `.transcribe_tmp_${Date.now()}`);
@@ -388,7 +178,7 @@ export async function transcribeAudio(
 
     const chunks = await splitAudioToChunks(audioPath, tempDir, duration, options.onProgress);
 
-    // Transcribe each chunk sequentially
+    // Transcribe each chunk sequentially on the Lemonade host
     const allSegments: TranscriptSegment[] = [];
     let language = "en";
 
@@ -400,29 +190,37 @@ export async function transcribeAudio(
       console.log(
         `[Transcribe] Processing chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s)`,
       );
-      options.onLog?.(`--- Chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s) ---`);
-      const whisperOutput = await transcribeChunk(chunk.path, modelPath, threads, options.onLog);
-
-      if (i === 0 && whisperOutput.result?.language) {
-        language = whisperOutput.result.language;
+      options.onLog?.(
+        `--- Chunk ${i + 1}/${chunks.length} (offset: ${chunk.startOffset}s) → Lemonade ${LEMONADE_ASR_MODEL} ---`,
+      );
+      // Each chunk is ONE silent multi-minute HTTP call — heartbeat the job's
+      // progress while it runs or the queue's 3-min no-progress watchdog
+      // aborts a perfectly healthy transcription (the old whisper-cli only
+      // survived because its streamed stderr acted as an accidental heartbeat).
+      const beat = setInterval(
+        () => options.onProgress?.(chunkPct, `Transcribing chunk ${i + 1}/${chunks.length}...`),
+        45_000,
+      );
+      let asr: Awaited<ReturnType<typeof lemonadeTranscribe>>;
+      try {
+        asr = await lemonadeTranscribe(chunk.path);
+      } finally {
+        clearInterval(beat);
       }
 
-      // Transform and offset timestamps for this chunk
-      for (const seg of whisperOutput.transcription) {
-        const words = seg.tokens
-          .filter((t) => t.text.trim().length > 0)
-          .filter((t) => !t.text.startsWith("["))
-          .map((t) => ({
-            word: t.text.trim(),
-            start: round3(t.offsets.from / 1000 + chunk.startOffset),
-            end: round3(t.offsets.to / 1000 + chunk.startOffset),
-          }));
+      if (i === 0 && asr.language) language = asr.language;
 
+      // Offset timestamps by the chunk's position in the full audio
+      for (const seg of asr.segments) {
         allSegments.push({
-          start: round3(seg.offsets.from / 1000 + chunk.startOffset),
-          end: round3(seg.offsets.to / 1000 + chunk.startOffset),
-          text: seg.text.trim(),
-          words,
+          start: round3(seg.start + chunk.startOffset),
+          end: round3(seg.end + chunk.startOffset),
+          text: seg.text,
+          words: seg.words.map((w) => ({
+            word: w.word,
+            start: round3(w.start + chunk.startOffset),
+            end: round3(w.end + chunk.startOffset),
+          })),
         });
       }
 

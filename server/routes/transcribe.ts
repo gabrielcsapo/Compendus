@@ -5,7 +5,7 @@ import { resolve, extname } from "path";
 import { eq } from "drizzle-orm";
 import { db, books } from "../../app/lib/db";
 import { enqueueJob, getJob } from "../../app/lib/queue";
-import { isWhisperAvailable } from "../../app/lib/processing/transcribe";
+import { isTranscriptionAvailable } from "../../app/lib/processing/transcribe";
 import { requireAdmin } from "../middleware/profile";
 
 const app = new Hono();
@@ -58,14 +58,14 @@ app.post("/api/books/:id/transcribe", async (c) => {
     return c.json({ success: true, jobId, pending: true });
   }
 
-  // Check whisper availability
-  if (!(await isWhisperAvailable())) {
+  // Check the Lemonade ASR backend is reachable with the model pulled
+  if (!(await isTranscriptionAvailable())) {
     return c.json(
       {
         success: false,
-        error: "whisper_not_available",
+        error: "transcription_not_available",
         message:
-          "whisper-cli is not available. Ensure whisper.cpp is built and whisper-cli is on PATH.",
+          "Lemonade ASR is not available. Ensure the lemonade server is reachable and `lemonade-server pull whisper-v3-turbo-FLM` has been run.",
       },
       400,
     );

@@ -16,10 +16,10 @@
 //  Coordinates are normalized to 0..1 against the image.
 //
 
-import UIKit
+@preconcurrency import UIKit
 import CoreGraphics
 
-enum PanelDetector {
+nonisolated enum PanelDetector {
     /// Returns detected panel rects in 0..1 normalized image coordinates, in
     /// reading order. Returns an empty array if detection fails or the page
     /// has no detectable gutters (caller should fall back to a heuristic).

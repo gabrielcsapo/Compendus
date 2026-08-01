@@ -129,6 +129,11 @@ struct BookDetailView: View {
                     )
                 }
                 Divider()
+                if displayBook.isSetAside == true {
+                    Button { restoreToToday() } label: {
+                        Label("Return to Today", systemImage: "arrow.uturn.backward.circle")
+                    }
+                }
                 Button { toggleRead() } label: {
                     Label(
                         isMarkedRead ? "Mark as Unread" : "Mark as Read",
@@ -897,6 +902,24 @@ struct BookDetailView: View {
         editedBook = updated
         Task {
             _ = try? await apiService.updateBook(id: book.id, updates: UpdateBookRequest(isRead: newValue))
+        }
+    }
+
+    /// Restore a deliberately paused book without touching its saved position.
+    private func restoreToToday() {
+        var updated = displayBook
+        updated.isSetAside = false
+        editedBook = updated
+        if let downloadedBook {
+            downloadedBook.isSetAside = false
+            downloadedBook.localProgressUpdatedAt = Date()
+            try? modelContext.save()
+        }
+        Task {
+            _ = try? await apiService.updateBook(
+                id: book.id,
+                updates: UpdateBookRequest(isSetAside: false)
+            )
         }
     }
 

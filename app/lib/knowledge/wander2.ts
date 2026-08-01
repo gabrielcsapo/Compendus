@@ -82,48 +82,67 @@ interface PassageRow {
   text: string;
 }
 
-const passageStmt = () =>
-  rawDb.prepare(
-    `SELECT p.id, p.book_id AS bookId, b.title AS bookTitle, p.chapter_title AS chapterTitle,
-            p.spine_index AS spineIndex, p.text
-     FROM passages p JOIN books b ON b.id = p.book_id WHERE p.id = ?`,
-  );
+// These statements sit on every Wander tap. Preparing them once avoids paying
+// SQLite parse/codegen cost repeatedly while preserving bound parameters.
+const passageStmt = rawDb.prepare(
+  `SELECT p.id, p.book_id AS bookId, b.title AS bookTitle, p.chapter_title AS chapterTitle,
+          p.spine_index AS spineIndex, p.text
+   FROM passages p JOIN books b ON b.id = p.book_id WHERE p.id = ?`,
+);
+
+const entitiesStmt = rawDb.prepare(
+  `SELECT e.id, e.canonical_name AS name, e.type
+     FROM canonical_mentions m JOIN entities e ON e.id = m.entity_id
+    WHERE m.passage_id = ? GROUP BY e.id
+    ORDER BY e.book_count DESC, e.mention_count DESC LIMIT ?`,
+);
+
+const topicStmt = rawDb.prepare(
+  `SELECT t.id, t.label FROM passage_topics pt JOIN topics t ON t.id = pt.topic_id
+    WHERE pt.passage_id = ?`,
+);
 
 function getPassage(id: string): PassageRow | undefined {
-  return passageStmt().get(id) as PassageRow | undefined;
+  return passageStmt.get(id) as PassageRow | undefined;
 }
 
 function entitiesOf(passageId: string, limit = 6): StopEntity[] {
-  return rawDb
-    .prepare(
-      `SELECT e.id, e.canonical_name AS name, e.type
-       FROM canonical_mentions m JOIN entities e ON e.id = m.entity_id
-       WHERE m.passage_id = ? GROUP BY e.id
-       ORDER BY e.book_count DESC, e.mention_count DESC LIMIT ?`,
-    )
-    .all(passageId, limit) as StopEntity[];
+  return entitiesStmt.all(passageId, limit) as StopEntity[];
 }
 
 function topicOf(passageId: string): { id: string; label: string | null } | undefined {
-  return rawDb
-    .prepare(
-      `SELECT t.id, t.label FROM passage_topics pt JOIN topics t ON t.id = pt.topic_id
-       WHERE pt.passage_id = ?`,
-    )
-    .get(passageId) as { id: string; label: string | null } | undefined;
+  return topicStmt.get(passageId) as { id: string; label: string | null } | undefined;
 }
 
 // --- step generation -----------------------------------------------------------------
 
-export function stepsFor(passageId: string, visited: Set<string>, limit = 6): WanderStep[] {
-  const here = getPassage(passageId);
+function buildSteps(
+  passageId: string,
+  visited: Set<string>,
+  limit = 6,
+  knownPassage?: PassageRow,
+  knownContext?: {
+    topic: { id: string; label: string | null } | undefined;
+    entities: StopEntity[];
+  },
+): WanderStep[] {
+  const here = knownPassage ?? getPassage(passageId);
   if (!here) return [];
   const steps: WanderStep[] = [];
   const used = new Set<string>([passageId, ...visited]);
+  const passageCache = new Map<string, PassageRow>([[here.id, here]]);
+
+  const cachedPassage = (id: string): PassageRow | undefined => {
+    const cached = passageCache.get(id);
+    if (cached) return cached;
+    const passage = getPassage(id);
+    if (passage) passageCache.set(id, passage);
+    return passage;
+  };
 
   const push = (kind: WanderStep["kind"], pid: string, reason: string, score: number): boolean => {
     if (used.has(pid)) return false;
-    const p = getPassage(pid);
+    const p = cachedPassage(pid);
     if (!p) return false;
     used.add(pid);
     steps.push({
@@ -139,7 +158,7 @@ export function stepsFor(passageId: string, visited: Set<string>, limit = 6): Wa
   };
 
   // 1. relationship — a typed edge from this passage's most salient entity.
-  const ents = entitiesOf(passageId, 3);
+  const ents = knownContext?.entities.slice(0, 3) ?? entitiesOf(passageId, 3);
   for (const ent of ents) {
     const rel = rawDb
       .prepare(
@@ -180,7 +199,7 @@ export function stepsFor(passageId: string, visited: Set<string>, limit = 6): Wa
     .all(passageId) as { pid: string; score: number }[];
   let sameIdeaCount = 0;
   for (const e of cross) {
-    const p = getPassage(e.pid);
+    const p = cachedPassage(e.pid);
     if (!p) continue;
     if (push("same_idea", e.pid, `The same idea in “${p.bookTitle}”`, 0.8 + e.score / 10)) {
       if (++sameIdeaCount >= 2) break;
@@ -211,7 +230,7 @@ export function stepsFor(passageId: string, visited: Set<string>, limit = 6): Wa
   }
 
   // 4. deeper — same topic, highest centrality, unvisited.
-  const topic = topicOf(passageId);
+  const topic = knownContext ? knownContext.topic : topicOf(passageId);
   if (topic) {
     const deeper = rawDb
       .prepare(
@@ -257,6 +276,10 @@ export function stepsFor(passageId: string, visited: Set<string>, limit = 6): Wa
   return steps.sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
+export function stepsFor(passageId: string, visited: Set<string>, limit = 6): WanderStep[] {
+  return buildSteps(passageId, visited, limit);
+}
+
 // --- stops -----------------------------------------------------------------------------
 
 /** Chapter-anchored progress for the native reader's locator. */
@@ -288,6 +311,7 @@ export function getStop(
   const p = getPassage(passageId);
   if (!p) return null;
   const topic = topicOf(passageId);
+  const entities = entitiesOf(passageId);
   if (opts.profileId) recordSeen(opts.profileId, passageId, "wander");
   return {
     passageId: p.id,
@@ -299,8 +323,8 @@ export function getStop(
     text: cleanPassageText(p.text),
     topicId: topic?.id ?? null,
     topicLabel: topic?.label ?? null,
-    entities: entitiesOf(passageId),
-    steps: stepsFor(passageId, new Set(opts.visited ?? [])),
+    entities,
+    steps: buildSteps(passageId, new Set(opts.visited ?? []), 6, p, { topic, entities }),
   };
 }
 
@@ -318,7 +342,7 @@ function topPassageOfTopic(topicId: string): string | undefined {
   return row?.pid;
 }
 
-// Has the fleet's fiction/nonfiction classification landed? When it has, wander
+// Has the fiction/nonfiction classification landed? When it has, wander
 // gates its start to nonfiction so a random walk begins in an *idea* (a how-to,
 // a history) rather than a novel. Cached; falls back gracefully if the
 // cs_book_class table isn't present yet.
@@ -357,7 +381,7 @@ function topNonfictionPassageOfTopic(topicId: string): string | undefined {
 
 export function startRandom(): string | null {
   // Weighted by PROSE size over substantial topics: connected serendipity,
-  // citations/front-matter communities excluded by construction. When the fleet's
+  // citations/front-matter communities excluded by construction. When the
   // classification is available, the topics (and final passage) are gated to
   // nonfiction so wander begins in an idea, not a novel.
   const gate = nonfictionReady();

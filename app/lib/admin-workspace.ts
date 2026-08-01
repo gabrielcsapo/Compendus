@@ -31,9 +31,6 @@ export interface JobsSummary {
   throughputPerHour: number;
   /** Hours to drain the pending queue at current throughput (null = unknown). */
   etaHours: number | null;
-  fleet: Array<{ name: string; platform: string; lastSeenMs: number | null; jobsDone: number }>;
-  /** Fabric work currently leased (what the fleet is chewing right now). */
-  fleetActive: Array<{ kind: string; deviceName: string | null; leasedForSec: number | null }>;
 }
 
 export async function adminJobsSummary(): Promise<JobsSummary> {
@@ -80,33 +77,6 @@ export async function adminJobsSummary(): Promise<JobsSummary> {
   const etaHours =
     pendingTotal > 0 && throughputPerHour > 0.2 ? pendingTotal / throughputPerHour : null;
 
-  const fleet = (
-    rawDb
-      .prepare(
-        "SELECT name, platform, last_seen AS ls, jobs_done AS jd FROM fabric_devices ORDER BY jobs_done DESC LIMIT 12",
-      )
-      .all() as Array<{ name: string; platform: string; ls: number | null; jd: number }>
-  ).map((d) => ({
-    name: d.name,
-    platform: d.platform,
-    lastSeenMs: d.ls ? d.ls * 1000 : null,
-    jobsDone: d.jd,
-  }));
-
-  const fleetActive = (
-    rawDb
-      .prepare(
-        `SELECT w.kind, d.name, w.leased_at AS la FROM work_items w
-         LEFT JOIN fabric_devices d ON d.id = w.lease_owner
-         WHERE w.status = 'leased' ORDER BY w.leased_at DESC LIMIT 8`,
-      )
-      .all() as Array<{ kind: string; name: string | null; la: number | null }>
-  ).map((w) => ({
-    kind: w.kind,
-    deviceName: w.name,
-    leasedForSec: w.la ? Math.max(0, nowSec - w.la) : null,
-  }));
-
   return {
     paused: pause.paused,
     pausedUntil: pause.until,
@@ -126,8 +96,6 @@ export async function adminJobsSummary(): Promise<JobsSummary> {
     hourly,
     throughputPerHour,
     etaHours,
-    fleet,
-    fleetActive,
   };
 }
 

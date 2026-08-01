@@ -1,16 +1,11 @@
 import { Suspense } from "react";
 import { BookCarousel } from "./BookCarousel";
 import { CarouselSkeleton } from "./CarouselSkeleton";
-import {
-  getInProgressBooks,
-  getRecentlyAddedBooks,
-  getTopSeriesSections,
-  getTopTagsSections,
-  getReadNextInSeries,
-  getStaleReads,
-  getMoreByAuthor,
-  getGenreSections,
-} from "../actions/explore";
+import { CuratedShelfSwitcher } from "./CuratedShelfSwitcher";
+import { getInProgressBooks, getRecentlyAddedBooks, getReadNextInSeries } from "../actions/explore";
+import { getBooks } from "../actions/books";
+import { getCuratedDiscovery } from "../lib/discovery/curation";
+import { resolveProfileId } from "../lib/profile";
 import type { BookType } from "../lib/book-types";
 
 // Each section is its own async server component awaiting only its own data,
@@ -21,90 +16,44 @@ import type { BookType } from "../lib/book-types";
 async function ContinueReadingSection({ typeFilter }: { typeFilter?: BookType }) {
   const books = await getInProgressBooks(undefined, typeFilter);
   if (books.length === 0) return null;
-  return <BookCarousel title="Continue Reading" books={books} />;
+  return <BookCarousel title="Continue Reading" books={books.slice(0, 10)} allowSetAside />;
 }
 
 async function ReadNextSection() {
   const items = await getReadNextInSeries();
   if (items.length === 0) return null;
-  return <BookCarousel title="Read Next in Series" books={items.map((r) => r.book)} />;
-}
-
-async function FinishTheseSection() {
-  const books = await getStaleReads();
-  if (books.length === 0) return null;
-  return <BookCarousel title="Finish These?" books={books} />;
+  return <BookCarousel title="Read Next in Series" books={items.slice(0, 10).map((r) => r.book)} />;
 }
 
 async function RecentlyAddedSection({ typeFilter }: { typeFilter?: BookType }) {
   const books = await getRecentlyAddedBooks(undefined, typeFilter);
   if (books.length === 0) return null;
-  return <BookCarousel title="Recently Added" books={books} seeAllHref="/library?view=grid" />;
-}
-
-async function MoreByAuthorSection() {
-  const groups = await getMoreByAuthor();
-  if (groups.length === 0) return null;
   return (
-    <>
-      {groups.map((authorGroup) => (
-        <BookCarousel
-          key={authorGroup.author}
-          title={`More by ${authorGroup.author}`}
-          books={authorGroup.books}
-        />
-      ))}
-    </>
+    <BookCarousel
+      title="Recently Added"
+      books={books.slice(0, 10)}
+      seeAllHref="/library?view=grid"
+    />
   );
 }
 
-async function GenresSection() {
-  const sections = await getGenreSections();
-  if (sections.length === 0) return null;
+async function CuratedDiscoverySections({ typeFilter }: { typeFilter?: BookType }) {
+  const profileId = resolveProfileId();
+  if (!profileId) return null;
+  const curated = await getCuratedDiscovery(profileId);
+  const ids = [...new Set(curated.shelves.flatMap((shelf) => shelf.bookIds))];
+  const books = await getBooks({ ids, limit: ids.length, profileId, type: typeFilter });
+  const booksById = new Map(books.map((book) => [book.id, book]));
   return (
-    <>
-      {sections.map((genre) => (
-        <BookCarousel
-          key={genre.subject}
-          title={genre.subject.replace(/\b\w/g, (c) => c.toUpperCase())}
-          books={genre.books}
-        />
-      ))}
-    </>
-  );
-}
-
-async function TopSeriesSection() {
-  const series = await getTopSeriesSections();
-  if (series.length === 0) return null;
-  return (
-    <>
-      {series.map((s) => (
-        <BookCarousel
-          key={s.name}
-          title={s.name}
-          books={s.books}
-          seeAllHref={`/library?series=${encodeURIComponent(s.name)}&view=grid`}
-        />
-      ))}
-    </>
-  );
-}
-
-async function TopTagsSection() {
-  const tags = await getTopTagsSections();
-  if (tags.length === 0) return null;
-  return (
-    <>
-      {tags.map((tag) => (
-        <BookCarousel
-          key={tag.id}
-          title={tag.name.charAt(0).toUpperCase() + tag.name.slice(1)}
-          books={tag.books}
-          seeAllHref="/tags"
-        />
-      ))}
-    </>
+    <CuratedShelfSwitcher
+      shelves={curated.shelves.map((shelf) => ({
+        ...shelf,
+        books: shelf.bookIds.flatMap((id) => {
+          const book = booksById.get(id);
+          return book ? [book] : [];
+        }),
+      }))}
+    />
   );
 }
 
@@ -122,23 +71,11 @@ export function ExploreSections({ typeFilter }: { typeFilter?: BookType }) {
       <Suspense fallback={<CarouselSkeleton titleWidth="w-44" />}>
         <ReadNextSection />
       </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-32" />}>
-        <FinishTheseSection />
+      <Suspense fallback={<CarouselSkeleton titleWidth="w-44" />}>
+        <CuratedDiscoverySections typeFilter={typeFilter} />
       </Suspense>
       <Suspense fallback={<CarouselSkeleton titleWidth="w-36" />}>
         <RecentlyAddedSection typeFilter={typeFilter} />
-      </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-48" />}>
-        <MoreByAuthorSection />
-      </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-40" />}>
-        <GenresSection />
-      </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-44" />}>
-        <TopSeriesSection />
-      </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-36" />}>
-        <TopTagsSection />
       </Suspense>
     </div>
   );

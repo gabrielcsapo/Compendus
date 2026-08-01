@@ -60,6 +60,12 @@ class AppSettings {
         }
     }
 
+    /// Explicit travel/airplane mode. Local reading and durable edit queues stay
+    /// active, while all nonessential server activity is suppressed.
+    var offlineMode: Bool {
+        didSet { ConnectivityMonitor.shared.manualOfflineMode = offlineMode }
+    }
+
     /// Computed color scheme for the app
     var colorScheme: ColorScheme? {
         switch colorSchemePreference {
@@ -81,6 +87,7 @@ class AppSettings {
         self.autoGenerateTTS = UserDefaults.standard.object(forKey: "autoGenerateTTS") as? Bool ?? false
         self.autoTranscribeAudiobooks = UserDefaults.standard.object(forKey: "autoTranscribeAudiobooks") as? Bool ?? false
         self.backgroundProcessingChargingOnly = UserDefaults.standard.object(forKey: "bgProcessingChargingOnly") as? Bool ?? true
+        self.offlineMode = UserDefaults.standard.bool(forKey: "compendus.offlineMode")
     }
 
     /// Update the last sync time to now

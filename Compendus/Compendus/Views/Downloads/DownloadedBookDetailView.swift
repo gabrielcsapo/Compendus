@@ -642,6 +642,10 @@ struct DownloadedBookDetailView: View {
 
     private func loadRelatedBooks() async {
         isLoadingRelated = true
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else {
+            isLoadingRelated = false
+            return
+        }
         do {
             let response = try await apiService.fetchBook(id: book.id)
             relatedBooks = response.relatedBooks ?? []

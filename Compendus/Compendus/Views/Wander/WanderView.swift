@@ -40,8 +40,8 @@ struct WanderView: View {
     @State private var showingSeek = false
     @State private var seekText = ""
 
-    // Topics / study mode sheet.
-    @State private var showingTopics = false
+    // Compact, source-grounded learning Pods.
+    @State private var showingPods = false
 
     // Saving the path as a trail.
     @State private var savedTrailTitle: String?
@@ -73,7 +73,7 @@ struct WanderView: View {
         .fullScreenCover(item: $bookToRead) { book in
             readerCover(for: book)
         }
-        .sheet(isPresented: $showingTopics) {
+        .sheet(isPresented: $showingPods) {
             JourneysView()
         }
         .alert("Not on this device", isPresented: $showNotDownloaded) {
@@ -140,7 +140,7 @@ struct WanderView: View {
 
     private var closeButton: some View {
         Button {
-            nav.selectedTab = 0
+            nav.exitExplore()
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 14, weight: .semibold))
@@ -152,13 +152,13 @@ struct WanderView: View {
         }
         .padding(.trailing, 20)
         .padding(.top, 8)
-        .accessibilityLabel("Exit wander")
+        .accessibilityLabel("Exit explore")
     }
 
     private var topLeadingButtons: some View {
         HStack(spacing: 10) {
             iconButton("magnifyingglass", label: "Wander toward something") { showingSeek = true }
-            iconButton("books.vertical", label: "Topics and study paths") { showingTopics = true }
+            iconButton("square.stack.3d.up", label: "Pods") { showingPods = true }
         }
         .padding(.leading, 20)
         .padding(.top, 8)

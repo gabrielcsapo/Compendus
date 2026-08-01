@@ -211,6 +211,34 @@
       "when": 1781583094558,
       "tag": "0029_minor_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1783828658936,
+      "tag": "0030_familiar_silk_fever",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1784220584225,
+      "tag": "0031_young_masked_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1784227316651,
+      "tag": "0032_rapid_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1785609341204,
+      "tag": "0033_green_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

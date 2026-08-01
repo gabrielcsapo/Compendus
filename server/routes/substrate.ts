@@ -1,12 +1,11 @@
 /**
  * Semantic substrate routes — thin HTTP wrappers (for the iOS app and any
- * non-web client) over the shared atlas/wander2/curriculum libs. The web UI
+ * non-web client) over the shared wander/Pods libraries. The web UI
  * reaches the same functions through server actions (app/actions/substrate.ts);
  * the logic lives in app/lib so there is exactly one implementation.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
 import { Hono } from "hono";
 import { rawDb } from "../../app/lib/db";
 import {
@@ -17,19 +16,17 @@ import {
   cleanPassageText,
 } from "../../app/lib/knowledge/wander2";
 import { substrateReady, getEmbedding, dequantize } from "../../app/lib/knowledge/substrate";
-// Journeys now read the CONCEPT substrate (nonfiction-gated, distinctively/fleet
-// labelled) on BOTH web and iOS — the old atlas/curriculum journey path is retired.
+// Topic detail remains solely as a deep-link compatibility surface. All active
+// learning clients use the substrate-neutral Pods read model below.
+import { lgTopicDetail } from "../../app/lib/lg/read-models";
 import {
-  listConceptJourneyTopics,
-  buildConceptCurriculum,
-  conceptAdjacentTopics,
-  conceptSearchJourneys,
-} from "../../app/lib/concept/wander";
-import { enqueueWork, blobPathFor } from "../../app/lib/fabric";
-import "../../app/lib/fabric/kinds";
-
-const resolveDataPath = (rel: string) =>
-  resolvePath(process.env.COMPENDUS_DATA_DIR || resolvePath(process.cwd(), "data"), rel);
+  adjacentPods,
+  answerPodQuestion,
+  getPodSession,
+  listPods,
+  searchPods,
+} from "../../app/lib/learning/pods";
+import { startPass, passStatus } from "../../app/lib/llm/lane";
 
 const app = new Hono();
 
@@ -69,18 +66,94 @@ app.get("/api/wander2/stop/:passageId", (c) => {
   return c.json({ success: true, stop });
 });
 
-// --- topics
+// --- pods -------------------------------------------------------------------------------
 
-// --- topics + realms (atlas) ----------------------------------------------------------
-
-/** GET /api/topics — paged topic list (or ids=csv selection) with coverage. */
-app.get("/api/topics", (c) => {
+/** GET /api/pods — the one learning collection contract shared by web + iOS. */
+app.get("/api/pods", (c) => {
   const ids = (c.req.query("ids") || "").split(",").filter(Boolean);
-  const { topics, total } = listConceptJourneyTopics({
+  const result = listPods({
     limit: parseInt(c.req.query("limit") || "60", 10),
     offset: parseInt(c.req.query("offset") || "0", 10),
     ids: ids.length ? ids : undefined,
   });
+  return c.json({ success: true, ...result });
+});
+
+app.get("/api/pods/search", (c) => {
+  const query = (c.req.query("q") || "").trim();
+  if (!query) return c.json({ success: false, error: "q required" }, 400);
+  return c.json({ success: true, pods: searchPods(query) });
+});
+
+app.get("/api/pods/:id/session", (c) => {
+  const session = getPodSession(c.req.param("id"), c.get("profileId") ?? undefined);
+  if (!session) {
+    return c.json({ success: false, error: "Pod does not have enough verified sources yet" }, 404);
+  }
+  return c.json({ success: true, session, adjacent: adjacentPods(c.req.param("id")) });
+});
+
+app.post("/api/pods/:id/attempts", async (c) => {
+  let body: {
+    revision?: string;
+    questionId?: string;
+    selectedChoiceId?: string;
+    attemptId?: string;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Malformed JSON body" }, 400);
+  }
+  if (!body.questionId || !body.selectedChoiceId) {
+    return c.json({ success: false, error: "questionId and selectedChoiceId required" }, 400);
+  }
+  const podId = c.req.param("id");
+  const profileId = c.get("profileId") ?? undefined;
+  const current = getPodSession(podId, profileId);
+  if (body.revision && current?.revision !== body.revision) {
+    return c.json(
+      {
+        success: false,
+        error: "Pod changed since this question was loaded",
+        code: "POD_REVISION_STALE",
+        revision: current?.revision ?? null,
+      },
+      409,
+    );
+  }
+  const result = answerPodQuestion({
+    podId,
+    revision: body.revision,
+    questionId: body.questionId,
+    selectedChoiceId: body.selectedChoiceId,
+    attemptId: body.attemptId,
+    profileId,
+  });
+  if (!result) return c.json({ success: false, error: "Question not found" }, 404);
+  return c.json({ success: true, result });
+});
+
+// --- legacy topic aliases --------------------------------------------------------------
+// Saved links and older clients keep working, but all reads now flow through
+// the Pods read model instead of selecting a substrate independently.
+
+/** GET /api/topics — paged topic list (or ids=csv selection) with coverage.
+ *  Serves the LLM learning graph once Phase 2 lands (data-presence cutover). */
+app.get("/api/topics", (c) => {
+  const ids = (c.req.query("ids") || "").split(",").filter(Boolean);
+  const opts = {
+    limit: parseInt(c.req.query("limit") || "60", 10),
+    offset: parseInt(c.req.query("offset") || "0", 10),
+    ids: ids.length ? ids : undefined,
+  };
+  const { pods, total } = listPods(opts);
+  const topics = pods.map((pod) => ({
+    id: pod.id,
+    label: pod.title,
+    size: pod.passageCount,
+    bookCount: pod.bookCount,
+  }));
   return c.json({ success: true, topics, total });
 });
 
@@ -91,11 +164,23 @@ app.get("/api/realms", (c) => c.json({ success: true, realms: [] }));
 app.get("/api/topics/search", (c) => {
   const q = (c.req.query("q") || "").trim();
   if (!q) return c.json({ success: false, error: "q required" }, 400);
-  return c.json({ success: true, topics: conceptSearchJourneys(q) });
+  const topics = searchPods(q).map((pod) => ({
+    id: pod.id,
+    label: pod.title,
+    size: pod.passageCount,
+    bookCount: pod.bookCount,
+  }));
+  return c.json({ success: true, topics });
 });
 
-/** GET /api/topics/:id — core-first passages + books (concept substrate). */
+/** GET /api/topics/:id — core-first passages + books. lgth_* ids read the
+ *  learning graph; cs ids stay on the concept substrate (deep-link compat). */
 app.get("/api/topics/:id", (c) => {
+  if (c.req.param("id").startsWith("lgth_")) {
+    const detail = lgTopicDetail(c.req.param("id"));
+    if (!detail) return c.json({ success: false, error: "Topic not found" }, 404);
+    return c.json({ success: true, topic: detail });
+  }
   const topic = rawDb
     .prepare(
       "SELECT id, COALESCE(fleet_label, display_label) AS label, size, nonfiction_books AS bookCount FROM cs_topics WHERE id = ?",
@@ -125,15 +210,31 @@ app.get("/api/topics/:id", (c) => {
   });
 });
 
-/** GET /api/topics/:id/adjacent — journey forks (concept substrate). */
+/** GET /api/topics/:id/adjacent — journey forks. */
 app.get("/api/topics/:id/adjacent", (c) => {
-  return c.json({ success: true, adjacent: conceptAdjacentTopics(c.req.param("id")) });
+  const id = c.req.param("id");
+  const adjacent = adjacentPods(id).map((pod) => ({
+    id: pod.id,
+    label: pod.title,
+    size: pod.passageCount,
+    bookCount: pod.bookCount,
+  }));
+  return c.json({ success: true, adjacent });
 });
 
 /** GET /api/topics/:id/curriculum — the journey reading path, built on demand. */
 app.get("/api/topics/:id/curriculum", (c) => {
-  const curriculum = buildConceptCurriculum(c.req.param("id"), c.get("profileId") ?? undefined);
-  if (!curriculum) return c.json({ success: false, error: "Topic not found or empty" }, 404);
+  const id = c.req.param("id");
+  const profileId = c.get("profileId") ?? undefined;
+  const session = getPodSession(id, profileId);
+  if (!session) return c.json({ success: false, error: "Topic not found or empty" }, 404);
+  const curriculum = {
+    id: session.id,
+    topicId: session.podId,
+    title: session.title,
+    builder: "pods-compat",
+    items: session.items,
+  };
   return c.json({ success: true, curriculum });
 });
 
@@ -276,14 +377,19 @@ app.get("/api/trails", (c) => {
 });
 
 /**
- * POST /api/trails/:id/render — enqueue narration of this trail as a fabric
- * job for a Kokoro-capable device (audio wander, S5).
+ * POST /api/trails/:id/render — render this trail's narration with the
+ * server's Kokoro TTS (audio wander). Runs detached on the serial inference
+ * lane; poll /api/trails/:id/render/status, then stream /audio.
  */
 app.post("/api/trails/:id/render", async (c) => {
   const profileId = c.get("profileId") as string | undefined;
   const row = rawDb
-    .prepare("SELECT id, profile_id AS profileId, path_json AS pathJson FROM trails WHERE id = ?")
-    .get(c.req.param("id")) as { id: string; profileId: string; pathJson: string } | undefined;
+    .prepare(
+      "SELECT id, profile_id AS profileId, path_json AS pathJson, audio_hash AS audioHash FROM trails WHERE id = ?",
+    )
+    .get(c.req.param("id")) as
+    | { id: string; profileId: string; pathJson: string; audioHash: string | null }
+    | undefined;
   if (!row || row.profileId !== profileId) {
     return c.json({ success: false, error: "Trail not found" }, 404);
   }
@@ -299,17 +405,31 @@ app.post("/api/trails/:id/render", async (c) => {
     }))
     .filter((s) => s.text.length > 0);
   if (segments.length === 0) return c.json({ success: false, error: "Trail has no text" }, 400);
-  const { item, deduped } = enqueueWork({
-    project: "compendus",
-    kind: "tts-render-trail",
-    payload: { trailId: row.id, voiceIndex: Number(body?.voiceIndex) || 0, segments },
-    requirements: { runtimes: ["kokoro"], estMinutes: 2 },
+
+  const { renderTrailAudio, trailAudioPath } = await import("../../app/lib/tts/trail-render");
+  // Compute-once: an already-rendered trail with its WAV on disk is done.
+  if (row.audioHash && existsSync(trailAudioPath(row.audioHash))) {
+    return c.json({ success: true, started: false, alreadyRendered: true });
+  }
+  const started = startPass(`tts-trail:${row.id}`, (status) => {
+    status.total = segments.length;
+    return renderTrailAudio(row.id, segments, {
+      voiceIndex: Number(body?.voiceIndex) || 0,
+      onProgress: (done) => {
+        status.processed = done;
+      },
+    });
   });
-  return c.json({ success: true, itemId: item.id, deduped });
+  if (!started.started) return c.json({ success: true, started: false, reason: started.reason });
+  return c.json({ success: true, started: true });
 });
 
+app.get("/api/trails/:id/render/status", (c) =>
+  c.json(passStatus(`tts-trail:${c.req.param("id")}`)),
+);
+
 /** GET /api/trails/:id/audio — stream the rendered narration WAV. */
-app.get("/api/trails/:id/audio", (c) => {
+app.get("/api/trails/:id/audio", async (c) => {
   const profileId = c.get("profileId") as string | undefined;
   const row = rawDb
     .prepare("SELECT profile_id AS profileId, audio_hash AS audioHash FROM trails WHERE id = ?")
@@ -318,8 +438,9 @@ app.get("/api/trails/:id/audio", (c) => {
     return c.json({ success: false, error: "Trail not found" }, 404);
   }
   if (!row.audioHash) return c.json({ success: false, error: "Not rendered yet" }, 404);
-  const abs = resolveDataPath(blobPathFor(row.audioHash));
-  if (!existsSync(abs)) return c.json({ success: false, error: "Artifact missing" }, 410);
+  const { trailAudioPath } = await import("../../app/lib/tts/trail-render");
+  const abs = trailAudioPath(row.audioHash);
+  if (!existsSync(abs)) return c.json({ success: false, error: "Audio file missing" }, 410);
   const bytes = readFileSync(abs);
   return c.body(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,

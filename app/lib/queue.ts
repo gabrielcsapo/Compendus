@@ -13,7 +13,7 @@ import { eq, asc, sql } from "drizzle-orm";
 import { mkdirSync, statSync } from "fs";
 import { resolve } from "path";
 import { db, backgroundJobs, books } from "./db";
-import { transcribeAudio, isWhisperAvailable } from "./processing/transcribe";
+import { transcribeAudio, isTranscriptionAvailable } from "./processing/transcribe";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -422,10 +422,10 @@ async function processTranscribeJob(jobId: string, payload: TranscribePayload): 
   const transcriptsDir = resolve(process.cwd(), "data", "transcripts");
   mkdirSync(transcriptsDir, { recursive: true });
 
-  // Check whisper availability
-  if (!(await isWhisperAvailable())) {
+  // Preflight: the Lemonade host must answer and have the ASR model pulled.
+  if (!(await isTranscriptionAvailable())) {
     throw new Error(
-      "whisper-cli is not available. Ensure whisper.cpp is built and whisper-cli is on PATH.",
+      "Lemonade ASR is not available. Ensure the lemonade server is reachable (OLLAMA_URL) and `lemonade-server pull whisper-v3-turbo-FLM` has been run.",
     );
   }
 
@@ -462,65 +462,6 @@ async function processConvertJob(jobId: string, payload: ConvertPayload): Promis
     }
   }
 
-  // FLEET FIRST for PDFs: the in-process conversion has OOM-killed this
-  // container on big image-heavy PDFs (the crash-loop of 2026-06-11). The
-  // pdf-epub kernel runs the identical conversion on whatever device leases
-  // it; apply copies the EPUB into place. Poll with watchdog heartbeats and
-  // fall back to local conversion if the fleet is asleep.
-  if (book.format === "pdf") {
-    try {
-      const fabric = await import("./fabric");
-      const { kernelHashFor } = await import("./fabric/kernels");
-      if (fabric.runtimeOnFleet("js-kernel")) {
-        const authors = (() => {
-          try {
-            const a = JSON.parse(book.authors ?? "[]");
-            return Array.isArray(a) ? a : [];
-          } catch {
-            return [];
-          }
-        })();
-        const { item } = fabric.enqueueWork({
-          project: "compendus",
-          kind: "convert-pdf-epub",
-          payload: {
-            bookId: book.id,
-            kernelHash: kernelHashFor("pdf-epub"),
-            fileRef: `/api/fabric/files/${book.id}`,
-            title: book.title,
-            authors,
-            language: book.language ?? undefined,
-          },
-          requirements: { runtimes: ["js-kernel"], estMinutes: 10 },
-        });
-        appendJobLog(jobId, `EPUB conversion offered to the fleet (${item.id})`);
-        const beat = setInterval(
-          () => updateJobProgress(jobId, { progress: 35, message: "Fleet is converting…" }),
-          20_000,
-        );
-        try {
-          const res = await fabric.waitForWorkResult(item.id, {
-            timeoutMs: 15 * 60 * 1000,
-            leaseWithinMs: 2 * 60 * 1000,
-          });
-          if (res) {
-            const fresh = db.select().from(books).where(eq(books.id, bookId)).get();
-            if (fresh?.convertedEpubPath) {
-              appendJobLog(jobId, "fleet converted the PDF — done");
-              console.log(`[Queue] PDF → EPUB fleet conversion complete for ${bookId}`);
-              return;
-            }
-          }
-          appendJobLog(jobId, "fleet didn't convert in time — converting locally");
-        } finally {
-          clearInterval(beat);
-        }
-      }
-    } catch (e) {
-      appendJobLog(jobId, `fleet conversion unavailable (${e instanceof Error ? e.message : e})`);
-    }
-  }
-
   // Shared with the knowledge pipeline's on-demand conversion (single source of
   // truth for "turn this book into an EPUB and record it on the book row").
   const { convertBookToEpub } = await import("./processing/ensure-epub");
@@ -549,7 +490,7 @@ async function processExtractJob(jobId: string, payload: ExtractPayload): Promis
 // Backfill CCD bundles for the whole library — idempotent (skips books already
 // at the current CCD version). Dynamic import keeps pdfjs/epub deps out of the
 // queue's static graph.
-const CCD_BACKFILL_DELAY_MS = 750;
+const CCD_BACKFILL_DELAY_MS = 150;
 // Per-book hard cap. > the worker's 120s task timeout, so the worker recovers
 // worker-side hangs first; this catches main-thread hangs (e.g. ensureEpub).
 const CCD_BOOK_TIMEOUT_MS = 180_000;
@@ -619,54 +560,6 @@ async function processGenerateCcdJob(jobId: string, payload: { bookId?: string }
   if (!needsCcd(book)) return; // already converted at the current version — nothing to do
   updateJobProgress(jobId, { status: "running", progress: 30, message: "Building CCD…" });
 
-  // FLEET FIRST for PDFs: conversion is the box's heaviest reader-facing CPU
-  // and pdfjs runs natively on every fleet host (browser tabs included). The
-  // apply hook writes ccd_path when the result lands; we poll, heartbeat the
-  // watchdog, and fall back to local conversion if nobody picks it up.
-  if (book.format === "pdf") {
-    try {
-      const fabric = await import("./fabric");
-      const { kernelHashFor } = await import("./fabric/kernels");
-      const { CCD_VERSION } = await import("./content-ast/types");
-      if (fabric.runtimeOnFleet("js-kernel")) {
-        const { item } = fabric.enqueueWork({
-          project: "compendus",
-          kind: "convert-pdf-ccd",
-          payload: {
-            bookId: book.id,
-            kernelHash: kernelHashFor("pdf-ccd"),
-            fileRef: `/api/fabric/files/${book.id}`,
-            expectCcdVersion: CCD_VERSION,
-          },
-          requirements: { runtimes: ["js-kernel"], estMinutes: 5 },
-        });
-        appendJobLog(jobId, `PDF conversion offered to the fleet (${item.id})`);
-        const beat = setInterval(
-          () => updateJobProgress(jobId, { progress: 35, message: "Fleet is converting…" }),
-          20_000,
-        );
-        try {
-          const res = await fabric.waitForWorkResult(item.id, {
-            timeoutMs: 10 * 60 * 1000,
-            leaseWithinMs: 2 * 60 * 1000,
-          });
-          if (res) {
-            const fresh = db.select().from(books).where(eq(books.id, bookId)).get();
-            if (fresh && !needsCcd(fresh)) {
-              appendJobLog(jobId, "fleet converted the PDF — done");
-              return;
-            }
-          }
-          appendJobLog(jobId, "fleet didn't convert in time — converting locally");
-        } finally {
-          clearInterval(beat);
-        }
-      }
-    } catch (e) {
-      appendJobLog(jobId, `fleet conversion unavailable (${e instanceof Error ? e.message : e})`);
-    }
-  }
-
   await generateCcd(book); // persists ccd_path/ccd_version on success, or ccd_error on failure
 }
 
@@ -696,46 +589,11 @@ async function processNextJob(): Promise<void> {
     return; // wait for the next tick before starting another job
   }
 
-  // BACKPRESSURE on fire-and-continue: every extract job that offloads to the
-  // fleet leaves a queued extract-entities item + a future apply. Without a
-  // cap the box fires books far faster than the fleet drains them (38 in
-  // flight observed) and the continuous embed + serialized applies starve the
-  // 2-core event loop — server unreachable for minutes. While the fleet
-  // backlog is deep, stop claiming NEW extract jobs (other tiers still run);
-  // applies land, the backlog shrinks, extraction resumes.
-  const FLEET_EXTRACT_BACKLOG_MAX = Number(process.env.FLEET_EXTRACT_BACKLOG_MAX || 4);
-  let skipExtract = false;
-  try {
-    const { runtimeOnFleet } = await import("./fabric");
-    // Backpressure only makes sense while a gliner device is actually awake
-    // to drain the backlog. Fleet asleep (laptop unplugged) + a standing
-    // backlog froze the whole extract tier — with no device checked in, the
-    // pipeline's runtimeOnFleet gate makes new jobs extract LOCALLY anyway,
-    // so claiming them is always safe.
-    if (runtimeOnFleet("gliner")) {
-      const { rawDb } = await import("./db");
-      const backlog = (
-        rawDb
-          .prepare(
-            "SELECT COUNT(*) AS n FROM work_items WHERE kind = 'extract-entities' AND status IN ('queued','leased')",
-          )
-          .get() as { n: number }
-      ).n;
-      skipExtract = backlog >= FLEET_EXTRACT_BACKLOG_MAX;
-    }
-  } catch {
-    // fabric tables unavailable (fresh DB mid-migration) — no backpressure
-  }
-
   // Find oldest pending job
   const row = db
     .select()
     .from(backgroundJobs)
-    .where(
-      skipExtract
-        ? sql`${backgroundJobs.status} = 'pending' AND ${backgroundJobs.type} != 'extract'`
-        : eq(backgroundJobs.status, "pending"),
-    )
+    .where(eq(backgroundJobs.status, "pending"))
     // Reader-facing work preempts enrichment: a fresh upload's CCD must not
     // sit behind days of queued analysis. Within a tier, FIFO.
     .orderBy(
@@ -908,11 +766,10 @@ export function startJobProcessor(): void {
 
   // Boot grace before pulling heavy jobs. Right after a restart the container is
   // already near its memory ceiling: the boot build, MiniLM + GLiNER model loads,
-  // and the substrate warm-up all peak together. Starting a large-book extract on
-  // top of that is what tips the 6GB box into an OOM/native crash → restart →
-  // boot-reset re-queue → crash again. Letting boot settle first breaks that
-  // collision; for a personal library a ~45s delay on resuming the queue is free.
-  const BOOT_GRACE_MS = 45_000;
+  // and the substrate warm-up all peak together. On the old 6GB box a large-book
+  // extract landing on top of that tipped it into an OOM crash-loop; the Beelink
+  // has real headroom, so a short settle window is enough.
+  const BOOT_GRACE_MS = 15_000;
   setTimeout(() => {
     setInterval(() => {
       processNextJob().catch((err) => {

@@ -1,25 +1,61 @@
 "use client";
 
-import { useRef } from "react";
-import { Link } from "react-flight-router/client";
+import { useRef, useState } from "react";
+import { Link, useRouter } from "react-flight-router/client";
 import { BookCover } from "./BookCover";
+import { useToast } from "./ToastContext";
+import { setBookAside } from "../actions/books";
 import type { BookWithState } from "../actions/books";
 
 interface BookCarouselProps {
   title: string;
+  subtitle?: string;
+  reasons?: Record<string, string>;
   books: BookWithState[];
   seeAllHref?: string;
+  allowSetAside?: boolean;
 }
 
-export function BookCarousel({ title, books, seeAllHref }: BookCarouselProps) {
+export function BookCarousel({
+  title,
+  subtitle,
+  reasons,
+  books,
+  seeAllHref,
+  allowSetAside = false,
+}: BookCarouselProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [settingAsideId, setSettingAsideId] = useState<string | null>(null);
+  const [hiddenBookIds, setHiddenBookIds] = useState<Set<string>>(() => new Set());
+  const visibleBooks = allowSetAside ? books.filter((book) => !hiddenBookIds.has(book.id)) : books;
 
-  if (books.length === 0) return null;
+  const handleSetAside = async (book: BookWithState) => {
+    if (settingAsideId) return;
+    setSettingAsideId(book.id);
+    try {
+      const result = await setBookAside(book.id, true);
+      if (!result) throw new Error("Set aside is unavailable without an active profile");
+      setHiddenBookIds((current) => new Set(current).add(book.id));
+      showToast(`Set aside “${book.title}”. Return it from the book page anytime.`, "info");
+      await router.refresh();
+    } catch {
+      showToast(`Couldn't set aside “${book.title}”. Try again.`, "error");
+    } finally {
+      setSettingAsideId(null);
+    }
+  };
+
+  if (visibleBooks.length === 0) return null;
 
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-bold text-foreground">{title}</h2>
+        <div>
+          <h2 className="text-lg font-bold text-foreground">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-xs text-foreground-muted">{subtitle}</p>}
+        </div>
         <div className="flex items-center gap-2">
           {seeAllHref && (
             <Link
@@ -66,7 +102,7 @@ export function BookCarousel({ title, books, seeAllHref }: BookCarouselProps) {
         className="flex gap-3 overflow-x-auto pb-1"
         style={{ scrollbarWidth: "none" }}
       >
-        {books.map((book) => {
+        {visibleBooks.map((book) => {
           const progressPercent = Math.round((book.readingProgress || 0) * 100);
           let authors: string[] = [];
           try {
@@ -74,33 +110,72 @@ export function BookCarousel({ title, books, seeAllHref }: BookCarouselProps) {
           } catch {}
 
           return (
-            <Link key={book.id} to={`/book/${book.id}`} className="flex-none w-28 group">
-              <div
-                className="aspect-[2/3] rounded-lg overflow-hidden shadow-sm group-hover:shadow-md transition-shadow"
-                style={{ backgroundColor: book.coverColor || undefined }}
-              >
-                <BookCover
-                  book={book}
-                  imgClassName="group-hover:scale-105 transition-transform duration-300"
-                />
-              </div>
-              <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2 leading-tight">
-                {book.title}
-              </p>
-              {authors.length > 0 && (
-                <p className="text-[10px] text-foreground-muted mt-0.5 line-clamp-1">
-                  {authors[0]}
-                </p>
-              )}
-              {progressPercent > 0 && (
-                <div className="mt-1.5 h-0.5 bg-surface-elevated rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full"
-                    style={{ width: `${progressPercent}%` }}
+            <article key={book.id} className="relative flex-none w-[clamp(8rem,9vw,10.5rem)] group">
+              <Link to={`/book/${book.id}`} className="block">
+                <div
+                  className="aspect-[2/3] rounded-lg overflow-hidden shadow-sm group-hover:shadow-md transition-shadow"
+                  style={{ backgroundColor: book.coverColor || undefined }}
+                >
+                  <BookCover
+                    book={book}
+                    imgClassName="group-hover:scale-105 transition-transform duration-300"
                   />
                 </div>
+                <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2 leading-tight">
+                  {book.title}
+                </p>
+                {authors.length > 0 && (
+                  <p className="text-[10px] text-foreground-muted mt-0.5 line-clamp-1">
+                    {authors[0]}
+                  </p>
+                )}
+                {reasons?.[book.id] && (
+                  <p className="mt-1 text-[10px] leading-snug text-primary line-clamp-3">
+                    {reasons[book.id]}
+                  </p>
+                )}
+                {progressPercent > 0 && (
+                  <div className="mt-1.5 h-0.5 bg-surface-elevated rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                )}
+              </Link>
+              {allowSetAside && (
+                <button
+                  type="button"
+                  onClick={() => handleSetAside(book)}
+                  disabled={settingAsideId !== null}
+                  className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/65 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-wait disabled:opacity-60"
+                  title="Set aside"
+                  aria-label={`Set aside ${book.title}`}
+                >
+                  {settingAsideId === book.id ? (
+                    <span
+                      className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 8h14M9 12h6m-9 8h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                  )}
+                </button>
               )}
-            </Link>
+            </article>
           );
         })}
       </div>

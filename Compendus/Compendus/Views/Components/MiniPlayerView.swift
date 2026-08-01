@@ -11,79 +11,44 @@ struct MiniPlayerView: View {
     @Environment(AudiobookPlayer.self) private var player
     @Environment(ThemeManager.self) private var themeManager
 
-    @State private var showStopConfirmation = false
-
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                // X — stops the session
                 Button {
-                    showStopConfirmation = true
+                    player.isFullPlayerPresented = true
                 } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 44)
-                }
-                .accessibilityLabel("Stop playback")
-                .confirmationDialog("Stop playback?", isPresented: $showStopConfirmation, titleVisibility: .visible) {
-                    Button("Stop", role: .destructive) { player.stop() }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This will end your listening session.")
-                }
+                    HStack(spacing: 10) {
+                        LocalCoverImage(
+                            bookId: player.currentBook?.id ?? "",
+                            coverData: player.currentBook?.coverData,
+                            format: player.currentBook?.format ?? "m4b"
+                        )
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                // Cover art — tap opens full player
-                LocalCoverImage(
-                    bookId: player.currentBook?.id ?? "",
-                    coverData: player.currentBook?.coverData,
-                    format: player.currentBook?.format ?? "m4b"
-                )
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .onTapGesture { player.isFullPlayerPresented = true }
-
-                // Title, chapter, and author — tap opens full player
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(player.currentBook?.title ?? "")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    if let chapter = player.currentChapter {
-                        Text(chapter.title)
-                            .font(.caption2)
-                            .foregroundStyle(themeManager.accentColor)
-                            .lineLimit(1)
-                    } else {
-                        Text(player.currentBook?.authorsDisplay ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(player.currentBook?.title ?? "")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .lineLimit(1)
+                            if let chapter = player.currentChapter {
+                                Text(chapter.title)
+                                    .font(.caption2)
+                                    .foregroundStyle(themeManager.accentColor)
+                                    .lineLimit(1)
+                            } else {
+                                Text(player.currentBook?.authorsDisplay ?? "")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .onTapGesture { player.isFullPlayerPresented = true }
-
-                // Speed picker
-                Menu {
-                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { speed in
-                        Button {
-                            player.setPlaybackRate(Float(speed))
-                        } label: {
-                            HStack {
-                                Text("\(speed, specifier: "%.2g")x")
-                                if player.playbackRate == Float(speed) {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Text("\(player.playbackRate, specifier: "%.2g")x")
-                        .font(.caption.weight(.semibold))
-                        .frame(width: 36, height: 44)
-                }
-                .accessibilityLabel("Playback speed")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open player for \(player.currentBook?.title ?? "audiobook")")
 
                 // Play/Pause
                 Button {
@@ -116,13 +81,5 @@ struct MiniPlayerView: View {
             .frame(height: 3)
         }
         .frame(height: 76)
-        .gesture(
-            DragGesture(minimumDistance: 40)
-                .onEnded { value in
-                    if value.translation.height < -30 && value.predictedEndTranslation.height < -60 {
-                        player.isFullPlayerPresented = true
-                    }
-                }
-        )
     }
 }

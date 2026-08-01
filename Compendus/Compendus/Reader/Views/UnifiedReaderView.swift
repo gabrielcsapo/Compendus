@@ -303,9 +303,10 @@ struct UnifiedReaderView: View {
                     )
                     .readerThemed(readerSettings)
                     .task {
-                        if let items = await engine?.tableOfContents(), !items.isEmpty {
-                            tocItems = items
-                        }
+                        // Build this when the sheet opens. EPUB page counts are
+                        // populated by background pagination, so eagerly caching
+                        // the TOC during launch made every chapter appear on page 1.
+                        tocItems = await engine?.tableOfContents() ?? []
                     }
                 }
             }
@@ -948,6 +949,24 @@ struct UnifiedReaderView: View {
         Color(uiColor: readerSettings.theme.textColor)
     }
 
+    /// Some converted books only provide a generated filename as their spine
+    /// title. Keep that implementation detail out of the reading chrome.
+    private func displayChapterTitle(_ rawTitle: String?) -> String? {
+        guard let rawTitle else { return nil }
+        let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let stem = (trimmed as NSString).deletingPathExtension
+        let lowercased = stem.lowercased()
+        for prefix in ["chapter-", "chapter_"] where lowercased.hasPrefix(prefix) {
+            let suffix = String(stem.dropFirst(prefix.count))
+            if let number = Int(suffix) {
+                return "Chapter \(number)"
+            }
+        }
+        return trimmed
+    }
+
     @ViewBuilder
     private func readerTopBar(engine: any ReaderEngine) -> some View {
         HStack(spacing: 0) {
@@ -962,47 +981,21 @@ struct UnifiedReaderView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            // Left-center: TOC
-            Button {
-                showingTOC = true
-            } label: {
-                Image(systemName: "list.bullet")
-                    .foregroundStyle(themeTextColor)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            .accessibilityLabel("Close reader")
 
             Spacer(minLength: 8)
 
             // Center: chapter/book title
-            Group {
-                if let title = engine.currentLocation?.title, !title.isEmpty {
-                    Text(title)
-                } else {
-                    Text(book.title)
-                }
-            }
+            Text(displayChapterTitle(engine.currentLocation?.title) ?? book.title)
             .font(.subheadline.weight(.medium))
             .foregroundStyle(themeTextColor)
             .lineLimit(1)
 
             Spacer(minLength: 8)
 
-            // Right-center: search + font settings + bookmark
+            // Keep one frequent reading adjustment visible. Navigation and
+            // annotation tools live in the explicit More menu below.
             HStack(spacing: 0) {
-                if !engine.isComic {
-                    Button {
-                        showingSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(themeTextColor)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                }
-
                 // Font/typography controls don't apply to comics (raster images);
                 // hide the Aa button there to avoid suggesting otherwise.
                 if !engine.isComic {
@@ -1014,6 +1007,7 @@ struct UnifiedReaderView: View {
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Reading appearance")
                 }
 
                 // One-tap Listen: starts read-along immediately with the saved
@@ -1038,25 +1032,34 @@ struct UnifiedReaderView: View {
                     }
                     .accessibilityLabel(readAlongService.isActive ? "Play or pause read aloud" : "Listen")
                 }
-
-                // Bookmark button: solid when bookmarked, outline when not
-                Button {
-                    bookmarkCurrentPage()
-                } label: {
-                    Image(systemName: isCurrentPageBookmarked ? "bookmark.fill" : "bookmark")
-                        .foregroundStyle(
-                            isCurrentPageBookmarked
-                                ? Color(uiColor: currentPageBookmark?.uiColor ?? .systemRed)
-                                : themeTextColor
-                        )
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
             }
             .buttonStyle(.plain)
 
             // Far right: overflow menu
             Menu {
+                Button {
+                    showingTOC = true
+                } label: {
+                    Label(engine.isComic ? "Pages" : "Table of Contents", systemImage: "list.bullet")
+                }
+
+                if !engine.isComic {
+                    Button {
+                        showingSearch = true
+                    } label: {
+                        Label("Search in Book", systemImage: "magnifyingglass")
+                    }
+                }
+
+                Button {
+                    bookmarkCurrentPage()
+                } label: {
+                    Label(
+                        isCurrentPageBookmarked ? "Edit Bookmark" : "Add Bookmark",
+                        systemImage: isCurrentPageBookmarked ? "bookmark.fill" : "bookmark"
+                    )
+                }
+
                 Button {
                     notesTab = engine.isComic ? .bookmarks : .highlights
                     showingNotes = true
@@ -1112,6 +1115,7 @@ struct UnifiedReaderView: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .accessibilityLabel("More reading tools")
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 10)
@@ -1273,12 +1277,13 @@ struct UnifiedReaderView: View {
         // user can see where they're about to land.
         let nativeEngine = engine as? NativeReaderEngine
         let scrubPage: Int? = scrubber.isScrubbing ? Int(scrubber.value) : nil
-        let chapterTitle: String? = {
+        let rawChapterTitle: String? = {
             if let scrubPage, let nativeEngine {
                 return nativeEngine.chapterTitle(forGlobalPage: scrubPage) ?? engine.currentLocation?.title
             }
             return engine.currentLocation?.title
         }()
+        let chapterTitle = displayChapterTitle(rawChapterTitle)
         let displayProgression: Double = {
             if let scrubPage {
                 let total = max(1, engine.totalPositions)
@@ -1332,49 +1337,17 @@ struct UnifiedReaderView: View {
             // `currentLocation.title` just echoes "Page N" which we already show
             // in the top bar and the row above. Suppress to avoid triplication.
             // During scrubbing this previews the destination chapter.
-            if !engine.isComic, let chapterTitle, !chapterTitle.isEmpty {
+            if scrubber.isScrubbing, !engine.isComic, let chapterTitle, !chapterTitle.isEmpty {
                 Text(chapterTitle)
                     .font(.caption2)
-                    .foregroundStyle(scrubber.isScrubbing ? .secondary : .tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .padding(.horizontal, 8)
                     .animation(.none, value: scrubPage)
             }
 
-            // Estimated reading time left (P2.5) — EPUB only. Uses a rough
-            // 250 WPM × ~300 words/page heuristic = ~1.2 min/page. Cheap,
-            // mostly accurate, and matches what users expect from Kindle.
-            if !scrubber.isScrubbing, let label = readingTimeLeftLabel(engine: engine) {
-                Text(label)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
         }
-    }
-
-    /// "About 23 min left in book" — only shown for paginated EPUB content
-    /// where we have a stable page count. Comics/PDFs are skipped (visual
-    /// reading speed varies too much) and audiobooks have their own readout.
-    private func readingTimeLeftLabel(engine: any ReaderEngine) -> String? {
-        guard !engine.isComic, !engine.isPDF else { return nil }
-        guard let nativeEngine = engine as? NativeReaderEngine else { return nil }
-        let totalPages = nativeEngine.totalPositions
-        let currentPage = nativeEngine.globalPageIndex + 1
-        let pagesLeft = totalPages - currentPage
-        guard pagesLeft > 1, totalPages > 1 else { return nil }
-        // ~1.2 minutes per page; cap precision so 47.999 → "48 min"
-        let minutes = Int(round(Double(pagesLeft) * 1.2))
-        if minutes < 1 { return nil }
-        if minutes < 60 {
-            return "About \(minutes) min left in book"
-        }
-        let hours = minutes / 60
-        let mins = minutes % 60
-        if mins == 0 {
-            return "About \(hours)h left in book"
-        }
-        return "About \(hours)h \(mins)m left in book"
     }
 
     // MARK: - Page Scrubber
@@ -1673,22 +1646,16 @@ struct UnifiedReaderView: View {
         startReadingSession(engine: nativeEngine)
         fetchBookmarks()
 
-        // Load TOC in background — not needed until user opens TOC panel
-        Task {
-            tocItems = await nativeEngine.tableOfContents()
-        }
         showHighlightSetupIfNeeded()
 
         // Check for matching audiobook / TTS availability (defer to avoid blocking)
-        Task.detached(priority: .userInitiated) { [book, modelContext, readAlongService, kokoroModelManager] in
+        Task(priority: .userInitiated) { @MainActor [book, modelContext, readAlongService, kokoroModelManager] in
             let audiobook = readAlongService.findMatchingAudiobook(for: book, in: modelContext)
-            await MainActor.run {
-                if let audiobook {
-                    self.matchingAudiobook = audiobook
-                }
-                if self.matchingAudiobook != nil || kokoroModelManager.isModelAvailable {
-                    withAnimation { self.showReadAlongPill = true }
-                }
+            if let audiobook {
+                self.matchingAudiobook = audiobook
+            }
+            if self.matchingAudiobook != nil || kokoroModelManager.isModelAvailable {
+                withAnimation { self.showReadAlongPill = true }
             }
         }
     }
@@ -2048,7 +2015,7 @@ struct UnifiedReaderView: View {
     }
 
     private func bookmarkRowTitle(for bookmark: ReadingMark) -> String {
-        if let title = bookmark.chapterTitle, !title.isEmpty { return title }
+        if let title = displayChapterTitle(bookmark.chapterTitle) { return title }
         if let page = bookmark.pageIndex { return "Page \(page + 1)" }
         return "Bookmark"
     }
@@ -2199,27 +2166,23 @@ struct UnifiedReaderView: View {
             readAlongService.state = .loading
         }
 
-        Task.detached(priority: .userInitiated) { [kokoroModelManager, readAlongService, book, ttsAudioCache, transcriptionService] in
+        Task { @MainActor [kokoroModelManager, readAlongService, book, ttsAudioCache, transcriptionService] in
             do {
-                let voiceIndex = await kokoroModelManager.selectedVoiceIndex
+                let voiceIndex = kokoroModelManager.selectedVoiceIndex
                 print("[TTS] Loading model with voice \(voiceIndex)...")
                 let context = try KokoroTTSContext.createFromBundle(voiceIndex: voiceIndex)
                 print("[TTS] Model loaded, activating service...")
-                await MainActor.run {
-                    readAlongService.activateWithTTS(
-                        ebook: book,
-                        engine: nativeEngine,
-                        ttsContext: context,
-                        voiceIndex: voiceIndex,
-                        audioCache: ttsAudioCache,
-                        transcriptionService: transcriptionService
-                    )
-                }
+                readAlongService.activateWithTTS(
+                    ebook: book,
+                    engine: nativeEngine,
+                    ttsContext: context,
+                    voiceIndex: voiceIndex,
+                    audioCache: ttsAudioCache,
+                    transcriptionService: transcriptionService
+                )
             } catch {
                 print("[TTS] Failed to load model: \(error)")
-                await MainActor.run {
-                    readAlongService.state = .error("Failed to load TTS model: \(error.localizedDescription)")
-                }
+                readAlongService.state = .error("Failed to load TTS model: \(error.localizedDescription)")
             }
         }
     }

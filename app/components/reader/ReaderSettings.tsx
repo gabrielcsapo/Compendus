@@ -373,6 +373,43 @@ export function ReaderSettings({
               </div>
             </SettingSection>
           )}
+
+          {/* Skip intervals — audio only */}
+          {isAudio && (
+            <SettingSection title="Skip Intervals">
+              <div className="flex gap-6">
+                {(
+                  [
+                    ["Back", "audioSkipBackInterval"],
+                    ["Forward", "audioSkipForwardInterval"],
+                  ] as const
+                ).map(([label, key]) => (
+                  <div key={key} className="flex-1">
+                    <div className="text-xs mb-1.5" style={{ color: `${theme.foreground}80` }}>
+                      {label}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[10, 15, 30, 45, 60].map((sec) => (
+                        <button
+                          key={sec}
+                          onClick={() => onUpdateSetting(key, sec)}
+                          className="px-2.5 py-1 rounded-md border text-xs transition-colors tabular-nums"
+                          style={{
+                            borderColor:
+                              settings[key] === sec ? theme.accent : `${theme.foreground}20`,
+                            backgroundColor:
+                              settings[key] === sec ? `${theme.accent}10` : "transparent",
+                          }}
+                        >
+                          {sec}s
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SettingSection>
+          )}
         </div>
       </div>
     </>

@@ -19,7 +19,6 @@ struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(HighlightColorManager.self) private var highlightColorManager
     @Environment(BackgroundProcessingManager.self) private var backgroundProcessingManager
-    @Environment(FleetWorkerService.self) private var fleetWorkerService
     @Environment(KokoroModelManager.self) private var kokoroModelManager
     @State private var editedServerURL = ""
     @State private var isTestingConnection = false
@@ -28,6 +27,7 @@ struct SettingsView: View {
     @State private var showingClearCacheConfirmation = false
     @State private var showingDisconnectConfirmation = false
     @State private var showingSwitchProfileConfirmation = false
+    @State private var showingCertificateResetConfirmation = false
     @State private var showingStorageChart = false
     @State private var editedDeviceName = DeviceIdentity.deviceName
 
@@ -45,6 +45,18 @@ struct SettingsView: View {
             Form {
                 // Server section
                 Section {
+                    Toggle("Offline Mode", isOn: $appSettings.offlineMode)
+                        .onChange(of: appSettings.offlineMode) { _, isOffline in
+                            downloadManager.setTransfersPausedForOfflineMode(
+                                isOffline,
+                                modelContext: modelContext
+                            )
+                        }
+                    if appSettings.offlineMode {
+                        Label("Local reading only", systemImage: "airplane")
+                            .foregroundStyle(.secondary)
+                    }
+
                     HStack {
                         TextField("Server URL", text: $editedServerURL)
                             .textInputAutocapitalization(.never)
@@ -55,7 +67,7 @@ struct SettingsView: View {
                             Button("Save") {
                                 testAndSaveConnection()
                             }
-                            .disabled(editedServerURL.isEmpty || isTestingConnection)
+                            .disabled(editedServerURL.isEmpty || isTestingConnection || appSettings.offlineMode)
                         }
                     }
 
@@ -77,11 +89,30 @@ struct SettingsView: View {
                     Button("Test Connection") {
                         testConnection()
                     }
-                    .disabled(isTestingConnection || editedServerURL.isEmpty)
+                    .disabled(isTestingConnection || editedServerURL.isEmpty || appSettings.offlineMode)
+
+                    if let pinnedServerHost {
+                        Button("Reset Server Certificate", role: .destructive) {
+                            showingCertificateResetConfirmation = true
+                        }
+                        .confirmationDialog(
+                            "Trust a new certificate for \(pinnedServerHost)?",
+                            isPresented: $showingCertificateResetConfirmation,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Reset Certificate", role: .destructive) {
+                                LocalNetworkSessionDelegate.clearPinnedCertificate(for: pinnedServerHost)
+                                connectionStatus = .unknown
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Only reset this after intentionally replacing the certificate on your Compendus server. The next connection establishes a new pin.")
+                        }
+                    }
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("Enter the IP address or hostname of your Compendus server (e.g., 192.168.1.100:3000)")
+                    Text(appSettings.offlineMode ? "Server requests and background sync are paused. Reading progress and edits remain on this device until you reconnect." : "Enter the IP address or hostname of your Compendus server (e.g., 192.168.1.100:3000)")
                 }
 
                 // This device — name used when showing per-device reading position
@@ -326,101 +357,6 @@ struct SettingsView: View {
                     }
                 }
 
-                // Idle Fleet section — this device works for the library while
-                // it charges (compute jobs leased from the server; see the
-                // semantic substrate proposal, §12).
-                if serverConfig.isProfileSelected {
-                    Section {
-                        if fleetWorkerService.isEnrolled {
-                            Toggle(isOn: Binding(
-                                get: { fleetWorkerService.isEnabled },
-                                set: { fleetWorkerService.isEnabled = $0 }
-                            )) {
-                                Label("Work While Charging", systemImage: "bolt.badge.clock")
-                            }
-                            HStack {
-                                Text("Status")
-                                Spacer()
-                                Text(
-                                    fleetWorkerService.isRunning
-                                        ? "Working…"
-                                        : fleetWorkerService.isOnExternalPower
-                                            ? "Ready (plugged in)"
-                                            : "Waiting for power"
-                                )
-                                .foregroundStyle(.secondary)
-                            }
-                            if fleetWorkerService.jobsCompleted > 0 {
-                                HStack {
-                                    Text("Jobs This Session")
-                                    Spacer()
-                                    Text("\(fleetWorkerService.jobsCompleted)")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            if let secs = fleetWorkerService.avgJobSeconds {
-                                HStack {
-                                    Text("Speed")
-                                    Spacer()
-                                    Text(secs >= 1
-                                        ? "~\(Int(secs.rounded()))s per job"
-                                        : String(format: "~%.1fs per job", secs))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            if let remaining = fleetWorkerService.queueRemaining {
-                                HStack {
-                                    Text("Queue Remaining")
-                                    Spacer()
-                                    Text("\(remaining) job\(remaining == 1 ? "" : "s")")
-                                        .foregroundStyle(.secondary)
-                                }
-                                if remaining > 0, let secs = fleetWorkerService.avgJobSeconds, secs > 0 {
-                                    HStack {
-                                        Text("Est. Time Left")
-                                        Spacer()
-                                        Text(fleetEtaText(Double(remaining) * secs))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            if let activity = fleetWorkerService.lastActivity {
-                                Text(activity)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Button(role: .destructive) {
-                                fleetWorkerService.unenroll()
-                            } label: {
-                                Label("Remove This Device", systemImage: "minus.circle")
-                            }
-                        } else if serverConfig.selectedProfileIsAdmin {
-                            Button {
-                                Task {
-                                    await fleetWorkerService.enroll(
-                                        deviceName: fleetWorkerService.defaultDeviceName
-                                    )
-                                }
-                            } label: {
-                                Label("Enroll This Device", systemImage: "plus.circle")
-                            }
-                            if let error = fleetWorkerService.lastError {
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                        } else {
-                            Text("An admin profile can enroll this device to help with library work while it charges.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } header: {
-                        Text("Idle Fleet")
-                    } footer: {
-                        Text("When enrolled and plugged in, this device quietly handles background work for your library — nothing runs on battery.")
-                    }
-                }
-
                 // Account section
                 Section {
                     Button(role: .destructive) {
@@ -509,6 +445,13 @@ struct SettingsView: View {
                 StorageBreakdownView()
             }
         }
+    }
+
+    private var pinnedServerHost: String? {
+        guard let host = serverConfig.baseURL?.host,
+              LocalNetworkSessionDelegate.isLocalNetworkHost(host),
+              LocalNetworkSessionDelegate.pinnedFingerprint(for: host) != nil else { return nil }
+        return host
     }
 
     @ViewBuilder
@@ -613,20 +556,4 @@ struct SettingsView: View {
         .environment(BackgroundProcessingManager())
         .environment(KokoroModelManager())
         .modelContainer(for: DownloadedBook.self, inMemory: true)
-}
-
-/// Compact human ETA for the fleet queue ("~2h 10m", "~5m", "~30s"). This is an
-/// upper bound at this device's current rate — other fleet devices drain the
-/// shared queue in parallel, so the real time is usually shorter.
-private func fleetEtaText(_ seconds: Double) -> String {
-    let s = Int(seconds.rounded())
-    if s >= 3600 {
-        let h = s / 3600
-        let m = (s % 3600) / 60
-        return m > 0 ? "~\(h)h \(m)m" : "~\(h)h"
-    }
-    if s >= 60 {
-        return "~\(s / 60)m"
-    }
-    return "~\(max(s, 1))s"
 }

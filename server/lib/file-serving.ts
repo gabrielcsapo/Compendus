@@ -1,6 +1,6 @@
 import { stat, access, mkdir, writeFile } from "fs/promises";
 import { createReadStream, constants } from "fs";
-import { resolve, dirname } from "path";
+import { resolve, dirname, relative, isAbsolute } from "path";
 import { lookup } from "mime-types";
 import type { Context } from "hono";
 
@@ -24,6 +24,14 @@ export async function getFileStat(filePath: string) {
  */
 export function generateETag(mtime: Date, size: number): string {
   return `W/"${mtime.getTime().toString(36)}-${size.toString(36)}"`;
+}
+
+export function resolveContained(root: string, ...segments: string[]): string | null {
+  const absoluteRoot = resolve(root);
+  const candidate = resolve(absoluteRoot, ...segments);
+  const rel = relative(absoluteRoot, candidate);
+  if (rel === "") return candidate;
+  return !rel.startsWith("..") && !isAbsolute(rel) ? candidate : null;
 }
 
 /**
@@ -74,8 +82,6 @@ function getContentType(filePath: string): string {
   return CONTENT_TYPE_MAP[ext] || lookup(filePath) || "application/octet-stream";
 }
 
-const AUDIO_EXTENSIONS = new Set(["m4b", "m4a", "mp3"]);
-
 /**
  * Stream a file as a response with proper headers.
  * Supports range requests for all file types.
@@ -87,6 +93,8 @@ export async function streamFileResponse(
     contentType?: string;
     cacheControl?: string;
     disposition?: string;
+    headers?: Record<string, string>;
+    etag?: string;
   } = {},
 ): Promise<Response> {
   const fileStat = await getFileStat(filePath);
@@ -95,12 +103,11 @@ export async function streamFileResponse(
   }
 
   const fileSize = fileStat.size;
-  const ext = filePath.split(".").pop()?.toLowerCase() || "";
   const contentType = options.contentType || getContentType(filePath);
   const cacheControl = options.cacheControl || "public, max-age=3600";
 
   // Generate ETag from file metadata
-  const etag = generateETag(fileStat.mtime, fileSize);
+  const etag = options.etag || generateETag(fileStat.mtime, fileSize);
   const conditionalResponse = checkConditional(c, etag);
   if (conditionalResponse) {
     return conditionalResponse;
@@ -111,6 +118,7 @@ export async function streamFileResponse(
     "Cache-Control": cacheControl,
     "Accept-Ranges": "bytes",
     ETag: etag,
+    ...options.headers,
   };
 
   if (options.disposition) {
@@ -118,16 +126,18 @@ export async function streamFileResponse(
   }
 
   // Handle range requests
-  const rangeHeader = c.req.header("range");
+  const ifRange = c.req.header("if-range");
+  const rangeHeader = !ifRange || ifRange === etag ? c.req.header("range") : undefined;
   if (rangeHeader) {
-    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
     if (match) {
-      const start = match[1] ? parseInt(match[1], 10) : 0;
-      // For audio, cap at 1MB chunks; for other files, allow larger ranges
-      const isAudio = AUDIO_EXTENSIONS.has(ext);
-      const maxChunk = isAudio ? 1024 * 1024 : 10 * 1024 * 1024;
-      const requestedEnd = match[2] ? parseInt(match[2], 10) : start + maxChunk - 1;
-      const end = Math.min(requestedEnd, fileSize - 1);
+      const suffixLength = !match[1] && match[2] ? parseInt(match[2], 10) : null;
+      const start =
+        suffixLength != null ? Math.max(0, fileSize - suffixLength) : parseInt(match[1] || "0", 10);
+      const end =
+        suffixLength != null
+          ? fileSize - 1
+          : Math.min(match[2] ? parseInt(match[2], 10) : fileSize - 1, fileSize - 1);
 
       if (start >= fileSize || start > end) {
         return new Response("Range Not Satisfiable", {
@@ -146,6 +156,10 @@ export async function streamFileResponse(
         },
       });
     }
+    return new Response("Range Not Satisfiable", {
+      status: 416,
+      headers: { "Content-Range": `bytes */${fileSize}` },
+    });
   }
 
   // Full file response — stream it

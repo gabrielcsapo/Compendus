@@ -93,7 +93,7 @@ class TTSPreGenerationService {
             resumableState = loadProgressFromDisk()
         }
 
-        currentTask = Task.detached(priority: .utility) { [weak self] in
+        currentTask = Task(priority: .utility) { [weak self] in
             await self?.performGeneration(
                 bookId: book.id,
                 bookLocalPath: book.localPath,
@@ -118,7 +118,7 @@ class TTSPreGenerationService {
 
     // MARK: - Generation Pipeline
 
-    nonisolated private func performGeneration(
+    private func performGeneration(
         bookId: String,
         bookLocalPath: String,
         voiceId: Int,
@@ -126,8 +126,7 @@ class TTSPreGenerationService {
         cache: TTSAudioCache,
         modelContainer: ModelContainer
     ) async {
-        do {
-            // Canonical content (CCD): chapter text comes from the unpacked CCD pack
+        // Canonical content (CCD): chapter text comes from the unpacked CCD pack
             // the reader uses — no on-device EPUB parsing.
             await MainActor.run { state = .generating(progress: 0, message: "Preparing chapters...") }
             let ccdBundle: CCDBundle? = {
@@ -155,7 +154,7 @@ class TTSPreGenerationService {
 
             // Initialize or restore resumable state
             let startIndex: Int
-            let currentResumable = await resumableState
+            let currentResumable = resumableState
             if let rs = currentResumable, rs.bookId == bookId, rs.voiceId == voiceId {
                 startIndex = rs.completedSpineIndex + 1
                 logger.info("Resuming TTS generation for '\(bookId)' from spine \(startIndex)")
@@ -174,7 +173,7 @@ class TTSPreGenerationService {
 
             var cumulativeTimeOffset: Double = 0
             // Calculate offset from already-completed chapters
-            if let rs = await resumableState {
+            if let rs = resumableState {
                 for segment in rs.accumulatedSegments {
                     cumulativeTimeOffset = max(cumulativeTimeOffset, segment.end)
                 }
@@ -182,7 +181,7 @@ class TTSPreGenerationService {
 
             for spineIndex in startIndex..<spineCount {
                 guard !Task.isCancelled else {
-                    await saveProgressToDisk()
+                    saveProgressToDisk()
                     return
                 }
 
@@ -253,7 +252,7 @@ class TTSPreGenerationService {
 
                 for (i, sentence) in sentences.enumerated() {
                     guard !Task.isCancelled else {
-                        await saveProgressToDisk()
+                        saveProgressToDisk()
                         return
                     }
 
@@ -329,7 +328,7 @@ class TTSPreGenerationService {
 
                 // Save progress periodically
                 if spineIndex % 2 == 0 {
-                    await saveProgressToDisk()
+                    saveProgressToDisk()
                 }
 
                 logger.info("Generated TTS for spine \(spineIndex)/\(spineCount) — \(chapterSamples.count) samples")
@@ -338,7 +337,7 @@ class TTSPreGenerationService {
             guard !Task.isCancelled else { return }
 
             // Build and save full transcript
-            if let rs = await resumableState, !rs.accumulatedSegments.isEmpty {
+            if let rs = resumableState, !rs.accumulatedSegments.isEmpty {
                 let fullTranscript = Transcript(
                     duration: cumulativeTimeOffset,
                     language: "en",
@@ -347,16 +346,11 @@ class TTSPreGenerationService {
                 await saveTranscript(fullTranscript, bookId: bookId, voiceId: voiceId, modelContainer: modelContainer)
             }
 
-            await clearProgressFromDisk()
+            clearProgressFromDisk()
             await MainActor.run {
                 state = .completed
             }
             logger.info("TTS pre-generation complete for '\(bookId)'")
-
-        } catch {
-            logger.error("TTS generation failed: \(error)")
-            await MainActor.run { state = .error(error.localizedDescription) }
-        }
     }
 
     // MARK: - Transcript Persistence

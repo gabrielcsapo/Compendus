@@ -58,7 +58,7 @@ function loadGraph(): {
 }
 
 /** Weighted label propagation — deterministic seed for reproducibility. */
-function labelProp(
+export function labelProp(
   nodes: string[],
   adj: Map<string, { j: string; w: number }[]>,
 ): Map<string, string> {

@@ -17,5 +17,10 @@ export default defineConfig({
     // Per-file isolation (default fork pool) so each test that sets
     // COMPENDUS_DATA_DIR + imports the db gets a fresh module registry.
     pool: "forks",
+    // Conversion tests spawn their own worker pools and perform OCR/PDF work.
+    // Running test files concurrently can starve those fixed-timeout operations
+    // on developer and CI machines, producing false failures. Reliability is
+    // more important than shaving seconds from this preflight suite.
+    fileParallelism: false,
   },
 });

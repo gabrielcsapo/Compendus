@@ -136,4 +136,30 @@ final class CCDPackTests: XCTestCase {
         let dropped = CCDContentMapper.nodes(for: bundle.chapters[0]) { _ in nil }
         XCTAssertTrue(imageURLs(in: dropped).isEmpty, "unresolved image handle must not produce an image node")
     }
+
+    func testFailedReplacementPreservesPreviouslyInstalledPack() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ccd-transaction-\(UUID().uuidString)", isDirectory: true)
+        let destination = root.appendingPathComponent("book", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try CCDPack.unpack(zipData: try packData(), into: destination)
+        let originalManifest = try Data(contentsOf: destination.appendingPathComponent("manifest.ccd.json"))
+
+        XCTAssertThrowsError(try CCDPack.unpack(zipData: Data("not a zip".utf8), into: destination))
+        XCTAssertEqual(
+            try Data(contentsOf: destination.appendingPathComponent("manifest.ccd.json")),
+            originalManifest,
+            "a failed replacement must not destroy the last verified offline copy"
+        )
+    }
+
+    func testInstalledPackValidatorDetectsMissingReferencedResource() throws {
+        let (manifest, resources, dir) = try unpackFixture()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bundle = try CCDBundle.decode(from: Data(contentsOf: manifest))
+        let urls = bundle.chapters.flatMap { imageURLs(in: CCDContentMapper.nodes(for: $0, resolveResource: resolver(resources))) }
+        let first = try XCTUnwrap(urls.first(where: \.isFileURL))
+        try FileManager.default.removeItem(at: first)
+        XCTAssertThrowsError(try CCDPack.validateInstalledPack(at: dir))
+    }
 }

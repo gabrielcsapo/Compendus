@@ -1,14 +1,19 @@
 import { Hono } from "hono";
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { resolve, dirname } from "path";
+import { readFile } from "fs/promises";
+import { resolve } from "path";
 import { eq } from "drizzle-orm";
 import { extractEpubResource } from "../../app/lib/processing/epub";
-import { buildCcdPack } from "../../app/lib/processing/ccd-pack";
 import { getBookFilePath, resolveStoragePath, readCcdBundle } from "../../app/lib/storage";
 import type { ContentBundle } from "../../app/lib/content-ast/types";
 import { renderPdfPage } from "../../app/lib/reader/pdf-renderer";
 import { db, books } from "../../app/lib/db";
-import { getFileStat, serveCachedResource, generateETag } from "../lib/file-serving";
+import {
+  getFileStat,
+  serveCachedResource,
+  generateETag,
+  streamFileResponse,
+} from "../lib/file-serving";
+import { resolveDownloadArtifact } from "../lib/download-artifacts";
 
 const app = new Hono();
 
@@ -189,14 +194,6 @@ app.get("/api/reader/:bookId/ccd/bundle", async (c) => {
   });
 });
 
-// Resolve the EPUB file backing a book's resources (converted EPUB for
-// mobi/azw3/lit, else the original .epub). Returns null for non-EPUB-backed books.
-function epubPathForBook(book: typeof books.$inferSelect): string | null {
-  if (book.convertedEpubPath) return resolveStoragePath(book.convertedEpubPath);
-  if (book.format === "epub") return getBookFilePath(book.id, "epub");
-  return null;
-}
-
 // GET /api/reader/:bookId/ccd/pack — self-contained offline archive: the CCD
 // manifest + every referenced resource. The client (iOS) downloads ONLY this and
 // reads fully offline, never touching a source EPUB. Built once and disk-cached;
@@ -204,38 +201,13 @@ function epubPathForBook(book: typeof books.$inferSelect): string | null {
 app.get("/api/reader/:bookId/ccd/pack", async (c) => {
   try {
     const bookId = c.req.param("bookId");
-    const loaded = await loadBundle(bookId);
-    if (!loaded) return c.json({ error: "ccd_not_found" }, 404);
-
-    const epubPath = epubPathForBook(loaded.book);
-    if (!epubPath) return c.json({ error: "no_resource_source" }, 404);
-
-    const cachePath = resolve("data", "resource-cache", bookId, "ccd-pack.zip");
-    const ccdAbs = resolveStoragePath(loaded.book.ccdPath!);
-    const [cacheStat, ccdStat] = await Promise.all([getFileStat(cachePath), getFileStat(ccdAbs)]);
-
-    let pack: Buffer;
-    if (cacheStat && ccdStat && cacheStat.mtime >= ccdStat.mtime) {
-      pack = await readFile(cachePath);
-    } else {
-      const epubStat = await getFileStat(epubPath);
-      if (!epubStat) return c.json({ error: "resource_source_missing" }, 404);
-      pack = await buildCcdPack(loaded.bundle, await readFile(epubPath));
-      await mkdir(dirname(cachePath), { recursive: true });
-      await writeFile(cachePath, pack).catch((err) =>
-        console.error("[ccd-pack] cache write failed:", err),
-      );
-    }
-
-    const etag = generateETag(ccdStat?.mtime ?? new Date(), pack.length);
-    if (c.req.header("if-none-match") === etag) return new Response(null, { status: 304 });
-    return new Response(new Uint8Array(pack), {
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Length": String(pack.length),
-        "Cache-Control": "private, max-age=300",
-        ETag: etag,
-      },
+    const artifact = await resolveDownloadArtifact(bookId);
+    if (artifact.format !== "ccdpack") return c.json({ error: "no_ccd_pack" }, 409);
+    return streamFileResponse(c, artifact.path, {
+      contentType: "application/zip",
+      cacheControl: "private, no-transform, max-age=31536000, immutable",
+      etag: `"sha256-${artifact.sha256}"`,
+      headers: { "X-Artifact-SHA256": artifact.sha256 },
     });
   } catch (error) {
     console.error("CCD pack error:", error);

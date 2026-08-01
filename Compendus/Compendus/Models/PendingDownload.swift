@@ -22,6 +22,13 @@ final class PendingDownload {
     var errorMessage: String?
     var queuedAt: Date
     var coverData: Data?
+    var artifactId: String = ""
+    var expectedSHA256: String = ""
+    var expectedByteLength: Int64 = 0
+    var peakDiskBytes: Int64 = 0
+    var artifactVersion: Int = 0
+    var ccdVersion: String?
+    var resumeData: Data?
 
     // Book metadata carried forward to create DownloadedBook on completion
     var subtitle: String?
@@ -83,20 +90,20 @@ final class PendingDownload {
     }
 
     /// Create from a Book API model and resolved download URL
-    static func from(book: Book, downloadURL: URL, localFormat: String) -> PendingDownload {
+    static func from(book: Book, manifest: DownloadArtifactManifest, downloadURL: URL) -> PendingDownload {
         var chaptersData: Data? = nil
         if let chapters = book.chapters {
             chaptersData = try? JSONEncoder().encode(chapters)
         }
 
-        return PendingDownload(
+        let pending = PendingDownload(
             id: book.id,
             bookId: book.id,
             title: book.title,
             authors: book.authors,
-            format: localFormat,
-            originalFormat: book.format,
-            fileSize: book.fileSize ?? 0,
+            format: manifest.format,
+            originalFormat: manifest.originalFormat,
+            fileSize: Int(manifest.byteLength),
             downloadURL: downloadURL.absoluteString,
             subtitle: book.subtitle,
             publisher: book.publisher,
@@ -109,11 +116,18 @@ final class PendingDownload {
             chaptersData: chaptersData,
             pageCount: book.pageCount
         )
+        pending.artifactId = manifest.artifactId
+        pending.expectedSHA256 = manifest.sha256.lowercased()
+        pending.expectedByteLength = manifest.byteLength
+        pending.peakDiskBytes = manifest.peakDiskBytes
+        pending.artifactVersion = manifest.artifactVersion
+        pending.ccdVersion = manifest.ccdVersion
+        return pending
     }
 
     /// Convert to DownloadedBook after download completes
     func toDownloadedBook(localPath: String, fileSize: Int, coverData: Data?) -> DownloadedBook {
-        DownloadedBook(
+        let downloaded = DownloadedBook(
             id: bookId,
             title: title,
             subtitle: subtitle,
@@ -133,5 +147,12 @@ final class PendingDownload {
             pageCount: pageCount,
             profileId: profileId
         )
+        downloaded.artifactId = artifactId
+        downloaded.artifactSHA256 = expectedSHA256
+        downloaded.artifactVersion = artifactVersion
+        downloaded.ccdVersion = ccdVersion
+        downloaded.verificationStatus = "verified"
+        downloaded.verifiedAt = Date()
+        return downloaded
     }
 }

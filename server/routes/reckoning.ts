@@ -1,22 +1,15 @@
 /**
  * Reckoning (prove-or-kill) admin routes. Drives the candidate-tension prototype:
- * mine cross-book passage pairs, enqueue them as `judge-tension` fleet jobs, and
+ * mine cross-book passage pairs, judge them with the server's local LLM, and
  * review the judged verdicts for human eval. Mounted behind /api/admin/* like
- * concept.ts, so the existing admin gate is the only auth.
+ * concept.ts, so the existing admin gate is the only auth. LLM batch passes run
+ * detached on the serial LLM lane — poll the /status endpoints.
  */
 import { Hono } from "hono";
 import { rawDb } from "../../app/lib/db";
-import { enqueueWork } from "../../app/lib/fabric";
-import "../../app/lib/fabric/kinds"; // side-effect: register judge-tension
+import { startPass, passStatus } from "../../app/lib/llm/lane";
 
 const app = new Hono();
-
-interface CandidateRow {
-  id: string;
-  passage_a: string;
-  passage_b: string;
-  shared: string;
-}
 
 /** Parse the stored JSON `shared` column into a string[] (best-effort). */
 function parseShared(json: string | null): string[] {
@@ -82,18 +75,11 @@ app.post("/api/admin/reckoning/mine", async (c) => {
 
 app.get("/api/admin/reckoning/mine/status", (c) => c.json(mineState));
 
-// 1b. Classify every book fiction|nonfiction on the fleet (mining prerequisite).
-// Enqueuing thousands of jobs is synchronous SQLite that would wedge the single
-// web thread if held in the request, so this also runs DETACHED — poll
-// /classify/enqueue/status (or /classify/stats) for progress.
-let classifyEnqueueState: {
-  running: boolean;
-  startedAt: number | null;
-  finishedAt: number | null;
-  result: unknown;
-  error: string | null;
-} = { running: false, startedAt: null, finishedAt: null, result: null, error: null };
-
+// 1b. Classify every book fiction|nonfiction with the local LLM (mining
+// prerequisite — and the nonfiction gate for journeys/wander). A full-library
+// run is hours of inference, so it runs DETACHED on the LLM lane — poll
+// /classify/enqueue/status (or /classify/stats) for progress. The endpoint
+// keeps its historical "enqueue" name for admin muscle memory.
 app.post("/api/admin/reckoning/classify/enqueue", async (c) => {
   let body: { limit?: number; reset?: boolean } = {};
   try {
@@ -104,92 +90,55 @@ app.post("/api/admin/reckoning/classify/enqueue", async (c) => {
   const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 3000;
   const reset = body.reset === true;
 
-  if (classifyEnqueueState.running) {
-    return c.json(
-      { ok: false, error: "classify enqueue already running", status: classifyEnqueueState },
-      409,
-    );
+  const started = startPass("classify-books", async (status) => {
+    const { runBookClassification } = await import("../../app/lib/reckoning/classify");
+    return runBookClassification({ limit, reset }, status);
+  });
+  if (!started.started) {
+    return c.json({ ok: false, error: started.reason, status: passStatus("classify-books") }, 409);
   }
-
-  classifyEnqueueState = {
-    running: true,
-    startedAt: Date.now(),
-    finishedAt: null,
-    result: null,
-    error: null,
-  };
-  void (async () => {
-    try {
-      const { enqueueBookClassification } = await import("../../app/lib/reckoning/classify");
-      classifyEnqueueState.result = await enqueueBookClassification({ limit, reset });
-    } catch (e) {
-      classifyEnqueueState.error = e instanceof Error ? e.message : String(e);
-    } finally {
-      classifyEnqueueState.running = false;
-      classifyEnqueueState.finishedAt = Date.now();
-    }
-  })();
-
   return c.json({ ok: true, started: true });
 });
 
-app.get("/api/admin/reckoning/classify/enqueue/status", (c) => c.json(classifyEnqueueState));
+app.get("/api/admin/reckoning/classify/enqueue/status", (c) =>
+  c.json(passStatus("classify-books")),
+);
 
 app.get("/api/admin/reckoning/classify/stats", async (c) => {
   const { classifySummary } = await import("../../app/lib/reckoning/classify");
   return c.json(classifySummary());
 });
 
-// 2. Enqueue candidate rows as judge-tension fleet jobs.
-app.post("/api/admin/reckoning/enqueue", async (c) => {
-  let body: { limit?: number } = {};
-  try {
-    body = await c.req.json();
-  } catch {
-    /* empty body is fine */
-  }
-  const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 100;
+// 2. Judge candidate rows with the local LLM (detached on the LLM lane).
+// POST /judge is the canonical route; /enqueue kept as an alias for muscle
+// memory from the fleet era.
+const startJudging = (limit: number) =>
+  startPass("judge-tensions", async (status) => {
+    const { runTensionJudging } = await import("../../app/lib/reckoning/judge");
+    return runTensionJudging({ limit }, status);
+  });
 
-  const rows = rawDb
-    .prepare(
-      `SELECT id, passage_a, passage_b, shared
-       FROM cs_tension_candidates
-       WHERE status = 'candidate'
-       ORDER BY heuristic_score DESC
-       LIMIT ?`,
-    )
-    .all(limit) as CandidateRow[];
+for (const path of ["/api/admin/reckoning/judge", "/api/admin/reckoning/enqueue"]) {
+  app.post(path, async (c) => {
+    let body: { limit?: number } = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      /* empty body is fine */
+    }
+    const limit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 100;
+    const started = startJudging(limit);
+    if (!started.started) {
+      return c.json(
+        { ok: false, error: started.reason, status: passStatus("judge-tensions") },
+        409,
+      );
+    }
+    return c.json({ ok: true, started: true });
+  });
+}
 
-  const getText = rawDb.prepare("SELECT text FROM passages WHERE id = ?");
-  const markQueued = rawDb.prepare(
-    "UPDATE cs_tension_candidates SET status = 'queued' WHERE id = ?",
-  );
-
-  let enqueued = 0;
-  for (const row of rows) {
-    const a = getText.get(row.passage_a) as { text: string } | undefined;
-    const b = getText.get(row.passage_b) as { text: string } | undefined;
-    if (!a?.text || !b?.text) continue; // skip pairs whose passages vanished
-
-    enqueueWork({
-      project: "compendus",
-      kind: "judge-tension",
-      payload: {
-        pairId: row.id,
-        subject: parseShared(row.shared).join(", "),
-        textA: a.text,
-        textB: b.text,
-      },
-      // Generic local-LLM runtime — Mac (Ollama) and iOS (Foundation Models) both
-      // advertise "llm", so any capable fleet device can adjudicate.
-      requirements: { runtimes: ["llm"] },
-    });
-    markQueued.run(row.id);
-    enqueued++;
-  }
-
-  return c.json({ ok: true, enqueued });
-});
+app.get("/api/admin/reckoning/judge/status", (c) => c.json(passStatus("judge-tensions")));
 
 // 2b. Peek raw mined candidates (pre-judging) to eyeball mining quality.
 app.get("/api/admin/reckoning/candidates", (c) => {
@@ -335,7 +284,6 @@ app.get("/api/admin/reckoning/stats", (c) => {
 
   return c.json({
     candidates: count("SELECT COUNT(*) AS n FROM cs_tension_candidates WHERE status = 'candidate'"),
-    queued: count("SELECT COUNT(*) AS n FROM cs_tension_candidates WHERE status = 'queued'"),
     judged: count("SELECT COUNT(*) AS n FROM cs_tension_candidates WHERE status = 'judged'"),
     byVerdict,
     evalLabeled: count(

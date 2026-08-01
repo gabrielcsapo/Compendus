@@ -2,35 +2,38 @@ services:
   compendus:
     build:
       context: .
-      args:
-        GPU_BACKEND: ${GPU_BACKEND:-cpu}
     ports:
       - "3000:3000"
     volumes:
       - ./data:/app/data
     environment:
-      - NODE_OPTIONS=--max-old-space-size=3072
-      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
+      - NODE_OPTIONS=--max-old-space-size=8192
+      # ALL inference (LLM chat, Whisper ASR, Kokoro TTS) is served by a
+      # Lemonade daemon on the HOST — stand one up and pull the models:
+      #   lemonade-server pull whisper-v3-turbo-FLM   # transcription (NPU)
+      #   lemonade-server pull kokoro-v1              # trail narration
+      #   + an LLM, e.g. Qwen3-8B-GGUF (iGPU) — see https://lemonade-server.ai
+      # host.docker.internal resolves via the host-gateway mapping below.
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-Qwen3-8B-GGUF}
+      # Lemonade's OpenAI-compatible chat endpoint is the primary LLM wire
+      # protocol. OLLAMA_* remains configured for audio and compatibility.
+      - LLM_API=${LLM_API:-openai}
+      - LLM_URL=${LLM_URL:-http://host.docker.internal:11434}
+      - LLM_MODEL=${LLM_MODEL:-Qwen3-8B-GGUF}
+      # ONNX thread pins default to 1 in code (the old 2-core cgroup deadlock);
+      # raise on hosts with cores to spare.
+      - GLINER_INTRA_OP_THREADS=4
+      - EMBED_INTRA_OP_THREADS=4
+      - RESOLUTION_BRUTE_MAX=10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
-          # Covers Node (3 GB heap) + the in-process GLiNER/embedding ONNX models
-          # + headroom for PDF/image spikes.
-          memory: 8G
+          # Node (8 GB heap) + in-process encoder ONNX (GLiNER/MiniLM) +
+          # PDF/image spikes. LLM/audio RAM lives with the host's Lemonade.
+          memory: 48G
         reservations:
-          memory: 2G
+          memory: 8G
     restart: unless-stopped
-    # ---------- GPU access ----------
-    # NVIDIA: uncomment below (requires nvidia-container-toolkit on host)
-    #   deploy.resources.reservations.devices:
-    #     - driver: nvidia
-    #       count: 1
-    #       capabilities: [gpu]
-    #
-    # AMD ROCm: uncomment below (build with GPU_BACKEND=rocm)
-    # devices:
-    #   - /dev/kfd
-    #   - /dev/dri
-    # group_add:
-    #   - video
-    #   - render

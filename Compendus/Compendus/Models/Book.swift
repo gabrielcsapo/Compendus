@@ -38,6 +38,7 @@ struct Book: Codable, Identifiable, Hashable {
     var convertedEpubSize: Int?     // Size of converted EPUB
     var hasTranscript: Bool?        // Whether audiobook has a transcript
     var isRead: Bool?               // Explicitly marked as read/completed
+    var isSetAside: Bool?           // Hidden from active-reading surfaces, without losing progress
     var rating: Int?                // 1-5 star rating
     var review: String?             // Free-text review
     var readingProgress: Double?    // 0-1 from server user_book_state
@@ -135,7 +136,7 @@ struct Book: Codable, Identifiable, Hashable {
         case format, series, seriesNumber, coverUrl, addedAt
         case fileSize, duration, narrator, chapters
         case convertedEpubPath, convertedEpubSize, hasTranscript
-        case isRead, rating, review
+        case isRead, isSetAside, rating, review
         case readingProgress, lastReadAt, lastPosition
         case ccdStatus
     }
@@ -167,6 +168,7 @@ struct Book: Codable, Identifiable, Hashable {
         convertedEpubSize = try container.decodeIfPresent(Int.self, forKey: .convertedEpubSize)
         hasTranscript = try container.decodeIfPresent(Bool.self, forKey: .hasTranscript)
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead)
+        isSetAside = try container.decodeIfPresent(Bool.self, forKey: .isSetAside)
         rating = try container.decodeIfPresent(Int.self, forKey: .rating)
         review = try container.decodeIfPresent(String.self, forKey: .review)
         readingProgress = try container.decodeIfPresent(Double.self, forKey: .readingProgress)

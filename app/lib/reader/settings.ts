@@ -109,10 +109,9 @@ export type PdfPageLayout = keyof typeof PDF_PAGE_LAYOUTS;
 
 export type ComicFitMode = keyof typeof COMIC_FIT_MODES;
 
-// Audio playback speeds
+// Audio playback speed presets (the fine-control slider allows any value in range)
 export const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
-
-type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
+export const PLAYBACK_SPEED_RANGE = { min: 0.5, max: 3.0, step: 0.05 } as const;
 
 // Reader settings interface
 export interface ReaderSettings {
@@ -138,8 +137,10 @@ export interface ReaderSettings {
   comicRtl: boolean; // Right-to-left (manga mode)
 
   // Audio-specific
-  audioPlaybackSpeed: PlaybackSpeed;
+  audioPlaybackSpeed: number; // 0.5-3.0 (presets in PLAYBACK_SPEEDS + fine slider)
   audioVolume: number; // 0-1
+  audioSkipBackInterval: number; // seconds, 5-90
+  audioSkipForwardInterval: number; // seconds, 5-90
 
   // EPUB-specific
   usePublisherStyles: boolean; // Apply EPUB's own CSS stylesheets
@@ -163,6 +164,8 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   comicRtl: false,
   audioPlaybackSpeed: 1,
   audioVolume: 1,
+  audioSkipBackInterval: 15,
+  audioSkipForwardInterval: 30,
   usePublisherStyles: true,
 };
 
@@ -239,14 +242,24 @@ export function validateSettings(settings: Partial<ReaderSettings>): ReaderSetti
   }
 
   if (settings.audioPlaybackSpeed !== undefined) {
-    const speed = PLAYBACK_SPEEDS.find((s) => s === settings.audioPlaybackSpeed);
-    if (speed) {
-      validated.audioPlaybackSpeed = speed;
+    const speed = Number(settings.audioPlaybackSpeed);
+    if (Number.isFinite(speed)) {
+      validated.audioPlaybackSpeed = Math.max(
+        PLAYBACK_SPEED_RANGE.min,
+        Math.min(PLAYBACK_SPEED_RANGE.max, speed),
+      );
     }
   }
 
   if (settings.audioVolume !== undefined) {
     validated.audioVolume = Math.max(0, Math.min(1, settings.audioVolume));
+  }
+
+  for (const key of ["audioSkipBackInterval", "audioSkipForwardInterval"] as const) {
+    if (settings[key] !== undefined) {
+      const v = Number(settings[key]);
+      if (Number.isFinite(v)) validated[key] = Math.max(5, Math.min(90, Math.round(v)));
+    }
   }
 
   if (settings.usePublisherStyles !== undefined) {

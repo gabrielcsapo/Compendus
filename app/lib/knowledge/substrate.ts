@@ -1029,12 +1029,11 @@ async function rebuildOffThread(onProgress?: (msg: string) => void): Promise<Str
   if (!existsSync(workerPath)) return rebuildStructure(onProgress);
   const { Worker } = await import("node:worker_threads");
   return new Promise<StructureStats>((resolvePromise, rejectPromise) => {
-    // Cap the worker's heap: it inherits NODE_OPTIONS' 3GB allowance otherwise,
-    // and main(3GB) + worker(3GB) + native ORT buffers can brush the container's
-    // 6GB ceiling → docker OOM-kill → a ~10-min boot-build blackout. The rebuild
-    // needs a few hundred MB even at the 180k-passage ceiling.
+    // Cap the worker's heap so main + worker can't compound toward the
+    // container ceiling (the old 6GB box OOM-killed exactly that way). 4GB is
+    // generous for rebuilds well past the current corpus on the 48GB container.
     const worker = new Worker(workerPath, {
-      resourceLimits: { maxOldGenerationSizeMb: 1536 },
+      resourceLimits: { maxOldGenerationSizeMb: 4096 },
     });
     const fail = (err: Error) => {
       worker.terminate().catch(() => {});

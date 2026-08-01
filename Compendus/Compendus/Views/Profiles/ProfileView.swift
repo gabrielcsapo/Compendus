@@ -378,9 +378,7 @@ struct ProfileView: View {
             streakDays = 0; todayMinutes = 0; streakHasFreeze = false; return
         }
         let pid = serverConfig.selectedProfileId ?? ""
-        let result = await Task.detached {
-            StreakCalculator.compute(sessions: allSessions, profileId: pid)
-        }.value
+        let result = StreakCalculator.compute(sessions: allSessions, profileId: pid)
         streakDays = result.streak
         todayMinutes = result.todayMinutes
         streakHasFreeze = result.hasFreeze

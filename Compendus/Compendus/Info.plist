@@ -2,31 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Amazon-Ember-Bold.ttf</string>
-		<string>Bookerly-Regular.ttf</string>
-		<string>DejaVuSansMono.ttf</string>
-	</array>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-		<string>fetch</string>
-		<string>audio</string>
-		<string>processing</string>
-	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.compendus.transcription</string>
 		<string>com.compendus.edit-sync</string>
 		<string>com.compendus.tts-generation</string>
 		<string>com.compendus.data-sync</string>
-		<string>com.compendus.fleet-worker</string>
 	</array>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Compendus uses speech recognition to generate transcripts for audiobook lyrics display.</string>
-	<key>UILaunchStoryboardName</key>
-	<string>Launch Screen</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -43,6 +25,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Compendus connects to your private library server on the local network to browse and download books for offline reading.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Amazon-Ember-Bold.ttf</string>
+		<string>Bookerly-Regular.ttf</string>
+		<string>DejaVuSansMono.ttf</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -62,5 +52,12 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+		<string>fetch</string>
+		<string>audio</string>
+		<string>processing</string>
+	</array>
 </dict>
 </plist>

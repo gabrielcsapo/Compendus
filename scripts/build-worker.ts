@@ -94,6 +94,13 @@ async function buildWorkers() {
       entryPoints: [join(rootDir, "app/lib/concept/ingest-worker.ts")],
       outfile: join(rootDir, "dist/worker/concept-ingest-worker.mjs"),
     }).then(() => console.log("[Worker Build] Built concept-ingest-worker.mjs")),
+
+    // Learning-graph worker (pairwise concept kNN + form-themes community pass)
+    build({
+      ...SHARED_OPTIONS,
+      entryPoints: [join(rootDir, "app/lib/lg/graph-worker.ts")],
+      outfile: join(rootDir, "dist/worker/lg-graph-worker.mjs"),
+    }).then(() => console.log("[Worker Build] Built lg-graph-worker.mjs")),
   ]);
 
   // Copy pdf.worker.mjs to dist/worker directory

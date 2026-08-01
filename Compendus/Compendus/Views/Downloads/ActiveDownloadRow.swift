@@ -19,7 +19,7 @@ struct ActiveDownloadRow: View {
 
     private var isFailed: Bool {
         if let progress, case .failed = progress.state { return true }
-        return pending.status == "failed"
+        return pending.status == "failed" || pending.status == "interrupted"
     }
 
     private var isWaiting: Bool {
@@ -67,6 +67,13 @@ struct ActiveDownloadRow: View {
                             .scaleEffect(0.6)
                             .frame(width: 12, height: 12)
                         Text("Waiting...")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if pending.status == "verifying" || pending.status == "installing" {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(pending.status == "verifying" ? "Verifying integrity…" : "Installing…")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

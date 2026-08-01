@@ -4,9 +4,16 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { createHash, randomBytes } from "crypto";
 import { db, profiles, type Profile } from "../../app/lib/db";
-import { requireAdmin } from "../middleware/profile";
+import { requireAdmin, requireExplicitProfile } from "../middleware/profile";
 
 const app = new Hono();
+
+// Listing, creation, PIN selection, and logout are the only intentionally
+// public profile operations. Reading or mutating a selected profile must not
+// inherit the single-profile compatibility fallback.
+app.use("/api/profiles/me", requireExplicitProfile);
+app.use("/api/profiles/:id", requireExplicitProfile);
+app.use("/api/profiles/:id/avatar", requireExplicitProfile);
 
 // --- PIN utilities ---
 

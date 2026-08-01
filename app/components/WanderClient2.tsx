@@ -176,11 +176,11 @@ export function WanderClient2({ initialStop }: { initialStop: StopView }) {
             wander toward…
           </button>
           <Link
-            to="/journeys"
+            to="/pods"
             onClick={logSession}
             className="rounded-full border border-stone-800 hover:border-stone-600 px-3 py-1.5 text-stone-500 hover:text-stone-300 transition-colors text-sm font-sans"
           >
-            journeys
+            Pods
           </Link>
         </div>
         <Link

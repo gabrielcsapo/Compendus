@@ -202,10 +202,22 @@ class ServerConfig {
 
     /// Test connection to the server
     func testConnection() async -> Bool {
-        guard let url = apiURL("/api/books?limit=1") else { return false }
+        // Profile discovery is the authenticated app's public bootstrap route.
+        // Protected library routes correctly return 401 on a fresh install,
+        // before the user has selected a profile.
+        guard let url = apiURL("/api/profiles") else { return false }
 
         do {
-            let session = URLSession(configuration: .default, delegate: LocalNetworkSessionDelegate.shared, delegateQueue: nil)
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 15
+            configuration.timeoutIntervalForResource = 15
+            configuration.waitsForConnectivity = false
+            let session = URLSession(
+                configuration: configuration,
+                delegate: LocalNetworkSessionDelegate.shared,
+                delegateQueue: nil
+            )
+            NetworkSessionRegistry.shared.registerDataSession(session)
             let (_, response) = try await session.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse else { return false }
             return (200...299).contains(httpResponse.statusCode)

@@ -60,6 +60,14 @@ final class PendingBookEdit {
         return PendingBookEdit(bookId: bookId, operationType: "metadata", payload: payload)
     }
 
+    /// Reversibly remove or restore a book from Today without discarding progress.
+    static func setAside(bookId: String, isSetAside: Bool) -> PendingBookEdit? {
+        var request = UpdateBookRequest()
+        request.isSetAside = isSetAside
+        guard let payload = try? JSONEncoder().encode(request) else { return nil }
+        return PendingBookEdit(bookId: bookId, operationType: "metadata", payload: payload)
+    }
+
     /// Create a pending rating/review update
     static func rateBook(bookId: String, rating: Int?, review: String?) -> PendingBookEdit? {
         var request = UpdateBookRequest()

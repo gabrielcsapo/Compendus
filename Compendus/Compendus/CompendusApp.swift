@@ -42,29 +42,32 @@ struct CompendusApp: App {
     @State private var downloadManager: DownloadManager
     @State private var bookEditSyncService: BookEditSyncService
     @State private var syncService: SyncService
-    @State private var fleetWorkerService: FleetWorkerService
 
     init() {
-        let config = ServerConfig()
-        let api = APIService(config: config)
-        let download = DownloadManager(config: config, apiService: api)
+        let config = AppServices.serverConfig
+        let api = AppServices.apiService
+        let download = AppServices.downloadManager
         let editSync = BookEditSyncService(apiService: api)
         let sync = SyncService(apiService: api)
-        let fleet = FleetWorkerService(serverConfig: config)
 
         _serverConfig = State(initialValue: config)
         _apiService = State(initialValue: api)
         _downloadManager = State(initialValue: download)
         _bookEditSyncService = State(initialValue: editSync)
         _syncService = State(initialValue: sync)
-        _fleetWorkerService = State(initialValue: fleet)
     }
 
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if let recoveryError = AppServices.modelContainerRecoveryError {
+                    DatabaseRecoveryView(errorMessage: recoveryError)
+                } else {
+                    ContentView()
+                }
+            }
                 .environment(serverConfig)
                 .environment(storageManager)
                 .environment(comicExtractor)
@@ -85,7 +88,6 @@ struct CompendusApp: App {
                 .environment(backgroundProcessingManager)
                 .environment(bookEditSyncService)
                 .environment(syncService)
-                .environment(fleetWorkerService)
                 .environment(\.deepLinkBookId, $deepLinkBookId)
                 .tint(themeManager.accentColor)
                 .preferredColorScheme(appSettings.colorScheme)
@@ -95,7 +97,11 @@ struct CompendusApp: App {
                 .onAppear {
                     downloadManager.appDelegate = appDelegate
                     downloadManager.modelContainer = sharedModelContainer
-                    downloadManager.reconnectBackgroundSession()
+                    if AppServices.modelContainerRecoveryError == nil {
+                        downloadManager.reconnectBackgroundSession()
+                    } else {
+                        downloadManager.suspendAllTransfersForDatabaseRecovery()
+                    }
                     downloadManager.backgroundProcessingManager = backgroundProcessingManager
                     downloadManager.appSettings = appSettings
                     downloadManager.kokoroModelManager = kokoroModelManager
@@ -117,10 +123,6 @@ struct CompendusApp: App {
                     BackgroundProcessingManager.registerBackgroundTasks(
                         manager: backgroundProcessingManager
                     )
-                    FleetWorkerService.registerBackgroundTask(
-                        service: fleetWorkerService
-                    )
-                    fleetWorkerService.startForegroundLoopIfEligible()
                     backgroundProcessingManager.configure(
                         transcriptionService: onDeviceTranscriptionService,
                         ttsPreGenerationService: ttsPreGenerationService,
@@ -139,20 +141,11 @@ struct CompendusApp: App {
                 bookEditSyncService.scheduleBackgroundTaskIfNeeded()
                 syncService.scheduleBackgroundTask()
                 backgroundProcessingManager.handleAppBackgrounded()
-                // iOS: hand off to the BGProcessingTask path when backgrounded.
-                // Catalyst: keep the loop running — on the Mac, "background"
-                // just means another window has focus, and the docked Mac is
-                // the fleet's workhorse precisely while you work elsewhere.
-                #if !targetEnvironment(macCatalyst)
-                fleetWorkerService.stopForegroundLoop()
-                #endif
-                fleetWorkerService.scheduleBackgroundTaskIfNeeded()
             case .active:
                 onDeviceTranscriptionService.handleAppForegrounded()
                 bookEditSyncService.handleAppForegrounded()
                 syncService.handleAppForegrounded()
                 backgroundProcessingManager.handleAppForegrounded()
-                fleetWorkerService.startForegroundLoopIfEligible()
             default:
                 break
             }

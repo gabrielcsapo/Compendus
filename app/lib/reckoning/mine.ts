@@ -2,7 +2,7 @@
  * Reckoning — candidate tension-pair mining (the box-side, CPU-only step).
  *
  * Goal: cheaply surface cross-book passage PAIRS that are (a) about the same
- * subject and (b) look like they might DISAGREE, so a later LLM fleet job can
+ * subject and (b) look like they might DISAGREE, so a later LLM judge pass can
  * adjudicate them into agree / contradict / qualify / neutral. This module does
  * NO model inference, NO embeddings, and NO network I/O — pure SQLite + string
  * heuristics over the concept substrate (cs_* tables).
@@ -177,7 +177,7 @@ export async function mineCandidateTensions(opts?: { limit?: number }): Promise<
   const maxDf = Math.max(MIN_DF, Math.floor(totalPassages * MAX_DF_FRACTION));
 
   // 0. NONFICTION ALLOWLIST. The Reckoning adjudicates *claims*, and this library
-  //    is ~97% fiction, so we mine ONLY books the fleet classified nonfiction
+  //    is ~97% fiction, so we mine ONLY books classified nonfiction
   //    (cs_book_class). If classification hasn't run, the set is empty and mining
   //    yields nothing — by design: classify first, then mine. (The per-passage
   //    expository filter below still strips front-matter within nonfiction.)
@@ -396,7 +396,7 @@ function tick(): Promise<void> {
 }
 
 /**
- * Set of book ids the fleet classified as nonfiction (cs_book_class). This is
+ * Set of book ids classified as nonfiction (cs_book_class). This is
  * the mining allowlist. Robust to a missing table (returns an empty set, so
  * mining yields nothing until classification has run — classify first, mine
  * second).

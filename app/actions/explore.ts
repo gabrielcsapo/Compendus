@@ -5,6 +5,7 @@ import { getSeriesWithCovers } from "./series";
 import { getTagsWithCounts } from "./tags";
 import { rawDb } from "../lib/db";
 import { resolveProfileId } from "../lib/profile";
+import { getCuratedDiscovery, type CuratedDiscovery } from "../lib/discovery/curation";
 
 export type ExploreData = {
   inProgress: BookWithState[];
@@ -15,6 +16,8 @@ export type ExploreData = {
   genreSections: Array<{ subject: string; books: BookWithState[] }>;
   topSeries: Array<{ name: string; bookCount: number; books: BookWithState[] }>;
   topTags: Array<{ id: string; name: string; color: string | null; books: BookWithState[] }>;
+  curated: CuratedDiscovery | null;
+  curatedBooks: BookWithState[];
   totalCount: number;
   unmatchedCount: number;
 };
@@ -63,6 +66,10 @@ export async function getReadNextInSeries(
       FROM series_status ss
       JOIN in_progress_series ips ON ips.series = ss.series
       WHERE ss.is_read = 0 AND ss.reading_progress = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM user_book_state aside
+          WHERE aside.profile_id = ? AND aside.book_id = ss.book_id AND aside.is_set_aside = 1
+        )
     )
     SELECT book_id, series, series_number
     FROM next_book
@@ -70,7 +77,7 @@ export async function getReadNextInSeries(
     LIMIT 10
   `,
     )
-    .all(pid) as Array<{ book_id: string; series: string; series_number: string | null }>;
+    .all(pid, pid) as Array<{ book_id: string; series: string; series_number: string | null }>;
 
   if (rows.length === 0) return [];
 
@@ -112,6 +119,7 @@ export async function getStaleReads(profileId?: string): Promise<BookWithState[]
       ON ubs.book_id = b.id AND ubs.profile_id = ?
     WHERE COALESCE(ubs.reading_progress, b.reading_progress, 0) > 0.1
       AND COALESCE(ubs.is_read, b.is_read, 0) = 0
+      AND COALESCE(ubs.is_set_aside, 0) = 0
       AND COALESCE(ubs.last_read_at, b.last_read_at) IS NOT NULL
       AND COALESCE(ubs.last_read_at, b.last_read_at) < ?
     ORDER BY COALESCE(ubs.last_read_at, b.last_read_at) ASC
@@ -293,7 +301,7 @@ export async function getInProgressBooks(
     profileId,
     type: typeFilter,
   });
-  return lastReadBooks.filter((b) => (b.readingProgress || 0) > 0);
+  return lastReadBooks.filter((b) => (b.readingProgress || 0) > 0 && !b.isSetAside);
 }
 
 /**
@@ -303,7 +311,14 @@ export async function getRecentlyAddedBooks(
   profileId?: string,
   typeFilter?: import("../lib/book-types").BookType,
 ): Promise<BookWithState[]> {
-  return getBooks({ orderBy: "createdAt", order: "desc", limit: 16, profileId, type: typeFilter });
+  const books = await getBooks({
+    orderBy: "createdAt",
+    order: "desc",
+    limit: 24,
+    profileId,
+    type: typeFilter,
+  });
+  return books.filter((book) => !book.isRead && !book.isSetAside).slice(0, 16);
 }
 
 /**
@@ -351,39 +366,44 @@ export async function getExploreData(
   profileId?: string,
   typeFilter?: import("../lib/book-types").BookType,
 ): Promise<ExploreData> {
+  const pid = profileId ?? resolveProfileId();
   const [
     inProgress,
     recentlyAdded,
     totalCount,
     unmatchedCount,
-    topSeries,
-    topTags,
     readNextInSeries,
     staleReads,
-    moreByAuthor,
-    genreSections,
+    curated,
   ] = await Promise.all([
     getInProgressBooks(profileId, typeFilter),
     getRecentlyAddedBooks(profileId, typeFilter),
     getBooksCount(typeFilter),
     getUnmatchedBooksCount(),
-    getTopSeriesSections(profileId, typeFilter),
-    getTopTagsSections(profileId),
     getReadNextInSeries(profileId),
     getStaleReads(profileId),
-    getMoreByAuthor(profileId),
-    getGenreSections(profileId),
+    pid ? getCuratedDiscovery(pid) : Promise.resolve(null),
   ]);
+
+  const curatedIds = curated ? [...new Set(curated.shelves.flatMap((shelf) => shelf.bookIds))] : [];
+  const curatedBooks =
+    curatedIds.length > 0
+      ? await getBooks({ ids: curatedIds, limit: curatedIds.length, profileId: pid })
+      : [];
 
   return {
     inProgress,
     readNextInSeries,
     staleReads,
     recentlyAdded,
-    moreByAuthor,
-    genreSections,
-    topSeries,
-    topTags,
+    // Keep the wire shape stable for older clients while Home intentionally
+    // limits itself to four useful modules. Deep browsing belongs in Library.
+    moreByAuthor: [],
+    genreSections: [],
+    topSeries: [],
+    topTags: [],
+    curated,
+    curatedBooks,
     totalCount,
     unmatchedCount,
   };

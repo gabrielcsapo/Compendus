@@ -9,6 +9,9 @@
 import Foundation
 import SwiftData
 import CCReader
+import CryptoKit
+import PDFKit
+import AVFoundation
 
 struct DownloadProgress: Identifiable {
     let id: String  // Book ID
@@ -40,6 +43,9 @@ struct DownloadProgress: Identifiable {
 
 enum DownloadError: LocalizedError {
     case insufficientStorage(required: Int64, available: Int64)
+    case sizeMismatch(expected: Int64, actual: Int64)
+    case checksumMismatch
+    case invalidArtifact(String)
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +55,12 @@ enum DownloadError: LocalizedError {
             let req = formatter.string(fromByteCount: required)
             let avail = formatter.string(fromByteCount: available)
             return "Not enough storage. This book requires \(req) but only \(avail) is available. Free up space or delete some downloads."
+        case .sizeMismatch(let expected, let actual):
+            return "The download was incomplete (expected \(expected) bytes, received \(actual))."
+        case .checksumMismatch:
+            return "The downloaded file failed its integrity check. Please retry it."
+        case .invalidArtifact(let reason):
+            return "The downloaded file could not be verified: \(reason)"
         }
     }
 }
@@ -61,6 +73,11 @@ class DownloadManager: NSObject {
     private(set) var activeDownloads: [String: DownloadProgress] = [:]
     /// Whether a metadata sync is currently in progress.
     private(set) var isSyncingMetadata: Bool = false
+    private(set) var isVerifyingLibrary: Bool = false
+    private(set) var verificationTotal: Int = 0
+    private(set) var verificationCompleted: Int = 0
+    private(set) var verificationFailures: Int = 0
+    private(set) var lastLibraryVerificationAt: Date?
     @ObservationIgnored private var _session: URLSession?
     @ObservationIgnored private var _foregroundSession: URLSession?
 
@@ -103,6 +120,7 @@ class DownloadManager: NSObject {
         config.timeoutIntervalForResource = 3600  // 1 hour max for entire download
         config.allowsCellularAccess = true
         let newSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        NetworkSessionRegistry.shared.registerTransferSession(newSession)
         _session = newSession
         return newSession
     }
@@ -118,6 +136,7 @@ class DownloadManager: NSObject {
         config.timeoutIntervalForResource = 3600
         config.allowsCellularAccess = true
         let newSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        NetworkSessionRegistry.shared.registerTransferSession(newSession)
         _foregroundSession = newSession
         return newSession
     }
@@ -129,10 +148,15 @@ class DownloadManager: NSObject {
 
     /// Start a download task on the appropriate session.
     @discardableResult
-    private func startDownloadTask(url: URL, bookId: String) -> URLSessionDownloadTask {
-        let task = downloadSession.downloadTask(with: url)
+    private func startDownloadTask(request: URLRequest, bookId: String, resumeData: Data? = nil) -> URLSessionDownloadTask {
+        let task = resumeData.map { downloadSession.downloadTask(withResumeData: $0) }
+            ?? downloadSession.downloadTask(with: request)
         task.taskDescription = bookId  // Persists across app termination (background session)
-        task.resume()
+        if ConnectivityMonitor.shared.permitsNetworkRequests {
+            task.resume()
+        } else {
+            task.suspend()
+        }
         return task
     }
 
@@ -144,17 +168,31 @@ class DownloadManager: NSObject {
 
     // MARK: - Public API
 
+    /// Keep background URLSession from mutating files while the catalog is in
+    /// recovery mode and cannot record a transactional completion.
+    func suspendAllTransfersForDatabaseRecovery() {
+        let suspend: (URLSession) -> Void = { session in
+            session.getAllTasks { $0.forEach { $0.suspend() } }
+        }
+        suspend(session)
+        if let foreground = _foregroundSession { suspend(foreground) }
+    }
+
     /// Download a book for offline reading.
     /// The download runs in the background and completes even if the app is suspended.
     /// Returns the existing DownloadedBook if already downloaded, or nil if download was started.
     @MainActor
-    func downloadBook(_ book: Book, modelContext: ModelContext) async throws -> DownloadedBook? {
+    func downloadBook(
+        _ book: Book,
+        modelContext: ModelContext,
+        replacingExisting: Bool = false
+    ) async throws -> DownloadedBook? {
         // Check if already downloaded
         let bookId = book.id
         let descriptor = FetchDescriptor<DownloadedBook>(
             predicate: #Predicate { $0.id == bookId }
         )
-        if let existing = try? modelContext.fetch(descriptor).first {
+        if let existing = try? modelContext.fetch(descriptor).first, !replacingExisting {
             return existing
         }
 
@@ -171,44 +209,16 @@ class DownloadManager: NSObject {
             modelContext.delete(existing)
         }
 
-        // Check available storage before starting download
-        if let fileSize = book.fileSize, fileSize > 0 {
-            let requiredBytes = Int64(fileSize)
-            let homeURL = URL(fileURLWithPath: NSHomeDirectory())
-            let availableBytes = (try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? 0
-            // Require at least the file size plus 50MB buffer for extraction/processing
-            let bufferBytes: Int64 = 50 * 1024 * 1024
-            if requiredBytes + bufferBytes > availableBytes {
-                throw DownloadError.insufficientStorage(required: requiredBytes, available: availableBytes)
-            }
-        }
-
-        // Determine download URL and final format
-        let fmt = book.format.lowercased()
-        let isCbr = fmt == "cbr"
-        // Reflowable ebooks are served as a self-contained CCD pack — no raw .epub
-        // on device, no on-device EPUB parsing. The pack is unzipped at completion.
-        let isReflowable = ["epub", "mobi", "azw", "azw3"].contains(fmt)
-        let downloadURL: URL?
-        let localFormat: String
-
-        if isCbr {
-            downloadURL = config.bookAsCbzURL(for: book.id)
-            localFormat = "cbz"
-            print("[DownloadManager] Converting CBR to CBZ for offline reading: \(book.id)")
-        } else if isReflowable {
-            // CCD pack (manifest + image resources) replaces the raw ebook file.
-            downloadURL = config.apiURL("/api/reader/\(book.id)/ccd/pack")
-            localFormat = "ccdpack"
-            print("[DownloadManager] Downloading CCD pack for reflowable book: \(book.id)")
-        } else {
-            // PDF and other formats download directly
-            downloadURL = apiService.bookDownloadURL(bookId: book.id, format: book.format)
-            localFormat = book.format
-        }
-
-        guard let downloadURL = downloadURL else {
+        // Resolve the exact immutable artifact before queueing. This gives the
+        // client the converted format, byte length, digest, and peak disk need.
+        let manifest = try await apiService.fetchDownloadManifest(bookId: book.id)
+        guard let downloadURL = URL(string: manifest.url, relativeTo: config.baseURL)?.absoluteURL else {
             throw APIError.invalidURL
+        }
+        let homeURL = URL(fileURLWithPath: NSHomeDirectory())
+        let availableBytes = (try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? 0
+        if manifest.peakDiskBytes > availableBytes {
+            throw DownloadError.insufficientStorage(required: manifest.peakDiskBytes, available: availableBytes)
         }
 
         // Pre-fetch cover before starting download
@@ -218,7 +228,7 @@ class DownloadManager: NSObject {
         }
 
         // Persist download intent in SwiftData
-        let pending = PendingDownload.from(book: book, downloadURL: downloadURL, localFormat: localFormat)
+        let pending = PendingDownload.from(book: book, manifest: manifest, downloadURL: downloadURL)
         pending.profileId = apiService.config.selectedProfileId ?? ""
         pending.status = "downloading"
         pending.coverData = coverData
@@ -230,28 +240,42 @@ class DownloadManager: NSObject {
             id: book.id,
             progress: 0,
             bytesReceived: 0,
-            totalBytes: Int64(book.fileSize ?? 0),
+            totalBytes: manifest.byteLength,
             state: .downloading
         )
         activeDownloads[book.id] = progress
 
         // Start download task (background session, or foreground fallback)
-        startDownloadTask(url: downloadURL, bookId: book.id)
+        startDownloadTask(request: apiService.authenticatedRequest(for: downloadURL), bookId: book.id)
 
         return nil
+    }
+
+    /// Re-fetch and replace a damaged or missing artifact while preserving the
+    /// existing book record, reading position, highlights, and review metadata.
+    @MainActor
+    func repairDownload(_ downloaded: DownloadedBook, modelContext: ModelContext) async throws {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { throw APIError.offline }
+        let response = try await apiService.fetchBook(id: downloaded.id)
+        _ = try await downloadBook(response.book, modelContext: modelContext, replacingExisting: true)
     }
 
     /// Download the converted EPUB version for a PDF book
     @MainActor
     func downloadEpubVersion(bookId: String, modelContext: ModelContext) async throws {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { throw APIError.offline }
         let descriptor = FetchDescriptor<DownloadedBook>(
             predicate: #Predicate { $0.id == bookId }
         )
         guard let downloadedBook = try? modelContext.fetch(descriptor).first else {
             throw APIError.invalidURL
         }
+        guard downloadedBook.format.lowercased() != "epub" else {
+            throw APIError.invalidURL
+        }
 
-        guard let downloadURL = config.bookAsEpubURL(for: bookId) else {
+        let manifest = try await apiService.fetchDownloadManifest(bookId: bookId, variant: "epub")
+        guard let downloadURL = URL(string: manifest.url, relativeTo: config.baseURL)?.absoluteURL else {
             throw APIError.invalidURL
         }
 
@@ -260,30 +284,57 @@ class DownloadManager: NSObject {
             id: progressId,
             progress: 0,
             bytesReceived: 0,
-            totalBytes: 0,
+            totalBytes: manifest.byteLength,
             state: .downloading
         )
         activeDownloads[progressId] = progress
 
-        // EPUB version downloads use a simple foreground data task since they're
-        // typically small and the user is actively waiting in the reader
-        let (data, _) = try await apiService.session.data(from: downloadURL)
+        let (temporaryURL, response) = try await apiService.session.download(
+            for: apiService.authenticatedRequest(for: downloadURL)
+        )
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 0, nil)
+        }
+        _ = try verifyArtifact(
+            at: temporaryURL,
+            expectedBytes: manifest.byteLength,
+            expectedSHA256: manifest.sha256,
+            format: "epub"
+        )
 
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
-        try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
+        let installed = try installRegularArtifact(
+            from: temporaryURL,
+            bookId: bookId,
+            format: "epub",
+            documentsURL: documentsURL
+        )
 
-        let fileName = "\(bookId).epub"
-        let destinationURL = booksDir.appendingPathComponent(fileName)
-
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.removeItem(at: destinationURL)
+        let priorMetadata = (
+            path: downloadedBook.epubLocalPath,
+            hash: downloadedBook.epubArtifactSHA256,
+            byteLength: downloadedBook.epubArtifactByteLength,
+            verification: downloadedBook.epubVerificationStatus
+        )
+        downloadedBook.epubLocalPath = installed.localPath
+        downloadedBook.epubArtifactSHA256 = manifest.sha256.lowercased()
+        downloadedBook.epubArtifactByteLength = manifest.byteLength
+        downloadedBook.epubVerificationStatus = "verified"
+        do {
+            try modelContext.save()
+        } catch {
+            rollbackInstall(
+                destination: installed.destination,
+                backup: installed.backup,
+                journal: installed.journal
+            )
+            downloadedBook.epubLocalPath = priorMetadata.path
+            downloadedBook.epubArtifactSHA256 = priorMetadata.hash
+            downloadedBook.epubArtifactByteLength = priorMetadata.byteLength
+            downloadedBook.epubVerificationStatus = priorMetadata.verification
+            throw error
         }
-
-        try data.write(to: destinationURL)
-
-        downloadedBook.epubLocalPath = "books/\(fileName)"
-        try modelContext.save()
+        finishInstall(backup: installed.backup, journal: installed.journal)
 
         activeDownloads.removeValue(forKey: progressId)
     }
@@ -291,25 +342,54 @@ class DownloadManager: NSObject {
     /// Retry a failed download using the persisted PendingDownload metadata
     @MainActor
     func retryDownload(_ pending: PendingDownload, modelContext: ModelContext) {
-        guard let downloadURL = URL(string: pending.downloadURL) else { return }
-
-        // Reset status
-        pending.status = "downloading"
+        pending.status = "pending"
         pending.errorMessage = nil
         try? modelContext.save()
-
-        // Initialize progress tracking
-        let progress = DownloadProgress(
-            id: pending.id,
-            progress: 0,
-            bytesReceived: 0,
-            totalBytes: Int64(pending.fileSize),
-            state: .downloading
-        )
-        activeDownloads[pending.id] = progress
-
-        // Start download task (background session, or foreground fallback)
-        startDownloadTask(url: downloadURL, bookId: pending.id)
+        Task { @MainActor in
+            do {
+                let manifest = try await apiService.fetchDownloadManifest(bookId: pending.bookId)
+                guard let downloadURL = URL(string: manifest.url, relativeTo: config.baseURL)?.absoluteURL else {
+                    throw APIError.invalidURL
+                }
+                let homeURL = URL(fileURLWithPath: NSHomeDirectory())
+                let available = (try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? 0
+                guard manifest.peakDiskBytes <= available else {
+                    throw DownloadError.insufficientStorage(required: manifest.peakDiskBytes, available: available)
+                }
+                let canResume = pending.artifactId == manifest.artifactId
+                let resumeData = canResume ? pending.resumeData : nil
+                pending.artifactId = manifest.artifactId
+                pending.expectedSHA256 = manifest.sha256.lowercased()
+                pending.expectedByteLength = manifest.byteLength
+                pending.peakDiskBytes = manifest.peakDiskBytes
+                pending.artifactVersion = manifest.artifactVersion
+                pending.ccdVersion = manifest.ccdVersion
+                pending.format = manifest.format
+                pending.originalFormat = manifest.originalFormat
+                pending.downloadURL = downloadURL.absoluteString
+                pending.fileSize = Int(manifest.byteLength)
+                pending.resumeData = nil
+                pending.status = "downloading"
+                try modelContext.save()
+                activeDownloads[pending.id] = DownloadProgress(
+                    id: pending.id,
+                    progress: 0,
+                    bytesReceived: 0,
+                    totalBytes: manifest.byteLength,
+                    state: .downloading
+                )
+                startDownloadTask(
+                    request: apiService.authenticatedRequest(for: downloadURL),
+                    bookId: pending.id,
+                    resumeData: resumeData
+                )
+            } catch {
+                pending.status = "failed"
+                pending.errorMessage = error.localizedDescription
+                try? modelContext.save()
+                activeDownloads[pending.id]?.state = .failed(error)
+            }
+        }
     }
 
     /// Remove failed downloads from activeDownloads that have been in a failed state
@@ -331,7 +411,7 @@ class DownloadManager: NSObject {
     @MainActor
     func retryFailedDownloads(modelContext: ModelContext) {
         let descriptor = FetchDescriptor<PendingDownload>(
-            predicate: #Predicate { $0.status == "failed" }
+            predicate: #Predicate { $0.status == "failed" || $0.status == "interrupted" }
         )
         guard let failedDownloads = try? modelContext.fetch(descriptor), !failedDownloads.isEmpty else {
             return
@@ -353,12 +433,41 @@ class DownloadManager: NSObject {
 
         // Also clean up any pending downloads not in activeDownloads
         let descriptor = FetchDescriptor<PendingDownload>(
-            predicate: #Predicate { $0.status == "pending" || $0.status == "downloading" || $0.status == "failed" }
+            predicate: #Predicate { $0.status == "pending" || $0.status == "downloading" || $0.status == "failed" || $0.status == "interrupted" || $0.status == "verifying" || $0.status == "installing" }
         )
         if let remaining = try? modelContext.fetch(descriptor) {
             for pending in remaining {
                 cancelDownload(bookId: pending.id, modelContext: modelContext)
             }
+        }
+    }
+
+    /// Suspend URLSession tasks as well as application-level retry/sync traffic.
+    /// Suspended tasks retain their partial bytes and resume when Offline Mode ends.
+    @MainActor
+    func setTransfersPausedForOfflineMode(_ paused: Bool, modelContext: ModelContext) {
+        let updateSession: (URLSession) -> Void = { session in
+            session.getAllTasks { tasks in
+                for task in tasks {
+                    if paused { task.suspend() } else { task.resume() }
+                }
+            }
+        }
+        updateSession(session)
+        if let foreground = _foregroundSession { updateSession(foreground) }
+
+        let descriptor = FetchDescriptor<PendingDownload>()
+        if let pending = try? modelContext.fetch(descriptor) {
+            for item in pending {
+                if paused, ["pending", "downloading"].contains(item.status) {
+                    item.status = "paused"
+                    activeDownloads[item.id]?.state = .waiting
+                } else if !paused, item.status == "paused" {
+                    item.status = "downloading"
+                    activeDownloads[item.id]?.state = .downloading
+                }
+            }
+            try? modelContext.save()
         }
     }
 
@@ -395,6 +504,11 @@ class DownloadManager: NSObject {
     func deleteBook(_ book: DownloadedBook, modelContext: ModelContext) throws {
         if let fileURL = book.fileURL {
             try? FileManager.default.removeItem(at: fileURL)
+        }
+        if let epubURL = book.epubFileURL { try? FileManager.default.removeItem(at: epubURL) }
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        for root in ["comic-cache", "tts-cache"] {
+            try? FileManager.default.removeItem(at: documents.appendingPathComponent(root).appendingPathComponent(book.id))
         }
         modelContext.delete(book)
         try modelContext.save()
@@ -436,6 +550,93 @@ class DownloadManager: NSObject {
 
     // MARK: - Background Session Reconnection
 
+    /// Reconcile an install that was interrupted between the filesystem swap
+    /// and the SwiftData commit. A surviving PendingDownload means the commit
+    /// did not finish, so restore the last committed artifact; no pending row
+    /// means the database commit won and only transaction debris remains.
+    @MainActor
+    func recoverInterruptedInstalls() {
+        guard let container = modelContainer else { return }
+        let fm = FileManager.default
+        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let documentsPrefix = documents.standardizedFileURL.path + "/"
+        let staging = documents.appendingPathComponent(".download-staging", isDirectory: true)
+        guard let entries = try? fm.contentsOfDirectory(
+            at: staging,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let context = ModelContext(container)
+        var recovered = 0
+        for journalURL in entries where journalURL.lastPathComponent.hasSuffix(".install-journal.json") {
+            guard let data = try? Data(contentsOf: journalURL),
+                  let journal = try? JSONDecoder().decode(InstallJournal.self, from: data) else {
+                try? fm.removeItem(at: journalURL)
+                continue
+            }
+            let destination = URL(fileURLWithPath: journal.destinationPath).standardizedFileURL
+            guard destination.path.hasPrefix(documentsPrefix) else {
+                try? fm.removeItem(at: journalURL)
+                continue
+            }
+            let backup = journal.backupPath.map { URL(fileURLWithPath: $0).standardizedFileURL }
+            guard backup == nil || backup!.path.hasPrefix(documentsPrefix) else {
+                try? fm.removeItem(at: journalURL)
+                continue
+            }
+
+            let bookId = journal.bookId
+            let descriptor = FetchDescriptor<PendingDownload>(
+                predicate: #Predicate { $0.id == bookId }
+            )
+            let pending = try? context.fetch(descriptor).first
+            if let pending {
+                do {
+                    if let backup, fm.fileExists(atPath: backup.path) {
+                        if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
+                        try fm.moveItem(at: backup, to: destination)
+                    } else if backup == nil, fm.fileExists(atPath: destination.path) {
+                        try fm.removeItem(at: destination)
+                    }
+                } catch {
+                    pending.status = "interrupted"
+                    pending.errorMessage = "Installation recovery needs attention: \(error.localizedDescription)"
+                    continue
+                }
+                pending.status = "interrupted"
+                pending.errorMessage = "Installation was interrupted and safely rolled back. Retry to continue."
+                recovered += 1
+            } else if let backup {
+                do {
+                    if fm.fileExists(atPath: backup.path) { try fm.removeItem(at: backup) }
+                } catch {
+                    continue
+                }
+            }
+            try? fm.removeItem(at: journalURL)
+        }
+        try? context.save()
+
+        // Staging contains no URLSession resume data. Once journals have been
+        // reconciled, ordinary remaining files are abandoned pre-journal
+        // copies. Preserve journals/backups if recovery itself needs a retry.
+        if let leftovers = try? fm.contentsOfDirectory(
+            at: staging,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for url in leftovers where
+                !url.lastPathComponent.hasSuffix(".install-journal.json") &&
+                !url.lastPathComponent.hasSuffix(".install-backup") {
+                try? fm.removeItem(at: url)
+            }
+        }
+        if recovered > 0 {
+            print("[DownloadManager] Recovered \(recovered) interrupted install(s)")
+        }
+    }
+
     /// Reconnect to any in-progress background downloads after app launch.
     func reconnectBackgroundSession() {
         session.getAllTasks { [weak self] tasks in
@@ -445,6 +646,11 @@ class DownloadManager: NSObject {
                 for task in tasks {
                     guard let bookId = task.taskDescription else { continue }
 
+                    if !ConnectivityMonitor.shared.permitsNetworkRequests {
+                        task.suspend()
+                    }
+
+                    let taskIsSuspended = task.state == .suspended || !ConnectivityMonitor.shared.permitsNetworkRequests
                     let progress = DownloadProgress(
                         id: bookId,
                         progress: task.countOfBytesExpectedToReceive > 0
@@ -452,9 +658,29 @@ class DownloadManager: NSObject {
                             : 0,
                         bytesReceived: task.countOfBytesReceived,
                         totalBytes: task.countOfBytesExpectedToReceive,
-                        state: .downloading
+                        state: taskIsSuspended ? .waiting : .downloading
                     )
                     self.activeDownloads[bookId] = progress
+                }
+
+                if let container = self.modelContainer {
+                    let context = ModelContext(container)
+                    let taskIds = Set(tasks.compactMap(\.taskDescription))
+                    let descriptor = FetchDescriptor<PendingDownload>()
+                    if let pending = try? context.fetch(descriptor) {
+                        for item in pending where taskIds.contains(item.id) {
+                            if let task = tasks.first(where: { $0.taskDescription == item.id }), task.state == .suspended {
+                                item.status = "paused"
+                            }
+                        }
+                        for item in pending where
+                            ["pending", "downloading", "paused", "verifying", "installing"].contains(item.status) &&
+                            !taskIds.contains(item.id) {
+                            item.status = "interrupted"
+                            item.errorMessage = "The transfer was interrupted. Retry to continue."
+                        }
+                        try? context.save()
+                    }
                 }
 
                 if !tasks.isEmpty {
@@ -464,33 +690,173 @@ class DownloadManager: NSObject {
         }
     }
 
+    /// Verify that every database record is backed by a complete, readable local
+    /// artifact. This performs no network requests and is safe in airplane mode.
+    @MainActor
+    func verifyAllDownloads(modelContext: ModelContext) async {
+        let profileId = config.selectedProfileId ?? ""
+        let descriptor = FetchDescriptor<DownloadedBook>(
+            predicate: #Predicate { $0.profileId == profileId || $0.profileId.isEmpty }
+        )
+        guard let books = try? modelContext.fetch(descriptor) else { return }
+        isVerifyingLibrary = true
+        verificationTotal = books.count
+        verificationCompleted = 0
+        verificationFailures = 0
+        defer { isVerifyingLibrary = false }
+
+        for book in books {
+            let url = book.fileURL
+            let packDir = book.ccdPackDir
+            let isPack = book.isReflowable
+            let expectedHash = book.artifactSHA256
+            let expectedBytes = Int64(book.fileSize)
+            let format = book.format
+            let result = await Task.detached(priority: .utility) {
+                await Self.verifyInstalled(
+                    url: url,
+                    packDir: packDir,
+                    isPack: isPack,
+                    expectedHash: expectedHash,
+                    expectedBytes: expectedBytes,
+                    format: format
+                )
+            }.value
+            var combinedResult = result
+            if let epubURL = book.epubFileURL {
+                let epubHash = book.epubArtifactSHA256
+                let epubBytes = book.epubArtifactByteLength
+                let epubResult = await Task.detached(priority: .utility) {
+                    Self.verifyAlternateEPUB(
+                        url: epubURL,
+                        expectedHash: epubHash,
+                        expectedBytes: epubBytes
+                    )
+                }.value
+                book.epubVerificationStatus = epubResult
+                if result == "verified", epubResult != "verified" {
+                    combinedResult = epubResult
+                }
+            } else {
+                book.epubVerificationStatus = nil
+            }
+            book.verificationStatus = combinedResult
+            if combinedResult == "verified" {
+                book.verifiedAt = Date()
+            } else {
+                verificationFailures += 1
+            }
+            verificationCompleted += 1
+        }
+        try? modelContext.save()
+        lastLibraryVerificationAt = Date()
+    }
+
+    nonisolated private static func verifyAlternateEPUB(
+        url: URL,
+        expectedHash: String,
+        expectedBytes: Int64
+    ) -> String {
+        do {
+            guard FileManager.default.fileExists(atPath: url.path) else { return "missing" }
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            let actualBytes = Int64(values.fileSize ?? 0)
+            if expectedBytes > 0, actualBytes != expectedBytes { return "corrupt" }
+            if !expectedHash.isEmpty, try sha256File(url) != expectedHash.lowercased() { return "corrupt" }
+            try CCDPack.validateEPUB(at: url)
+            return "verified"
+        } catch {
+            return "corrupt"
+        }
+    }
+
+    private static func verifyInstalled(
+        url: URL?,
+        packDir: URL?,
+        isPack: Bool,
+        expectedHash: String,
+        expectedBytes: Int64,
+        format: String
+    ) async -> String {
+        do {
+            if isPack {
+                guard let packDir, FileManager.default.fileExists(atPath: packDir.path) else { return "missing" }
+                try CCDPack.validateInstalledPack(at: packDir)
+                return "verified"
+            }
+            guard let url, FileManager.default.fileExists(atPath: url.path) else { return "missing" }
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard Int64(values.fileSize ?? 0) == expectedBytes else { return "corrupt" }
+            if !expectedHash.isEmpty, try sha256File(url) != expectedHash.lowercased() { return "corrupt" }
+            if format.lowercased() == "cbz" { try CCDPack.validateCBZ(at: url) }
+            if format.lowercased() == "pdf" {
+                guard let document = PDFDocument(url: url), document.pageCount > 0 else { return "corrupt" }
+            }
+            if ["m4b", "m4a", "mp3"].contains(format.lowercased()) {
+                let asset = AVURLAsset(url: url)
+                let playable = try await asset.load(.isPlayable)
+                let duration = try await asset.load(.duration)
+                guard playable && duration.seconds.isFinite && duration.seconds > 0 else { return "corrupt" }
+            }
+            return "verified"
+        } catch {
+            return "corrupt"
+        }
+    }
+
+    nonisolated private static func sha256File(_ url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     // MARK: - Metadata Sync
 
     private static let syncInterval: TimeInterval = 3600
     private static let lastSyncKey = "lastMetadataSyncTimestamp"
+    /// Keep launch/refresh metadata reconciliation from flooding the server and
+    /// URLSession connection pool for large offline libraries.
+    private static let maxConcurrentMetadataRequests = 6
 
     @MainActor
     func syncDownloadedBooksMetadata(modelContext: ModelContext, force: Bool = false) async {
+        guard config.isConfigured, let profileId = config.selectedProfileId else { return }
+        let profileSyncKey = "\(Self.lastSyncKey)-\(profileId)"
+
         if !force {
-            let lastSync = UserDefaults.standard.double(forKey: Self.lastSyncKey)
+            let lastSync = UserDefaults.standard.double(forKey: profileSyncKey)
             if lastSync > 0 && Date.now.timeIntervalSince1970 - lastSync < Self.syncInterval {
                 return
             }
         }
 
-        guard config.isConfigured else { return }
-
-        let descriptor = FetchDescriptor<DownloadedBook>()
+        // Legacy unassigned downloads are visible to the selected profile until
+        // the profile migration flow claims them, matching the rest of the app.
+        let descriptor = FetchDescriptor<DownloadedBook>(
+            predicate: #Predicate { $0.profileId == profileId || $0.profileId.isEmpty }
+        )
         guard let downloadedBooks = try? modelContext.fetch(descriptor), !downloadedBooks.isEmpty else { return }
+        let downloadedBooksById = Dictionary(
+            downloadedBooks.map { ($0.id, $0) },
+            uniquingKeysWith: { existing, candidate in
+                candidate.profileId == profileId ? candidate : existing
+            }
+        )
+        let bookIds = Array(downloadedBooksById.keys)
 
         isSyncingMetadata = true
         defer { isSyncingMetadata = false }
 
-        print("[DownloadManager] Syncing metadata for \(downloadedBooks.count) downloaded books")
+        print("[DownloadManager] Syncing metadata for \(bookIds.count) downloaded books")
 
         await withTaskGroup(of: (String, Book?, Data?).self) { group in
-            for downloadedBook in downloadedBooks {
-                let bookId = downloadedBook.id
+            var pendingBookIds = bookIds.makeIterator()
+
+            func enqueue(_ bookId: String) {
                 group.addTask {
                     do {
                         let book = try await self.apiService.fetchBook(id: bookId).book
@@ -506,16 +872,31 @@ class DownloadManager: NSObject {
                 }
             }
 
-            for await (bookId, book, coverData) in group {
+            for _ in 0..<min(Self.maxConcurrentMetadataRequests, bookIds.count) {
+                if let bookId = pendingBookIds.next() {
+                    enqueue(bookId)
+                }
+            }
+
+            while let (bookId, book, coverData) = await group.next() {
                 guard let book = book,
-                      let downloadedBook = downloadedBooks.first(where: { $0.id == bookId }) else { continue }
+                      let downloadedBook = downloadedBooksById[bookId] else {
+                    if let nextBookId = pendingBookIds.next() {
+                        enqueue(nextBookId)
+                    }
+                    continue
+                }
                 downloadedBook.updateMetadata(from: book, coverData: coverData)
+
+                if let nextBookId = pendingBookIds.next() {
+                    enqueue(nextBookId)
+                }
             }
         }
 
         do {
             try modelContext.save()
-            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: Self.lastSyncKey)
+            UserDefaults.standard.set(Date.now.timeIntervalSince1970, forKey: profileSyncKey)
             print("[DownloadManager] Metadata sync complete")
         } catch {
             print("[DownloadManager] Failed to save synced metadata: \(error.localizedDescription)")
@@ -545,6 +926,131 @@ class DownloadManager: NSObject {
             manager.enqueue(.transcription(bookId: bookId))
             print("[DownloadManager] Auto-queued transcription for \(bookId)")
         }
+    }
+
+    private func verifyArtifact(at url: URL, expectedBytes: Int64, expectedSHA256: String, format: String) throws -> Int {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        let actualBytes = Int64(values.fileSize ?? 0)
+        guard actualBytes == expectedBytes else {
+            throw DownloadError.sizeMismatch(expected: expectedBytes, actual: actualBytes)
+        }
+        guard try sha256(of: url) == expectedSHA256.lowercased() else {
+            throw DownloadError.checksumMismatch
+        }
+        switch format.lowercased() {
+        case "pdf":
+            let prefix = try FileHandle(forReadingFrom: url).read(upToCount: 5) ?? Data()
+            guard prefix == Data("%PDF-".utf8) else { throw DownloadError.invalidArtifact("invalid PDF header") }
+        case "cbz":
+            try CCDPack.validateCBZ(at: url)
+        case "epub":
+            try CCDPack.validateEPUB(at: url)
+        default:
+            guard actualBytes > 0 else { throw DownloadError.invalidArtifact("empty file") }
+        }
+        return Int(actualBytes)
+    }
+
+    private func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Move a verified ordinary artifact through same-volume staging and into its
+    /// final path. The returned closure removes the install if SwiftData commit fails.
+    private struct RegularInstall {
+        let localPath: String
+        let destination: URL
+        let backup: URL?
+        let journal: URL
+    }
+
+    private struct InstallJournal: Codable {
+        let bookId: String
+        let destinationPath: String
+        let backupPath: String?
+    }
+
+    private func beginInstallJournal(
+        bookId: String,
+        destination: URL,
+        backup: URL?,
+        documentsURL: URL
+    ) throws -> URL {
+        let stagingDir = documentsURL.appendingPathComponent(".download-staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        // A random filename prevents an untrusted server-side identifier from
+        // influencing the local path. The actual book ID lives in the payload.
+        let journalURL = stagingDir.appendingPathComponent("\(UUID().uuidString).install-journal.json")
+        let journal = InstallJournal(
+            bookId: bookId,
+            destinationPath: destination.path,
+            backupPath: backup?.path
+        )
+        try JSONEncoder().encode(journal).write(to: journalURL, options: .atomic)
+        return journalURL
+    }
+
+    private func rollbackInstall(destination: URL, backup: URL?, journal: URL) {
+        let fm = FileManager.default
+        do {
+            if let backup, fm.fileExists(atPath: backup.path) {
+                if fm.fileExists(atPath: destination.path) {
+                    try fm.removeItem(at: destination)
+                }
+                try fm.moveItem(at: backup, to: destination)
+            } else if backup == nil, fm.fileExists(atPath: destination.path) {
+                try fm.removeItem(at: destination)
+            }
+            try? fm.removeItem(at: journal)
+        } catch {
+            // Keep the journal and backup so launch recovery can retry instead
+            // of turning a transient filesystem error into data loss.
+            print("[DownloadManager] Install rollback deferred to launch recovery: \(error)")
+        }
+    }
+
+    private func finishInstall(backup: URL?, journal: URL) {
+        if let backup { try? FileManager.default.removeItem(at: backup) }
+        try? FileManager.default.removeItem(at: journal)
+    }
+
+    private func installRegularArtifact(from source: URL, bookId: String, format: String, documentsURL: URL) throws -> RegularInstall {
+        let fm = FileManager.default
+        let stagingDir = documentsURL.appendingPathComponent(".download-staging", isDirectory: true)
+        try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        let staged = stagingDir.appendingPathComponent("\(UUID().uuidString).\(format)")
+        try fm.moveItem(at: source, to: staged)
+        let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
+        try fm.createDirectory(at: booksDir, withIntermediateDirectories: true)
+        let destination = booksDir.appendingPathComponent("\(bookId).\(format)")
+        let backup = fm.fileExists(atPath: destination.path)
+            ? stagingDir.appendingPathComponent("\(UUID().uuidString).install-backup")
+            : nil
+        let journal = try beginInstallJournal(
+            bookId: bookId,
+            destination: destination,
+            backup: backup,
+            documentsURL: documentsURL
+        )
+        do {
+            if let backup { try fm.moveItem(at: destination, to: backup) }
+            try fm.moveItem(at: staged, to: destination)
+        } catch {
+            rollbackInstall(destination: destination, backup: backup, journal: journal)
+            throw error
+        }
+        return RegularInstall(
+            localPath: "books/\(bookId).\(format)",
+            destination: destination,
+            backup: backup,
+            journal: journal
+        )
     }
 }
 
@@ -589,7 +1095,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
         // so we must read it here before the object can be detached.
         let pendingFormat = pending.format
         let pendingOriginalFormat = pending.originalFormat
-        let pendingFileSize = pending.fileSize
         let pendingCoverData = pending.coverData
         let pendingBookId = pending.bookId
         let pendingTitle = pending.title
@@ -605,6 +1110,13 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let pendingChaptersData = pending.chaptersData
         let pendingPageCount = pending.pageCount
         let pendingProfileId = pending.profileId
+        let pendingArtifactId = pending.artifactId
+        let pendingExpectedSHA256 = pending.expectedSHA256
+        let pendingExpectedByteLength = pending.expectedByteLength
+        let pendingArtifactVersion = pending.artifactVersion
+        let pendingCcdVersion = pending.ccdVersion
+        pending.status = "verifying"
+        try? bgContext.save()
 
         do {
             // File operations must happen synchronously on this thread
@@ -613,41 +1125,70 @@ extension DownloadManager: URLSessionDownloadDelegate {
             let localPath: String
             let storedFormat: String
             let actualFileSize: Int
+            let installedURL: URL
+            var replacedFileBackup: URL?
+            var replacedDirectoryBackup: URL?
+            var installJournalURL: URL?
+
+            actualFileSize = try verifyArtifact(
+                at: location,
+                expectedBytes: pendingExpectedByteLength,
+                expectedSHA256: pendingExpectedSHA256,
+                format: pendingFormat
+            )
+            pending.status = "installing"
+            try? bgContext.save()
 
             if pendingFormat.lowercased() == "ccdpack" {
                 // Reflowable ebook: the download is a CCD pack ZIP. Unpack it into
                 // the stable per-book pack dir; no raw .epub is ever stored.
-                let zipData = try Data(contentsOf: location)
                 let packDir = documentsURL
                     .appendingPathComponent("ccd-packs", isDirectory: true)
                     .appendingPathComponent(bookId, isDirectory: true)
-                try CCDPack.unpack(zipData: zipData, into: packDir)
+                let stagingDir = documentsURL.appendingPathComponent(".download-staging", isDirectory: true)
+                try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: packDir.path) {
+                    replacedDirectoryBackup = stagingDir
+                        .appendingPathComponent("\(UUID().uuidString).install-backup", isDirectory: true)
+                }
+                installJournalURL = try beginInstallJournal(
+                    bookId: bookId,
+                    destination: packDir,
+                    backup: replacedDirectoryBackup,
+                    documentsURL: documentsURL
+                )
+                do {
+                    if let replacedDirectoryBackup {
+                        try FileManager.default.moveItem(at: packDir, to: replacedDirectoryBackup)
+                    }
+                    try CCDPack.install(zipURL: location, into: packDir)
+                } catch {
+                    if let installJournalURL {
+                        rollbackInstall(
+                            destination: packDir,
+                            backup: replacedDirectoryBackup,
+                            journal: installJournalURL
+                        )
+                    }
+                    throw error
+                }
                 try? FileManager.default.removeItem(at: location)
                 // localPath is a marker pointing at the pack dir (the reader derives
                 // the manifest/resources paths from the book id).
                 localPath = "ccd-packs/\(bookId)"
                 storedFormat = pendingOriginalFormat.isEmpty ? "epub" : pendingOriginalFormat.lowercased()
-                actualFileSize = zipData.count
+                installedURL = packDir
             } else {
-                let booksDir = documentsURL.appendingPathComponent("books", isDirectory: true)
-                try FileManager.default.createDirectory(at: booksDir, withIntermediateDirectories: true)
-
-                let fileName = "\(bookId).\(pendingFormat)"
-                let destinationURL = booksDir.appendingPathComponent(fileName)
-
-                if FileManager.default.fileExists(atPath: destinationURL.path) {
-                    try FileManager.default.removeItem(at: destinationURL)
-                }
-
-                try FileManager.default.moveItem(at: location, to: destinationURL)
-
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: destinationURL.path),
-                   let size = attrs[.size] as? Int {
-                    actualFileSize = size
-                } else {
-                    actualFileSize = pendingFileSize
-                }
-                localPath = "books/\(fileName)"
+                let installed = try installRegularArtifact(
+                    from: location,
+                    bookId: bookId,
+                    format: pendingFormat,
+                    documentsURL: documentsURL
+                )
+                localPath = installed.localPath
+                installedURL = installed.destination
+                replacedFileBackup = installed.backup
+                installJournalURL = installed.journal
                 storedFormat = pendingFormat
             }
 
@@ -658,28 +1199,64 @@ extension DownloadManager: URLSessionDownloadDelegate {
             DispatchQueue.main.async {
                 let mainContext = ModelContext(container)
 
-                let downloadedBook = DownloadedBook(
-                    id: pendingBookId,
-                    title: pendingTitle,
-                    subtitle: pendingSubtitle,
-                    authors: pendingAuthors,
-                    publisher: pendingPublisher,
-                    publishedDate: pendingPublishedDate,
-                    bookDescription: pendingBookDescription,
-                    format: storedFormat,
-                    fileSize: actualFileSize,
-                    localPath: localPath,
-                    coverData: pendingCoverData,
-                    series: pendingSeries,
-                    seriesNumber: pendingSeriesNumber,
-                    duration: pendingDuration,
-                    narrator: pendingNarrator,
-                    chaptersData: pendingChaptersData,
-                    pageCount: pendingPageCount,
-                    profileId: pendingProfileId
+                let existingDescriptor = FetchDescriptor<DownloadedBook>(
+                    predicate: #Predicate { $0.id == bookId }
                 )
-
-                mainContext.insert(downloadedBook)
+                let downloadedBook: DownloadedBook
+                var supersededURL: URL?
+                if let existing = try? mainContext.fetch(existingDescriptor).first {
+                    downloadedBook = existing
+                    let oldURL = documentsURL.appendingPathComponent(existing.localPath)
+                    if oldURL.standardizedFileURL != installedURL.standardizedFileURL {
+                        supersededURL = oldURL
+                    }
+                    existing.title = pendingTitle
+                    existing.subtitle = pendingSubtitle
+                    existing.authors = pendingAuthors
+                    existing.publisher = pendingPublisher
+                    existing.publishedDate = pendingPublishedDate
+                    existing.bookDescription = pendingBookDescription
+                    existing.format = storedFormat
+                    existing.fileSize = actualFileSize
+                    existing.localPath = localPath
+                    existing.coverData = pendingCoverData ?? existing.coverData
+                    existing.series = pendingSeries
+                    existing.seriesNumber = pendingSeriesNumber
+                    existing.duration = pendingDuration
+                    existing.narrator = pendingNarrator
+                    existing.chaptersData = pendingChaptersData
+                    existing.pageCount = pendingPageCount
+                    existing.profileId = pendingProfileId
+                } else {
+                    downloadedBook = DownloadedBook(
+                        id: pendingBookId,
+                        title: pendingTitle,
+                        subtitle: pendingSubtitle,
+                        authors: pendingAuthors,
+                        publisher: pendingPublisher,
+                        publishedDate: pendingPublishedDate,
+                        bookDescription: pendingBookDescription,
+                        format: storedFormat,
+                        fileSize: actualFileSize,
+                        localPath: localPath,
+                        coverData: pendingCoverData,
+                        series: pendingSeries,
+                        seriesNumber: pendingSeriesNumber,
+                        duration: pendingDuration,
+                        narrator: pendingNarrator,
+                        chaptersData: pendingChaptersData,
+                        pageCount: pendingPageCount,
+                        profileId: pendingProfileId
+                    )
+                    mainContext.insert(downloadedBook)
+                }
+                downloadedBook.artifactId = pendingArtifactId
+                downloadedBook.artifactSHA256 = pendingExpectedSHA256
+                downloadedBook.artifactVersion = pendingArtifactVersion
+                downloadedBook.ccdVersion = pendingCcdVersion
+                downloadedBook.ccdStatus = pendingFormat.lowercased() == "ccdpack" ? "ready" : nil
+                downloadedBook.verificationStatus = "verified"
+                downloadedBook.verifiedAt = Date()
 
                 // Delete the PendingDownload from the main context
                 let deleteDescriptor = FetchDescriptor<PendingDownload>(
@@ -693,6 +1270,25 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     try mainContext.save()
                 } catch {
                     print("[DownloadManager] Failed to save completed download for \(bookId): \(error)")
+                    if let installJournalURL {
+                        self.rollbackInstall(
+                            destination: installedURL,
+                            backup: replacedFileBackup ?? replacedDirectoryBackup,
+                            journal: installJournalURL
+                        )
+                    }
+                    self.markDownloadFailed(bookId: bookId, error: error)
+                    return
+                }
+
+                if let installJournalURL {
+                    self.finishInstall(
+                        backup: replacedFileBackup ?? replacedDirectoryBackup,
+                        journal: installJournalURL
+                    )
+                }
+                if let supersededURL {
+                    try? FileManager.default.removeItem(at: supersededURL)
                 }
 
                 self.activeDownloads[bookId]?.state = .completed
@@ -789,29 +1385,32 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 pending.errorMessage = nil
                 try? ctx.save()
                 self.activeDownloads[bookId]?.state = .downloading
-                self.startDownloadTask(url: url, bookId: bookId)
+                let request = self.apiService.authenticatedRequest(for: url)
+                self.startDownloadTask(request: request, bookId: bookId)
             }
             return
         }
 
         // Update PendingDownload status on main thread to avoid detaching
         // objects from the context while @Query still holds references
+        let resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
         DispatchQueue.main.async {
-            self.markDownloadFailed(bookId: bookId, error: error)
+            self.markDownloadFailed(bookId: bookId, error: error, interrupted: resumeData != nil, resumeData: resumeData)
         }
     }
 
     /// Mark a download as failed and surface the error to the UI. Must be called
     /// on the main thread.
-    private func markDownloadFailed(bookId: String, error: Error) {
+    private func markDownloadFailed(bookId: String, error: Error, interrupted: Bool = false, resumeData: Data? = nil) {
         if let container = self.modelContainer {
             let mainContext = ModelContext(container)
             let descriptor = FetchDescriptor<PendingDownload>(
                 predicate: #Predicate { $0.id == bookId }
             )
             if let pending = try? mainContext.fetch(descriptor).first {
-                pending.status = "failed"
+                pending.status = interrupted ? "interrupted" : "failed"
                 pending.errorMessage = error.localizedDescription
+                pending.resumeData = resumeData
                 try? mainContext.save()
             }
         }

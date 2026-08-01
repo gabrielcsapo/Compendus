@@ -841,20 +841,24 @@ class ReadAlongService {
         let nc = NotificationCenter.default
         backgroundObservers = [
             nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                guard let self = self, self.audioSource == .tts else { return }
-                self.ttsBackgrounded = true
-                self.ttsGenerationTask?.cancel()
-                self.ttsPlayerNode?.pause()
-                self.ttsIsPlaying = false
-                if self.state == .active { self.state = .paused }
-                logger.info("TTS paused — app entered background")
+                MainActor.assumeIsolated {
+                    guard let self, self.audioSource == .tts else { return }
+                    self.ttsBackgrounded = true
+                    self.ttsGenerationTask?.cancel()
+                    self.ttsPlayerNode?.pause()
+                    self.ttsIsPlaying = false
+                    if self.state == .active { self.state = .paused }
+                    logger.info("TTS paused — app entered background")
+                }
             },
             nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-                guard let self = self, self.audioSource == .tts else { return }
-                self.ttsBackgrounded = false
-                logger.info("TTS resumed — app entering foreground")
-                // Restart generation from current sentence
-                self.restartTTSFromSentence(self.ttsCurrentSentenceIndex)
+                MainActor.assumeIsolated {
+                    guard let self, self.audioSource == .tts else { return }
+                    self.ttsBackgrounded = false
+                    logger.info("TTS resumed — app entering foreground")
+                    // Restart generation from current sentence
+                    self.restartTTSFromSentence(self.ttsCurrentSentenceIndex)
+                }
             }
         ]
     }
@@ -1282,11 +1286,9 @@ class ReadAlongService {
                     self.ttsBuffersQueued += 1
                     self.ttsSentencePlaybackQueue.append(i)
                     let options: AVAudioPlayerNodeBufferOptions = successCount == 1 ? .interrupts : []
-                    playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak self] in
-                        Task { @MainActor in
-                            self?.ttsBuffersQueued -= 1
-                            self?.handleSentenceBufferCompleted()
-                        }
+                    let service = self
+                    playerNode.scheduleBuffer(buffer, at: nil, options: options) { [weak service] in
+                        if let service { Self.enqueueBufferCompletion(for: service) }
                     }
                     self.ttsTotalSamplesScheduled += sentenceSamples.count
 
@@ -1596,11 +1598,9 @@ class ReadAlongService {
                 sentinel.frameLength = 1
                 sentinel.floatChannelData![0][0] = 0
                 if playerNode.engine != nil {
-                    playerNode.scheduleBuffer(sentinel) { [weak self] in
-                        Task { @MainActor in
-                            self?.ttsBuffersQueued -= 1
-                            self?.handleSentenceBufferCompleted()
-                        }
+                    let service = self
+                    playerNode.scheduleBuffer(sentinel, completionCallbackType: .dataPlayedBack) { [weak service] _ in
+                        if let service { Self.enqueueBufferCompletion(for: service) }
                     }
                 }
 
@@ -1985,11 +1985,9 @@ class ReadAlongService {
                     sentinel.frameLength = 1
                     sentinel.floatChannelData![0][0] = 0
                     if playerNode.engine != nil {
-                        playerNode.scheduleBuffer(sentinel) { [weak self] in
-                            Task { @MainActor in
-                                self?.ttsBuffersQueued -= 1
-                                self?.handleSentenceBufferCompleted()
-                            }
+                        let service = self
+                        playerNode.scheduleBuffer(sentinel, completionCallbackType: .dataPlayedBack) { [weak service] _ in
+                            if let service { Self.enqueueBufferCompletion(for: service) }
                         }
                     }
                 } catch {
@@ -2008,6 +2006,13 @@ class ReadAlongService {
             await MainActor.run { [weak self] in
                 self?.handleTTSChapterComplete()
             }
+        }
+    }
+
+    nonisolated private static func enqueueBufferCompletion(for service: ReadAlongService) {
+        Task { @MainActor in
+            service.ttsBuffersQueued -= 1
+            service.handleSentenceBufferCompleted()
         }
     }
 

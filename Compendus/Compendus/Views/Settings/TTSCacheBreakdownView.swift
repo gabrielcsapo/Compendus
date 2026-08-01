@@ -215,33 +215,27 @@ struct TTSCacheBreakdownView: View {
         let result = await Task.detached(priority: .userInitiated) {
             let bookIds = sm.ttsCacheBookIds()
             let totalTTS = sm.ttsCacheSize()
-
-            let cached: [CachedBookInfo] = bookIds.compactMap { bookId in
+            let cached = bookIds.compactMap { bookId -> (String, Int64, Int)? in
                 let size = sm.ttsCacheSize(for: bookId)
                 guard size > 0 else { return nil }
-
-                let book = bookMap[bookId]
-                let title = book?.title ?? "Unknown Book"
-                let authors = book?.authors.joined(separator: ", ") ?? bookId
-
                 let cacheDir = sm.ttsCacheURL.appendingPathComponent(bookId, isDirectory: true)
                 let chapterCount = (try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil))?
                     .filter { $0.pathExtension == "pcm" }.count ?? 0
-
-                return CachedBookInfo(
-                    id: bookId,
-                    title: title,
-                    authors: authors,
-                    cacheSize: size,
-                    chapterCount: chapterCount
-                )
+                return (bookId, size, chapterCount)
             }
-            .sorted { $0.cacheSize > $1.cacheSize }
-
             return (cached, totalTTS)
         }.value
 
-        ttsCachedBooks = result.0
+        ttsCachedBooks = result.0.map { bookId, size, chapterCount in
+            let book = bookMap[bookId]
+            return CachedBookInfo(
+                id: bookId,
+                title: book?.title ?? "Unknown Book",
+                authors: book?.authors.joined(separator: ", ") ?? bookId,
+                cacheSize: size,
+                chapterCount: chapterCount
+            )
+        }.sorted { $0.cacheSize > $1.cacheSize }
         cachedTTSBytes = result.1
         refreshTranscriptions()
     }

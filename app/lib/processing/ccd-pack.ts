@@ -16,6 +16,19 @@ import type { ContentBundle, Block } from "../content-ast/types.js";
 import { extractEpubResource } from "./epub.js";
 import { yieldToEventLoop } from "./utils.js";
 
+const safeResourceHandle = (handle: string): string => {
+  const normalized = handle.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    normalized.split("/").includes("..") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(normalized)
+  ) {
+    throw new Error(`CCD pack contains an unsafe or non-local resource handle: ${handle}`);
+  }
+  return normalized;
+};
+
 const isSvgHandle = (handle: string, mimeType?: string) =>
   /\.svg$/i.test(handle) || (mimeType || "").includes("svg");
 
@@ -92,21 +105,25 @@ export async function buildCcdPack(bundle: ContentBundle, epubBuffer: Buffer): P
   const remap = new Map<string, string>();
   const handles = collectResourceHandles(bundle);
   let i = 0;
-  for (const handle of handles) {
+  for (const originalHandle of handles) {
+    const handle = safeResourceHandle(originalHandle);
     const res = await extractEpubResource(epubBuffer, handle).catch(() => null);
-    if (res) {
-      if (isSvgHandle(handle, res.mimeType)) {
-        try {
-          const png = await sharp(res.data, { density: 144 }).png().toBuffer();
-          const pngHandle = `${handle}.png`;
-          out.file(`resources/${pngHandle}`, png);
-          remap.set(handle, pngHandle);
-        } catch {
-          out.file(`resources/${handle}`, res.data); // rasterization failed — ship the SVG as-is
-        }
-      } else {
+    if (!res) {
+      throw new Error(`CCD pack is incomplete: resource not found in source EPUB: ${handle}`);
+    }
+    if (isSvgHandle(handle, res.mimeType)) {
+      try {
+        const png = await sharp(res.data, { density: 144 }).png().toBuffer();
+        const pngHandle = `${handle}.png`;
+        out.file(`resources/${pngHandle}`, png);
+        remap.set(originalHandle, pngHandle);
+      } catch {
+        // A raw SVG is still a complete artifact; the iOS validator will ensure
+        // it exists even if the platform cannot render this optional resource.
         out.file(`resources/${handle}`, res.data);
       }
+    } else {
+      out.file(`resources/${handle}`, res.data);
     }
     if (++i % 16 === 0) await yieldToEventLoop();
   }

@@ -4,7 +4,8 @@
  * No embeddings, no inference: every step is a few indexed lookups.
  */
 import { rawDb } from "../db";
-import { enqueueWork } from "../fabric";
+import { nameTopic } from "../llm/ollama";
+import { tick as laneTick, type PassStatus } from "../llm/lane";
 
 export interface WanderStep {
   kind: "same_idea" | "deeper" | "bridge";
@@ -184,7 +185,7 @@ export function conceptTopics(
 // class"), (b) fiction character clusters, and (c) generic-df labels ("code,
 // section, data"). The journeys read-model fixes all three WITHOUT a graph
 // rebuild: a one-time refresh pass writes two derived columns onto cs_topics —
-// `nonfiction_books` (so journeys gate on the fleet's classify-book verdicts) and
+// `nonfiction_books` (so journeys gate on the classify-book verdicts) and
 // `display_label` (the topic's most prominent DISTINCTIVE concepts, junk/generic/
 // citation excluded). A topic with no distinctive concepts gets a null label and
 // drops out entirely.
@@ -262,8 +263,9 @@ export function ensureJourneyColumns(): void {
   for (const ddl of [
     "ALTER TABLE cs_topics ADD COLUMN nonfiction_books INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE cs_topics ADD COLUMN display_label TEXT",
-    // Fleet-LLM authored name + blurb (a device names the topic; preferred over
-    // the regex `display_label` when present). See the name-topic fabric kind.
+    // LLM-authored name + blurb, preferred over the regex `display_label` when
+    // present. The "fleet_" prefix is historical (naming used to run on fleet
+    // devices; it now runs on the server's Ollama — see runTopicNaming).
     "ALTER TABLE cs_topics ADD COLUMN fleet_label TEXT",
     "ALTER TABLE cs_topics ADD COLUMN fleet_blurb TEXT",
     "ALTER TABLE cs_topics ADD COLUMN fleet_model TEXT",
@@ -345,14 +347,18 @@ const JOURNEY_WHERE =
   "AND display_label IS NOT NULL AND size >= 6";
 
 /**
- * Enqueue `name-topic` fleet jobs for nonfiction journey topics that don't yet
- * have a fleet-authored name. Each job carries the topic's distinctive concepts
- * + a few high-salience nonfiction excerpts; a device returns a human shelf-card
- * name → cs_topics.fleet_label. Bounded; chunked + yields. Run after a refresh.
+ * Name nonfiction journey topics that don't yet have an LLM-authored name.
+ * For each topic the local LLM gets the topic's distinctive concepts + a few
+ * high-salience nonfiction excerpts and returns a human shelf-card name →
+ * cs_topics.fleet_label ("fleet" is historical — the naming used to run on
+ * fleet devices; it now runs on the server's Ollama). Bounded; resumable
+ * (topics with a label are skipped). Run detached on the LLM lane, after a
+ * journeys refresh.
  */
-export async function enqueueTopicNaming(opts?: {
-  limit?: number;
-}): Promise<{ enqueued: number; candidates: number }> {
+export async function runTopicNaming(
+  opts: { limit?: number },
+  status?: PassStatus,
+): Promise<{ named: number; failed: number; candidates: number }> {
   ensureJourneyColumns();
   const limit = opts?.limit ?? 600;
   const topics = rawDb
@@ -372,10 +378,13 @@ export async function enqueueTopicNaming(opts?: {
        JOIN cs_passage_salience s ON s.passage_id = pt.passage_id
       WHERE pt.topic_id = ? AND s.prose >= 0.5 ORDER BY s.salience DESC LIMIT 3`,
   );
-  let enqueued = 0;
-  let i = 0;
+  const applyName = rawDb.prepare(
+    "UPDATE cs_topics SET fleet_label = ?, fleet_blurb = ?, fleet_model = ? WHERE id = ?",
+  );
+  if (status) status.total = topics.length;
+  let named = 0;
+  let failed = 0;
   for (const t of topics) {
-    if (++i % 50 === 0) await tick();
     const concepts = (conceptsOf.all(t.id) as { display: string }[])
       .map((r) => r.display)
       .filter((d) => !isJunkConcept(d))
@@ -383,16 +392,26 @@ export async function enqueueTopicNaming(opts?: {
     const samples = (samplesOf.all(t.id) as { text: string }[]).map((r) =>
       r.text.replace(/\s+/g, " ").trim().slice(0, 400),
     );
+    if (status) status.processed++;
     if (concepts.length === 0 || samples.length === 0) continue;
-    enqueueWork({
-      project: "compendus",
-      kind: "name-topic",
-      payload: { topicId: t.id, concepts, samples },
-      requirements: { runtimes: ["llm"] },
-    });
-    enqueued++;
+    try {
+      const r = await nameTopic({ concepts, samples });
+      const label = r.label.trim();
+      // Shelf-card bounds (was the fabric validator): 3-60 chars, single line.
+      if (label.length < 3 || label.length > 60 || /\n/.test(label)) {
+        failed++;
+        continue;
+      }
+      applyName.run(label, r.blurb.trim().slice(0, 200), r.modelId, t.id);
+      named++;
+      if (status) status.note = label;
+    } catch (e) {
+      failed++;
+      console.warn(`[name-topic] ${t.id}: ${e instanceof Error ? e.message : e}`);
+    }
+    await laneTick();
   }
-  return { enqueued, candidates: topics.length };
+  return { named, failed, candidates: topics.length };
 }
 
 export function listConceptJourneyTopics(opts: {
@@ -531,14 +550,34 @@ export function buildConceptCurriculum(
 export function conceptSearchJourneys(
   q: string,
 ): Array<{ id: string; label: string | null; size: number; bookCount: number }> {
-  const like = `%${q.toLowerCase().trim()}%`;
+  const needle = q.toLowerCase().trim();
   return rawDb
     .prepare(
       `SELECT id, ${LABEL_EXPR} AS label, size, nonfiction_books AS bookCount
-         FROM cs_topics WHERE ${JOURNEY_WHERE} AND LOWER(display_label) LIKE ?
-        ORDER BY nonfiction_books DESC, size DESC LIMIT 20`,
+         FROM cs_topics
+        WHERE ${JOURNEY_WHERE}
+          AND (
+            INSTR(LOWER(${LABEL_EXPR}), ?) > 0
+            OR INSTR(LOWER(display_label), ?) > 0
+            OR INSTR(LOWER(COALESCE(fleet_blurb, '')), ?) > 0
+          )
+        ORDER BY
+          CASE
+            WHEN LOWER(${LABEL_EXPR}) = ? THEN 0
+            WHEN INSTR(LOWER(${LABEL_EXPR}), ?) = 1 THEN 1
+            WHEN INSTR(LOWER(${LABEL_EXPR}), ?) > 0 THEN 2
+            WHEN INSTR(LOWER(display_label), ?) > 0 THEN 3
+            ELSE 4
+          END,
+          nonfiction_books DESC, size DESC
+        LIMIT 20`,
     )
-    .all(like) as Array<{ id: string; label: string | null; size: number; bookCount: number }>;
+    .all(needle, needle, needle, needle, needle, needle, needle) as Array<{
+    id: string;
+    label: string | null;
+    size: number;
+    bookCount: number;
+  }>;
 }
 
 /** Nonfiction topics that share concepts with this one — the journey's forks. */

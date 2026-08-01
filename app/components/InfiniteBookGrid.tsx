@@ -89,13 +89,32 @@ export function InfiniteBookGrid({
   const [hasMore, setHasMore] = useState(initialBooks.length < totalCount);
   const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadControllerRef = useRef<AbortController | null>(null);
   const columns = useColumns(containerRef);
+  const queryKey = useMemo(
+    () => JSON.stringify([currentSort, currentType, [...currentFormats].sort(), seriesFilter]),
+    [currentSort, currentType, currentFormats, seriesFilter],
+  );
+  const activeQueryKeyRef = useRef(queryKey);
+  activeQueryKeyRef.current = queryKey;
 
-  // Reset when loader data changes (filter/sort change triggers navigation)
+  // Reset when route data changes and cancel an in-flight page from the old
+  // query. Without this, a slow response can append stale books after a
+  // filter/sort navigation has already painted the new first page.
   useEffect(() => {
+    loadControllerRef.current?.abort();
+    loadControllerRef.current = null;
     setBooks(initialBooks);
     setHasMore(initialBooks.length < totalCount);
-  }, [initialBooks, totalCount]);
+    setIsLoadingMore(false);
+  }, [initialBooks, totalCount, queryKey]);
+
+  useEffect(
+    () => () => {
+      loadControllerRef.current?.abort();
+    },
+    [],
+  );
 
   const buildFetchUrl = useCallback(
     (offset: number) => {
@@ -112,9 +131,15 @@ export function InfiniteBookGrid({
 
   const loadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) return;
+
+    const requestQueryKey = queryKey;
+    const controller = new AbortController();
+    loadControllerRef.current?.abort();
+    loadControllerRef.current = controller;
     setIsLoadingMore(true);
+
     try {
-      const res = await fetch(buildFetchUrl(books.length));
+      const res = await fetch(buildFetchUrl(books.length), { signal: controller.signal });
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
       const newBooks: Book[] = data.books.map((b: Record<string, unknown>) => ({
@@ -124,16 +149,27 @@ export function InfiniteBookGrid({
         lastReadAt: b.lastReadAt ? new Date(b.lastReadAt as string) : null,
         importedAt: b.importedAt ? new Date(b.importedAt as string) : null,
       }));
-      setBooks((prev) => [...prev, ...newBooks]);
-      if (newBooks.length < BOOKS_PER_PAGE) {
-        setHasMore(false);
-      }
+
+      if (controller.signal.aborted || activeQueryKeyRef.current !== requestQueryKey) return;
+
+      const existingIds = new Set(books.map((book) => book.id));
+      const uniqueBooks = newBooks.filter((book) => !existingIds.has(book.id));
+      setBooks((prev) => [...prev, ...uniqueBooks]);
+      setHasMore(uniqueBooks.length > 0 && books.length + uniqueBooks.length < totalCount);
     } catch (err) {
-      console.error("Failed to load more books:", err);
+      if (!(err instanceof Error && err.name === "AbortError")) {
+        console.error("Failed to load more books:", err);
+      }
     } finally {
-      setIsLoadingMore(false);
+      if (
+        loadControllerRef.current === controller &&
+        activeQueryKeyRef.current === requestQueryKey
+      ) {
+        loadControllerRef.current = null;
+        setIsLoadingMore(false);
+      }
     }
-  }, [books.length, isLoadingMore, hasMore, buildFetchUrl]);
+  }, [books, isLoadingMore, hasMore, buildFetchUrl, queryKey, totalCount]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {

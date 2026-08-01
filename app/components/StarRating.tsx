@@ -56,10 +56,19 @@ export function StarRating({ rating, onChange, readonly = false, size = "md" }: 
           }}
           title={
             readonly
-              ? `${rating} of 5 stars`
+              ? rating == null
+                ? "Not rated"
+                : `${rating} of 5 stars`
               : star === rating
                 ? "Clear rating"
                 : `Rate ${star} of 5`
+          }
+          aria-label={
+            readonly
+              ? rating == null
+                ? `Not rated, star ${star} of 5`
+                : `${rating} of 5 stars, star ${star}`
+              : `Rate ${star} of 5 stars`
           }
         >
           <StarIcon filled={star <= displayRating} />

@@ -106,6 +106,7 @@ struct ContinueReadingSection: View {
     var onRemoteBookTap: ((Book) -> Void)?
     var onDownloadBook: ((Book) -> Void)?
     var onMarkAsRead: ((DownloadedBook) -> Void)?
+    var onSetAside: ((ContinueReadingItem) -> Void)?
     var onViewDetails: ((DownloadedBook) -> Void)?
 
     var body: some View {
@@ -192,6 +193,12 @@ struct ContinueReadingSection: View {
                 Label("View Details", systemImage: "info.circle")
             }
 
+            Button {
+                onSetAside?(item)
+            } label: {
+                Label("Set Aside", systemImage: "archivebox")
+            }
+
         case .remote(let book):
             Button {
                 onDownloadBook?(book)
@@ -203,6 +210,13 @@ struct ContinueReadingSection: View {
                 onRemoteBookTap?(book)
             } label: {
                 Label("View Details", systemImage: "info.circle")
+            }
+
+
+            Button {
+                onSetAside?(item)
+            } label: {
+                Label("Set Aside", systemImage: "archivebox")
             }
         }
     }

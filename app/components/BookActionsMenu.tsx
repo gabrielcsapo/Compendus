@@ -1,16 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-flight-router/client";
+import { Link, useRouter } from "react-flight-router/client";
 import { RematchModal } from "./RematchModal";
 import { EditBookModal } from "./EditBookModal";
 import { AnalyzeButton } from "./AnalyzeButton";
+import { useToast } from "./ToastContext";
 import { buttonStyles } from "../lib/styles";
-import type { Book, Tag } from "../lib/db/schema";
+import { setBookAside, type BookWithState } from "../actions/books";
+import type { Tag } from "../lib/db/schema";
 import type { BookFormat } from "../lib/types";
 
 interface BookActionsMenuProps {
-  book: Book;
+  book: BookWithState;
   tags: Tag[];
   authors: string[];
   coverUrl?: string;
@@ -32,7 +34,10 @@ export function BookActionsMenu({
   const [open, setOpen] = useState(false);
   const [rematchOpen, setRematchOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [isReturningToToday, setIsReturningToToday] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const { showToast } = useToast();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -54,6 +59,21 @@ export function BookActionsMenu({
   const canEditEpub = book.format === "epub" || !!book.convertedEpubPath;
   const itemClass =
     "flex w-full items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-foreground hover:bg-surface-elevated transition-colors text-left";
+
+  const handleReturnToToday = async () => {
+    setIsReturningToToday(true);
+    try {
+      const result = await setBookAside(book.id, false);
+      if (!result) throw new Error("Return to Today is unavailable without an active profile");
+      setOpen(false);
+      showToast(`Returned “${book.title}” to Today.`, "success");
+      await router.refresh();
+    } catch {
+      showToast(`Couldn't return “${book.title}” to Today. Try again.`, "error");
+    } finally {
+      setIsReturningToToday(false);
+    }
+  };
 
   return (
     <div className="relative" ref={ref}>
@@ -85,6 +105,42 @@ export function BookActionsMenu({
           role="menu"
           className="absolute top-full right-0 mt-1 z-50 min-w-[208px] bg-surface border border-border rounded-xl shadow-lg p-2"
         >
+          {book.isSetAside && (
+            <>
+              <button
+                role="menuitem"
+                type="button"
+                className={itemClass}
+                onClick={handleReturnToToday}
+                disabled={isReturningToToday}
+              >
+                {isReturningToToday ? (
+                  <span
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-primary/30 border-t-primary"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <svg
+                    className="w-4 h-4 text-primary"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 3v2m6.364.636l-1.414 1.414M21 12h-2M5.05 7.05L3.636 5.636M5 12H3m5 4a4 4 0 118 0v1H8v-1zm-1 5h10"
+                    />
+                  </svg>
+                )}
+                {isReturningToToday ? "Returning…" : "Return to Today"}
+              </button>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
+
           <button
             role="menuitem"
             type="button"

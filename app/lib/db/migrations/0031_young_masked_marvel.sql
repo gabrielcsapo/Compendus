@@ -1,0 +1,1 @@
+ALTER TABLE `user_book_state` ADD `is_set_aside` integer DEFAULT false NOT NULL;

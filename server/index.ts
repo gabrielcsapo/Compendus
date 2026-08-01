@@ -3,9 +3,9 @@ import { cors } from "hono/cors";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { createMiddleware } from "hono/factory";
+import { randomUUID } from "crypto";
 
-import { profileMiddleware, requireProfile, requireAdmin } from "./middleware/profile";
-import { registerKernels } from "../app/lib/fabric/kernels";
+import { profileMiddleware, requireExplicitProfile, requireAdmin } from "./middleware/profile";
 import { profileRoutes } from "./routes/profiles";
 import { syncRoutes } from "./routes/sync";
 import { searchRoutes } from "./routes/search";
@@ -26,20 +26,28 @@ import { adminRoutes } from "./routes/admin";
 import { statsRoutes } from "./routes/stats";
 import { exploreRoutes } from "./routes/explore";
 import { knowledgeRoutes } from "./routes/knowledge";
-import { fabricRoutes } from "./routes/fabric";
 import { substrateRoutes } from "./routes/substrate";
 import { conceptRoutes } from "./routes/concept";
 import { reckoningRoutes } from "./routes/reckoning";
+import { lgRoutes } from "./routes/lg";
+import { downloadRoutes } from "./routes/downloads";
 import { generateMissingThumbnails } from "../app/lib/processing/cover";
 
 const app = new Hono();
 
-// Content-address the built fleet kernels (code mobility — see fabric/kernels.ts).
-try {
-  registerKernels();
-} catch (e) {
-  console.warn("[Fabric] kernel registration failed:", e instanceof Error ? e.message : e);
-}
+// Give local development and production diagnostics the same lightweight
+// vocabulary. This intentionally records no profile or reading data: it only
+// exposes an opaque request ID and the server's handler duration.
+const requestMetricsMiddleware = createMiddleware(async (c, next) => {
+  const requestId = c.req.header("X-Request-Id") || randomUUID();
+  const startedAt = performance.now();
+
+  await next();
+
+  const durationMs = Math.max(0, performance.now() - startedAt);
+  c.header("X-Request-Id", requestId);
+  c.header("Server-Timing", `app;dur=${durationMs.toFixed(1)}`);
+});
 
 // Pre-compiled regex for static asset detection (used in profileGateMiddleware)
 const STATIC_ASSET_RE = /\.\w+$/;
@@ -50,10 +58,20 @@ app.use(
   cors({
     origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "X-Profile-Id"],
+    allowHeaders: ["Content-Type", "X-Profile-Id", "X-Request-Id"],
+    exposeHeaders: [
+      "ETag",
+      "Server-Timing",
+      "X-Request-Id",
+      "X-Artifact-SHA256",
+      "X-Artifact-Version",
+      "Content-Range",
+    ],
     credentials: true,
   }),
 );
+
+app.use("*", requestMetricsMiddleware);
 
 // Global profile middleware (reads profile from header/cookie, never blocks)
 app.use("*", profileMiddleware);
@@ -103,29 +121,29 @@ app.use("/api/*", etag());
 // Profile routes (public — no profile required for listing/selecting)
 app.route("/", profileRoutes);
 
-// Sync routes (require profile)
-app.route("/", syncRoutes);
+// Deny API access by default unless the caller supplied a valid profile
+// credential. Public profile discovery/selection routes are mounted above this
+// boundary; every API route mounted below it inherits the explicit guard.
+app.use("/api/*", requireExplicitProfile);
 
-// API routes that require a profile
-app.use("/api/search*", requireProfile);
-app.use("/api/books*", requireProfile);
-app.use("/api/series*", requireProfile);
-app.use("/api/library*", requireProfile);
-app.use("/api/wishlist*", requireProfile);
-app.use("/api/tags*", requireProfile);
-app.use("/api/reader*", requireProfile);
-app.use("/api/jobs*", requireProfile);
-app.use("/api/stats*", requireProfile);
-app.use("/api/explore*", requireProfile);
-app.use("/api/graph*", requireProfile);
-app.use("/api/wander2*", requireProfile);
-app.use("/api/topics*", requireProfile);
-app.use("/api/frontier*", requireProfile);
-app.use("/api/trails*", requireProfile);
+// Raw/downloadable content is protected separately because it lives outside
+// the /api namespace as well as under it.
+app.use("/api/downloads/*", requireExplicitProfile);
+app.use("/books/*", requireExplicitProfile);
+app.use("/book/*", requireExplicitProfile);
+app.use("/comic/*", requireExplicitProfile);
+app.use("/mobi-images/*", requireExplicitProfile);
 
 // Admin-only routes
-app.use("/api/upload*", requireAdmin);
-app.use("/api/admin*", requireAdmin);
+app.use("/api/upload", requireAdmin);
+app.use("/api/upload/*", requireAdmin);
+app.use("/api/upload-multifile", requireAdmin);
+app.use("/api/admin", requireAdmin);
+app.use("/api/admin/*", requireAdmin);
+app.use("/api/books/:id/file", requireAdmin);
+
+// Sync routes (require an explicit profile through the default API boundary)
+app.route("/", syncRoutes);
 
 app.route("/", searchRoutes);
 app.route("/", booksRoutes);
@@ -136,6 +154,7 @@ app.route("/", uploadRoutes);
 app.route("/", jobsRoutes);
 app.route("/", wishlistRoutes);
 app.route("/", readerRoutes);
+app.route("/", downloadRoutes);
 app.route("/", convertRoutes);
 app.route("/", transcribeRoutes);
 app.route("/", editorRoutes);
@@ -147,8 +166,7 @@ app.route("/", knowledgeRoutes);
 app.route("/", substrateRoutes);
 app.route("/", conceptRoutes);
 app.route("/", reckoningRoutes);
-// Fabric routes authenticate workers by device token (not profile) — see routes/fabric.ts
-app.route("/", fabricRoutes);
+app.route("/", lgRoutes);
 
 // Static asset routes
 app.route("/", assetsRoutes);

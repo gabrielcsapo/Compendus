@@ -212,7 +212,7 @@ public class NativeReaderEngine: ReaderEngine {
 
     /// Chapter title for a given spine index.
     public func chapterTitle(forSpineIndex spineIndex: Int) -> String? {
-        spineTitles[spineIndex]
+        chapterTitleOrTocTitle(forSpineIndex: spineIndex)
     }
 
     /// The CCD table-of-contents entries (title + spineIndex + nested children).
@@ -401,11 +401,13 @@ public class NativeReaderEngine: ReaderEngine {
                let spineIdx = json["spineIndex"] as? Int,
                chaptersBySpine[spineIdx] != nil {
                 initialSpineIndex = spineIdx
-                // Prefer charOffset for precise cross-device restoration
+                // Prefer charOffset for precise cross-device restoration.
+                // `progress` is book-wide and must never be reused as the
+                // within-chapter progression when restoring a location.
                 if let charOff = json["charOffset"] as? Int {
                     pendingCharOffset = charOff
                 }
-                initialProgression = json["progress"] as? Double
+                initialProgression = json["chapterProgression"] as? Double
             }
             // Legacy format: { href, locations: { progression, totalProgression } }
             else {
@@ -449,6 +451,10 @@ public class NativeReaderEngine: ReaderEngine {
                             self.navigateToOffsetInCurrentChapter(charOffset)
                         }
                         await self.paginateAllChapters()
+                        // Background pagination changes the book-wide page
+                        // denominator. Publish one corrected location when it
+                        // completes so progress and TOC page numbers agree.
+                        self.updateLocation()
                     }
                 }
             }
@@ -1253,8 +1259,23 @@ public class NativeReaderEngine: ReaderEngine {
 
     /// Title for a chapter: prefer the readingOrder title, fall back to the TOC.
     private func chapterTitleOrTocTitle(forSpineIndex spineIndex: Int) -> String? {
-        if let t = spineTitles[spineIndex], !t.isEmpty { return t }
+        if let t = spineTitles[spineIndex], !t.isEmpty {
+            // Conversion pipelines sometimes use a filename-like placeholder
+            // even when the publication provides a human TOC heading.
+            if isGeneratedChapterTitle(t), let toc = tocTitle(forSpineIndex: spineIndex) {
+                return toc
+            }
+            return t
+        }
         return tocTitle(forSpineIndex: spineIndex)
+    }
+
+    private func isGeneratedChapterTitle(_ title: String) -> Bool {
+        let stem = (title as NSString).deletingPathExtension.lowercased()
+        for prefix in ["chapter-", "chapter_"] where stem.hasPrefix(prefix) {
+            if Int(stem.dropFirst(prefix.count)) != nil { return true }
+        }
+        return false
     }
 
     /// Find a TOC entry title that targets the given spine index.
@@ -1644,6 +1665,7 @@ public class NativeReaderEngine: ReaderEngine {
             "type": "epub",
             "spineIndex": currentSpineIndex,
             "progress": location.totalProgression,
+            "chapterProgression": location.progression,
             // Keep href and title for display/fallback
             "href": location.href ?? "",
             "title": location.title ?? ""
@@ -1820,4 +1842,3 @@ public class NativeReaderEngine: ReaderEngine {
         }
     }
 }
-

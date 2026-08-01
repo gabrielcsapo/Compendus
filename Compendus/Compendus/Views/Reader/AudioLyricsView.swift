@@ -42,7 +42,9 @@ struct AudioLyricsView: View {
                                 isActive: index == activeSegmentIndex,
                                 isPast: activeSegmentIndex > -1 && index < activeSegmentIndex,
                                 distance: activeSegmentIndex >= 0 ? abs(index - activeSegmentIndex) : 0,
-                                currentTime: currentTime,
+                                // Only the active row needs the fine-grained
+                                // playback clock for word highlighting.
+                                currentTime: index == activeSegmentIndex ? currentTime : 0,
                                 accentColor: themeManager.accentColor
                             )
                             .id(index)

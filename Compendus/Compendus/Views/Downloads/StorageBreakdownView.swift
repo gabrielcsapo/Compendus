@@ -175,11 +175,16 @@ struct StorageBreakdownView: View {
     private func refreshStorageData() {
         let sm = storageManager
         let currentBooks = books
-        Task.detached(priority: .userInitiated) {
-            let comicCacheBytes = sm.comicCacheSize()
-            let coverCacheBytes = sm.coverCacheSize()
-            let ttsCacheBytes = sm.ttsCacheSize()
-            let available = sm.availableDiskSpace()
+        Task {
+            let metrics = await Task.detached(priority: .userInitiated) {
+                (
+                    sm.comicCacheSize(),
+                    sm.coverCacheSize(),
+                    sm.ttsCacheSize(),
+                    sm.availableDiskSpace()
+                )
+            }.value
+            let (comicCacheBytes, coverCacheBytes, ttsCacheBytes, available) = metrics
 
             // Build segments
             var segs: [StorageSegment] = []
@@ -217,12 +222,10 @@ struct StorageBreakdownView: View {
             items.append(contentsOf: entries.map { .cache($0) })
             items.sort { $0.bytes > $1.bytes }
 
-            await MainActor.run {
-                cachedSegments = segs
-                cachedCacheEntries = entries
-                cachedAllItems = items
-                cachedAvailableBytes = available
-            }
+            cachedSegments = segs
+            cachedCacheEntries = entries
+            cachedAllItems = items
+            cachedAvailableBytes = available
         }
     }
 }

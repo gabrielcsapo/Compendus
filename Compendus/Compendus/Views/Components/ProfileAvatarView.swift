@@ -75,11 +75,16 @@ struct ProfileAvatarView: View {
     }
 
     private func loadAvatar(from url: URL) async {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else {
+            loadFailed = true
+            return
+        }
         let session = URLSession(
             configuration: .default,
             delegate: LocalNetworkSessionDelegate.shared,
             delegateQueue: nil
         )
+        NetworkSessionRegistry.shared.registerDataSession(session)
         do {
             let (data, _) = try await session.data(from: url)
             if let image = UIImage(data: data) {

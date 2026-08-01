@@ -106,24 +106,16 @@ export default function AdminOverviewClient() {
     );
   }
 
-  const activeDevices = summary.fleet.filter(
-    (d) => d.lastSeenMs && Date.now() - d.lastSeenMs < 10 * 60 * 1000,
-  );
   const pendingChips = Object.entries(summary.pendingByType).sort((a, b) => b[1] - a[1]);
 
   // Constraint inference: the single sentence that explains the system.
   let constraint: string;
   if (summary.paused) {
-    constraint = "Paused — the box is yours; fleet results defer until resume.";
+    constraint = "Paused — the box is yours; work resumes automatically.";
   } else if (summary.pendingTotal === 0) {
     constraint = "Queue empty — nothing limits throughput right now.";
-  } else if (activeDevices.length === 0) {
-    constraint =
-      "Throughput limited by: no fleet devices online. Plug in a laptop or open /fleet-worker on any machine to scale.";
-  } else if (activeDevices.length === 1) {
-    constraint = `Throughput limited by: 1 fleet device (${activeDevices[0].name}). Add devices at /fleet-worker to scale.`;
   } else {
-    constraint = `${activeDevices.length} fleet devices active — throughput scales with devices.`;
+    constraint = "Working through the queue — one job at a time, all on this server.";
   }
 
   return (
@@ -199,17 +191,6 @@ export default function AdminOverviewClient() {
           </div>
         </div>
 
-        {/* Fleet activity line */}
-        {summary.fleetActive.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-muted">
-            {summary.fleetActive.map((w, i) => (
-              <span key={i}>
-                <span className="text-foreground">{w.deviceName ?? "device"}</span> — {w.kind}
-                {w.leasedForSec !== null && ` (${Math.round(w.leasedForSec / 60)}m)`}
-              </span>
-            ))}
-          </div>
-        )}
         <div className="mt-3 text-xs text-foreground-muted">{constraint}</div>
       </section>
 
@@ -303,36 +284,6 @@ export default function AdminOverviewClient() {
           )}
         </div>
       )}
-
-      {/* Fleet roster */}
-      <section className="rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-xs uppercase tracking-wide text-foreground-muted">Fleet</div>
-          <Link to="/admin/fleet" className="text-xs text-primary hover:text-primary-hover">
-            details →
-          </Link>
-        </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {summary.fleet.length === 0 && (
-            <span className="text-sm text-foreground-muted">No devices enrolled.</span>
-          )}
-          {summary.fleet.map((d) => {
-            const online = d.lastSeenMs && Date.now() - d.lastSeenMs < 10 * 60 * 1000;
-            return (
-              <span
-                key={d.name}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs"
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${online ? "bg-green-400" : "bg-border"}`}
-                />
-                <span className="text-foreground">{d.name}</span>
-                <span className="text-foreground-muted tabular-nums">{d.jobsDone}</span>
-              </span>
-            );
-          })}
-        </div>
-      </section>
     </div>
   );
 }

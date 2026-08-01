@@ -4,7 +4,8 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { Link, useRouter } from "react-flight-router/client";
 import type { Book } from "../../lib/db/schema";
 import { BookCover } from "../BookCover";
-import { toggleBookReadStatus } from "../../actions/books";
+import { useToast } from "../ToastContext";
+import { setBookAside, toggleBookReadStatus } from "../../actions/books";
 import { isReflowableFormat, ccdStatusOf } from "../../lib/book-types";
 
 interface ContextMenuState {
@@ -57,8 +58,12 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [settingAsideId, setSettingAsideId] = useState<string | null>(null);
+  const [hiddenBookIds, setHiddenBookIds] = useState<Set<string>>(() => new Set());
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const { showToast } = useToast();
+  const visibleBooks = books.filter((book) => !hiddenBookIds.has(book.id));
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -98,9 +103,18 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
   const handleContextMenu = (e: React.MouseEvent, book: Book) => {
     e.preventDefault();
     const menuWidth = 192;
-    const menuHeight = 140;
+    const menuHeight = 188;
     const x = Math.min(e.clientX, window.innerWidth - menuWidth - 8);
     const y = Math.min(e.clientY, window.innerHeight - menuHeight - 8);
+    setContextMenu({ book, x, y });
+  };
+
+  const handleActionsClick = (e: React.MouseEvent<HTMLButtonElement>, book: Book) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 192;
+    const menuHeight = 188;
+    const x = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+    const y = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - menuHeight - 8));
     setContextMenu({ book, x, y });
   };
 
@@ -115,6 +129,22 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
     }
   };
 
+  const handleSetAside = async (book: Book) => {
+    setSettingAsideId(book.id);
+    setContextMenu(null);
+    try {
+      const result = await setBookAside(book.id, true);
+      if (!result) throw new Error("Set aside is unavailable without an active profile");
+      setHiddenBookIds((current) => new Set(current).add(book.id));
+      showToast(`Set aside “${book.title}”. Return it from the book page anytime.`, "info");
+      await router.refresh();
+    } catch {
+      showToast(`Couldn't set aside “${book.title}”. Try again.`, "error");
+    } finally {
+      setSettingAsideId(null);
+    }
+  };
+
   const scroll = (direction: "left" | "right") => {
     const el = scrollRef.current;
     if (!el) return;
@@ -126,7 +156,7 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
     });
   };
 
-  if (books.length === 0) return null;
+  if (visibleBooks.length === 0) return null;
 
   return (
     <>
@@ -135,7 +165,7 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
           <h2 className="text-lg font-semibold text-foreground">Continue Reading</h2>
           <div className="flex items-center gap-2">
             <span className="text-sm text-foreground-muted">
-              {books.length} {books.length === 1 ? "book" : "books"}
+              {visibleBooks.length} {visibleBooks.length === 1 ? "book" : "books"}
             </span>
             <div className="hidden sm:flex items-center gap-1">
               <button
@@ -193,7 +223,7 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
             ref={scrollRef}
             className="flex gap-4 overflow-x-auto pb-3 scrollbar-none -mx-1 px-1 snap-x snap-mandatory scroll-smooth"
           >
-            {books.map((book) => {
+            {visibleBooks.map((book) => {
               const progressPercent = Math.round((book.readingProgress || 0) * 100);
               const progressLabel = getProgressLabel(book);
 
@@ -206,7 +236,7 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
               return (
                 <div
                   key={book.id}
-                  className="group flex-shrink-0 w-28 snap-start"
+                  className="group relative flex-shrink-0 w-28 snap-start"
                   onContextMenu={(e) => handleContextMenu(e, book)}
                 >
                   <Link
@@ -262,6 +292,32 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
                       )}
                     </div>
                   </Link>
+                  <button
+                    type="button"
+                    onClick={(e) => handleActionsClick(e, book)}
+                    disabled={settingAsideId === book.id}
+                    className="absolute right-1.5 top-1.5 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/65 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-wait disabled:opacity-60"
+                    aria-label={`More actions for ${book.title}`}
+                    title="More actions"
+                  >
+                    {settingAsideId === book.id ? (
+                      <span
+                        className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <svg
+                        className="h-4 w-4"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <circle cx="5" cy="12" r="1.75" />
+                        <circle cx="12" cy="12" r="1.75" />
+                        <circle cx="19" cy="12" r="1.75" />
+                      </svg>
+                    )}
+                  </button>
                 </div>
               );
             })}
@@ -316,6 +372,27 @@ export function ContinueReadingCarousel({ books }: { books: Book[] }) {
             View Details
           </Link>
           <div className="my-1 border-t border-border" />
+          <button
+            onClick={() => handleSetAside(contextMenu.book)}
+            disabled={settingAsideId === contextMenu.book.id}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50"
+          >
+            <svg
+              className="w-4 h-4 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 8h14M9 12h6m-9 8h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+              />
+            </svg>
+            Set Aside
+          </button>
           <button
             onClick={() => handleToggleRead(contextMenu.book)}
             disabled={togglingId === contextMenu.book.id}

@@ -27,15 +27,16 @@ async function getExtractor(): Promise<Extractor> {
       // for outbound network access to embed.
       env.allowRemoteModels = false;
       env.localModelPath = resolve(process.cwd(), "models");
-      // Pin onnxruntime to a single intra-op thread. Its default thread pool
-      // deadlocks under container cgroup CPU limits (embedding froze mid-run on
-      // the deploy box while running fine on the host). Sequential execution is
-      // plenty fast for MiniLM and is deadlock-proof; this is scoped to the
-      // embedding session only.
+      // Default to a single intra-op thread: onnxruntime's default thread pool
+      // deadlocks under tight container cgroup CPU limits (embedding froze
+      // mid-run on the old 2-core box while running fine on the host).
+      // Sequential single-thread is deadlock-proof; on a box with cores to
+      // spare, raise EMBED_INTRA_OP_THREADS (set in docker-compose).
+      const intraOp = Math.max(1, parseInt(process.env.EMBED_INTRA_OP_THREADS || "1", 10) || 1);
       const pipe = await pipeline("feature-extraction", EMBEDDING_MODEL, {
         dtype: "q8",
         session_options: {
-          intraOpNumThreads: 1,
+          intraOpNumThreads: intraOp,
           interOpNumThreads: 1,
           executionMode: "sequential",
         },

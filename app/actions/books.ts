@@ -34,7 +34,7 @@ import { resolveProfileId } from "../lib/profile";
  * When profileId is provided, the reading state fields come from userBookState
  * instead of the deprecated columns on books.
  */
-export type BookWithState = Book;
+export type BookWithState = Book & { isSetAside: boolean };
 
 /**
  * Generate a clean filename from title and authors
@@ -80,6 +80,7 @@ const userStateSelection = {
   ubsLastReadAt: userBookState.lastReadAt,
   ubsLastPosition: userBookState.lastPosition,
   ubsIsRead: userBookState.isRead,
+  ubsIsSetAside: userBookState.isSetAside,
   ubsRating: userBookState.rating,
   ubsReview: userBookState.review,
 };
@@ -94,6 +95,7 @@ function overlayUserState(row: {
   ubsLastReadAt: Date | null;
   ubsLastPosition: string | null;
   ubsIsRead: boolean | null;
+  ubsIsSetAside: boolean | null;
   ubsRating: number | null;
   ubsReview: string | null;
 }): BookWithState {
@@ -103,6 +105,7 @@ function overlayUserState(row: {
     lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
     lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
     isRead: row.ubsIsRead ?? row.book.isRead,
+    isSetAside: row.ubsIsSetAside ?? false,
     rating: row.ubsRating ?? row.book.rating,
     review: row.ubsReview ?? row.book.review,
   };
@@ -228,10 +231,11 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
     query = query.where(and(...conditions));
   }
 
-  return query
+  const rows = await query
     .orderBy(...ordering)
     .limit(limit)
     .offset(offset);
+  return rows.map((book) => ({ ...book, isSetAside: false }));
 }
 
 export async function getBook(
@@ -251,7 +255,7 @@ export async function getBook(
   }
 
   const result = await db.select().from(books).where(eq(books.id, id)).get();
-  return result || null;
+  return result ? { ...result, isSetAside: false } : null;
 }
 
 export async function updateBook(
@@ -274,6 +278,7 @@ export async function updateBook(
     lastPosition: string;
     bookTypeOverride: string | null;
     isRead: boolean;
+    isSetAside: boolean;
     rating: number | null;
     review: string | null;
   }>,
@@ -289,6 +294,7 @@ export async function updateBook(
     "readingProgress",
     "lastPosition",
     "isRead",
+    "isSetAside",
     "rating",
     "review",
   ] as const;
@@ -864,6 +870,7 @@ export async function getRecentBooks(
         ubsLastReadAt: userBookState.lastReadAt,
         ubsLastPosition: userBookState.lastPosition,
         ubsIsRead: userBookState.isRead,
+        ubsIsSetAside: userBookState.isSetAside,
         ubsRating: userBookState.rating,
         ubsReview: userBookState.review,
       })
@@ -872,7 +879,13 @@ export async function getRecentBooks(
         userBookState,
         and(eq(userBookState.bookId, books.id), eq(userBookState.profileId, profileId)),
       )
-      .where(and(sql`${userBookState.lastReadAt} IS NOT NULL`, eq(userBookState.isRead, false)))
+      .where(
+        and(
+          sql`${userBookState.lastReadAt} IS NOT NULL`,
+          eq(userBookState.isRead, false),
+          eq(userBookState.isSetAside, false),
+        ),
+      )
       .orderBy(desc(userBookState.lastReadAt))
       .limit(limit);
 
@@ -882,18 +895,20 @@ export async function getRecentBooks(
       lastReadAt: row.ubsLastReadAt ?? row.book.lastReadAt,
       lastPosition: row.ubsLastPosition ?? row.book.lastPosition,
       isRead: row.ubsIsRead ?? row.book.isRead,
+      isSetAside: row.ubsIsSetAside ?? false,
       rating: row.ubsRating ?? row.book.rating,
       review: row.ubsReview ?? row.book.review,
     }));
   }
 
   // Legacy path: read from books table directly
-  return db
+  const legacyRows = await db
     .select()
     .from(books)
     .where(and(sql`${books.lastReadAt} IS NOT NULL`, eq(books.isRead, false)))
     .orderBy(desc(books.lastReadAt))
     .limit(limit);
+  return legacyRows.map((book) => ({ ...book, isSetAside: false }));
 }
 
 export async function getBooksCount(
@@ -1706,6 +1721,27 @@ export async function toggleBookReadStatus(
   }
 
   return { isRead };
+}
+
+/** Remove or restore a book from the profile's active-reading surfaces. */
+export async function setBookAside(
+  bookId: string,
+  isSetAside: boolean,
+  explicitProfileId?: string,
+): Promise<{ isSetAside: boolean } | null> {
+  const profileId = explicitProfileId ?? resolveProfileId();
+  const book = await getBook(bookId, profileId);
+  if (!book) return null;
+
+  if (profileId) {
+    await upsertUserBookState(profileId, bookId, { isSetAside });
+  } else {
+    // Set-aside is a profile concept; without a profile there is nowhere safe
+    // to persist it without affecting every reader of the legacy library.
+    return null;
+  }
+
+  return { isSetAside };
 }
 
 export async function rateBook(

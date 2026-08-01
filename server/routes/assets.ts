@@ -2,65 +2,50 @@ import { Hono } from "hono";
 import { readFile, stat, writeFile } from "fs/promises";
 import { resolve, extname } from "path";
 import { eq } from "drizzle-orm";
-import { getComicPage, getComicPageCount, convertCbrToCbz } from "../../app/lib/processing/comic";
+import { getComicPage, getComicPageCount } from "../../app/lib/processing/comic";
 import { extractEpubResource } from "../../app/lib/processing/epub";
 import { convertMobiToEpub } from "../../app/lib/processing/mobi-to-epub";
 import { db, books } from "../../app/lib/db";
 import type { BookFormat } from "../../app/lib/types";
-import { getFileStat, streamFileResponse, serveCachedResource } from "../lib/file-serving";
+import {
+  getFileStat,
+  streamFileResponse,
+  serveCachedResource,
+  resolveContained,
+} from "../lib/file-serving";
+import { resolveDownloadArtifact } from "../lib/download-artifacts";
 
 const app = new Hono();
 
 // GET /books/:id/as-cbz - convert CBR to CBZ for offline iOS reading
 app.get("/books/:id/as-cbz", async (c) => {
   const bookId = c.req.param("id");
-
-  // First check if CBZ already exists (prefer native format)
-  const cbzPath = resolve(process.cwd(), "data", "books", `${bookId}.cbz`);
-  const cbzStat = await getFileStat(cbzPath);
-  if (cbzStat) {
-    return streamFileResponse(c, cbzPath, {
+  try {
+    const artifact = await resolveDownloadArtifact(bookId);
+    if (artifact.format !== "cbz") return new Response("Comic not found", { status: 404 });
+    return streamFileResponse(c, artifact.path, {
       contentType: "application/vnd.comicbook+zip",
       disposition: `attachment; filename="${bookId}.cbz"`,
-      cacheControl: "public, max-age=3600",
+      cacheControl: "private, no-transform, max-age=31536000, immutable",
+      etag: `"sha256-${artifact.sha256}"`,
+      headers: { "X-Artifact-SHA256": artifact.sha256 },
     });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[as-cbz] Conversion failed for ${bookId}:`, errorMessage);
+    return c.json(
+      { error: "Conversion failed", details: errorMessage },
+      errorMessage.includes("too large") ? 413 : 500,
+    );
   }
-
-  // Check for CBR and convert
-  const cbrPath = resolve(process.cwd(), "data", "books", `${bookId}.cbr`);
-  const cbrStat = await getFileStat(cbrPath);
-  if (cbrStat) {
-    try {
-      console.log(`[as-cbz] Converting CBR to CBZ for book ${bookId}`);
-      const cbrBuffer = await readFile(cbrPath);
-      const cbzBuffer = await convertCbrToCbz(cbrBuffer);
-
-      return new Response(new Uint8Array(cbzBuffer), {
-        headers: {
-          "Content-Type": "application/vnd.comicbook+zip",
-          "Content-Disposition": `attachment; filename="${bookId}.cbz"`,
-          "Content-Length": String(cbzBuffer.byteLength),
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      console.error(`[as-cbz] Conversion failed for ${bookId}:`, errorMessage);
-
-      if (errorMessage.includes("too large")) {
-        return c.json({ error: errorMessage }, 413);
-      }
-      return c.json({ error: "Conversion failed", details: errorMessage }, 500);
-    }
-  }
-
-  return new Response("Comic not found", { status: 404 });
 });
 
 // GET /books/:id/as-epub - serve converted EPUB (auto-converts MOBI/AZW3 on first request)
 app.get("/books/:id/as-epub", async (c) => {
   const bookId = c.req.param("id");
-  const epubPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
+  const booksRoot = resolve(process.cwd(), "data", "books");
+  const epubPath = resolveContained(booksRoot, `${bookId}.epub`);
+  if (!epubPath) return c.json({ error: "Invalid book ID" }, 400);
 
   // Serve cached conversion if it exists
   const epubStat = await getFileStat(epubPath);
@@ -85,7 +70,8 @@ app.get("/books/:id/as-epub", async (c) => {
     try {
       // Auto-convert MOBI/AZW3 → EPUB
       const ext = book.fileName ? extname(book.fileName) : `.${book.format}`;
-      const mobiPath = resolve(process.cwd(), "data", "books", `${bookId}${ext}`);
+      const mobiPath = resolveContained(booksRoot, `${bookId}${ext}`);
+      if (!mobiPath) return c.json({ error: "Invalid book ID" }, 400);
 
       const mobiStat = await getFileStat(mobiPath);
       if (!mobiStat) {
@@ -138,7 +124,8 @@ app.get("/books/:id/as-epub", async (c) => {
 // GET /books/* - serve book files with streaming and range request support
 app.get("/books/:filepath{.+}", async (c) => {
   const filepath = c.req.param("filepath");
-  const filePath = resolve(process.cwd(), "data", "books", filepath);
+  const filePath = resolveContained(resolve(process.cwd(), "data", "books"), filepath);
+  if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
     cacheControl: "public, max-age=3600",
@@ -148,7 +135,8 @@ app.get("/books/:filepath{.+}", async (c) => {
 // GET /covers/:filename - serve cover images
 app.get("/covers/:filename", async (c) => {
   const filename = c.req.param("filename");
-  const filePath = resolve(process.cwd(), "data", "covers", filename);
+  const filePath = resolveContained(resolve(process.cwd(), "data", "covers"), filename);
+  if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
     contentType: "image/jpeg",
@@ -159,7 +147,8 @@ app.get("/covers/:filename", async (c) => {
 // GET /avatars/:filename - serve profile avatar images
 app.get("/avatars/:filename", async (c) => {
   const filename = c.req.param("filename");
-  const filePath = resolve(process.cwd(), "data", "avatars", filename);
+  const filePath = resolveContained(resolve(process.cwd(), "data", "avatars"), filename);
+  if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
     contentType: "image/jpeg",
@@ -176,10 +165,11 @@ app.get("/mobi-images/:rest{.+}", async (c) => {
   if (pathParts.length >= 2) {
     const [bookId, ...restParts] = pathParts;
     const filename = restParts.join("/");
-    filePath = resolve(process.cwd(), "images", bookId, filename);
+    filePath = resolveContained(resolve(process.cwd(), "images"), bookId, filename) ?? "";
   } else {
-    filePath = resolve(process.cwd(), "images", pathParts[0]);
+    filePath = resolveContained(resolve(process.cwd(), "images"), pathParts[0]) ?? "";
   }
+  if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
     cacheControl: "public, max-age=86400",
@@ -191,7 +181,8 @@ app.get("/comic/:id/:format/page/:pageNum", async (c) => {
   const bookId = c.req.param("id");
   const format = c.req.param("format");
   const pageNum = parseInt(c.req.param("pageNum"), 10);
-  const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.${format}`);
+  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.${format}`);
+  if (!bookPath) return new Response("Page not found", { status: 404 });
 
   const bookStat = await getFileStat(bookPath);
   if (!bookStat) {
@@ -223,7 +214,8 @@ app.get("/comic/:id/:format/page/:pageNum", async (c) => {
 app.get("/comic/:id/:format/info", async (c) => {
   const bookId = c.req.param("id");
   const format = c.req.param("format");
-  const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.${format}`);
+  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.${format}`);
+  if (!bookPath) return new Response("Comic not found", { status: 404 });
 
   const bookStat = await getFileStat(bookPath);
   if (!bookStat) {
@@ -251,7 +243,8 @@ app.get("/book/:id/:rest{.+}", async (c, next) => {
     return next();
   }
 
-  const bookPath = resolve(process.cwd(), "data", "books", `${bookId}.epub`);
+  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.epub`);
+  if (!bookPath) return new Response("Resource not found", { status: 404 });
   const bookStat = await getFileStat(bookPath);
   if (!bookStat) {
     return new Response("Resource not found", { status: 404 });

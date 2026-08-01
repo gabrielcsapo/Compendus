@@ -411,7 +411,9 @@ export async function generateMissingThumbnails(): Promise<void> {
   if (!existsSync(coversDir)) return;
 
   const files = readdirSync(coversDir);
-  const coverFiles = files.filter((f) => f.endsWith(".jpg") && !f.endsWith(".thumb.jpg"));
+  const coverFiles = files.filter(
+    (f) => !f.startsWith("._") && f.endsWith(".jpg") && !f.endsWith(".thumb.jpg"),
+  );
 
   let generated = 0;
   for (const file of coverFiles) {

@@ -1,313 +1,435 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-flight-router/client";
-import { getJourney, wanderStop } from "../actions/substrate";
+import { answerPod, getPod } from "../actions/substrate";
+import type {
+  PodAttemptResult,
+  PodQuestion,
+  PodSession,
+  PodSessionItem,
+  PodSummary,
+  SourceLocator,
+} from "../lib/learning/pods";
 
-/**
- * One journey: a meandering candlelit road through a theme. Nodes are real
- * passages (role-marked), modules are stretches of the road, the current node
- * glows, and the road forks at the end toward adjacent themes. Reading a node
- * records coverage server-side — the same coverage wander and the reader feed —
- * so the road remembers wherever you actually read. No streaks, no scores.
- */
-
-interface StudyItem {
-  ordinal: number;
-  passageId: string;
-  bookId: string;
-  bookTitle: string;
-  snippet: string;
-  module: string;
-  role: string;
-  transition: string;
-  seen: boolean;
-}
-interface Curriculum {
-  id: string;
-  topicId: string;
-  title: string;
-  builder: string;
-  items: StudyItem[];
-}
-interface AdjacentTopic {
-  id: string;
-  label: string | null;
-  size: number;
-  bookCount: number;
-}
-interface StopView {
-  passageId: string;
-  bookId: string;
-  spineIndex: number | null;
-  text: string;
-}
-
-const ROLE_GLYPH: Record<string, string> = {
-  definition: "✦",
-  example: "❧",
-  argument: "¶",
-  application: "⚒",
-  narrative: "☾",
-};
-const ROLE_LABEL: Record<string, string> = {
-  definition: "a framing",
-  example: "an example",
-  argument: "an argument",
-  application: "in practice",
-  narrative: "a story",
+type AnswerState = {
+  selectedChoiceId: string;
+  attemptId?: string;
+  submitting: boolean;
+  result: PodAttemptResult | null;
+  error?: string;
 };
 
-export function JourneyClient({ topicId }: { topicId: string }) {
-  const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
-  const [adjacent, setAdjacent] = useState<AdjacentTopic[]>([]);
-  const [seen, setSeen] = useState<Set<string>>(new Set());
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [openText, setOpenText] = useState<StopView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const currentRef = useRef<HTMLLIElement | null>(null);
+const ROLE_LABELS: Record<string, string> = {
+  definition: "Definition",
+  entry: "Starting point",
+  derivation: "Reasoning",
+  argument: "Argument",
+  summary: "Summary",
+  example: "Example",
+  caveat: "Caveat",
+  anecdote: "Story",
+  application: "Application",
+  exercise: "Exercise",
+};
 
-  useEffect(() => {
-    getJourney(topicId)
-      .then(({ curriculum: c, adjacent: a }) => {
-        if (!c) {
-          setError("This road hasn't been mapped yet.");
-          return;
-        }
-        setCurriculum(c as Curriculum);
-        setSeen(new Set((c.items as StudyItem[]).filter((i) => i.seen).map((i) => i.passageId)));
-        setAdjacent((a as AdjacentTopic[]) ?? []);
-      })
-      .catch(() => setError("Couldn't reach the library."));
-  }, [topicId]);
+function sourceHref(source: SourceLocator): string {
+  const params = new URLSearchParams();
+  if (source.page != null && source.page > 0) {
+    params.set("page", String(source.page));
+  } else if (source.spineIndex != null && source.spineIndex >= 0) {
+    params.set("spine", String(source.spineIndex));
+    params.set("p", "0");
+  }
+  params.set("source", source.passageId);
+  if (source.charStart != null) params.set("char", String(source.charStart));
+  return `/book/${source.bookId}/read?${params.toString()}`;
+}
 
-  /** Opening a node fetches the full passage — which records coverage server-side. */
-  const openNode = useCallback(
-    async (item: StudyItem) => {
-      if (openId === item.passageId) {
-        setOpenId(null);
-        setOpenText(null);
-        return;
-      }
-      setOpenId(item.passageId);
-      setOpenText(null);
-      try {
-        const stop = await wanderStop(item.passageId);
-        if (stop) {
-          setOpenText(stop as StopView);
-          setSeen((s) => new Set([...s, item.passageId]));
-        }
-      } catch {
-        // leave the snippet showing
-      }
-    },
-    [openId],
+function SourceLink({ source, onOpen }: { source: SourceLocator; onOpen?: () => void }) {
+  return (
+    <Link
+      to={sourceHref(source)}
+      onClick={onOpen}
+      className="inline-flex items-center gap-1.5 rounded-full border border-amber-900/70 bg-amber-950/20 px-3 py-1.5 font-sans text-xs font-medium text-amber-200 transition-colors hover:border-amber-700 hover:bg-amber-950/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+    >
+      Open in reader ↗
+    </Link>
   );
+}
 
-  const items = curriculum?.items ?? [];
-  const currentIdx = items.findIndex((i) => !seen.has(i.passageId));
-  const modules: string[] = [];
-  for (const item of items) if (!modules.includes(item.module)) modules.push(item.module);
-  const moduleComplete = (m: string) =>
-    items.filter((i) => i.module === m).every((i) => seen.has(i.passageId));
-  const walkedCount = items.filter((i) => seen.has(i.passageId)).length;
+function QuestionCard({
+  podId,
+  revision,
+  question,
+  state,
+  onStateChange,
+  onCorrect,
+}: {
+  podId: string;
+  revision: string;
+  question: PodQuestion;
+  state: AnswerState | undefined;
+  onStateChange: (state: AnswerState) => void;
+  onCorrect: () => void;
+}) {
+  const selectedChoiceId = state?.selectedChoiceId ?? "";
+  const result = state?.result ?? null;
 
-  const scrollToCurrent = useCallback(() => {
-    currentRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
+  const submit = async () => {
+    if (!selectedChoiceId || state?.submitting) return;
+    const attemptId = state?.attemptId ?? crypto.randomUUID();
+    onStateChange({ selectedChoiceId, attemptId, submitting: true, result });
+    try {
+      const nextResult = await answerPod(podId, revision, question.id, selectedChoiceId, attemptId);
+      if (!nextResult) throw new Error("Question is no longer available");
+      onStateChange({ selectedChoiceId, attemptId, submitting: false, result: nextResult });
+      if (nextResult.correct) onCorrect();
+    } catch {
+      onStateChange({
+        selectedChoiceId,
+        attemptId,
+        submitting: false,
+        result: null,
+        error: "The answer couldn't be checked. Try again.",
+      });
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#0b0b0f] text-stone-200 font-serif">
-      {/* faint stars */}
-      <div
-        className="pointer-events-none fixed inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            "radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,0.25) 50%, transparent 50%), radial-gradient(1px 1px at 78% 9%, rgba(255,255,255,0.18) 50%, transparent 50%), radial-gradient(1px 1px at 55% 31%, rgba(255,255,255,0.12) 50%, transparent 50%), radial-gradient(1px 1px at 88% 64%, rgba(255,255,255,0.16) 50%, transparent 50%), radial-gradient(1px 1px at 22% 76%, rgba(255,255,255,0.12) 50%, transparent 50%)",
-        }}
-      />
+    <section className="ml-0 rounded-2xl border border-amber-900/50 bg-amber-950/10 p-5 sm:ml-12 sm:p-6">
+      <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-400/70">
+        Check your understanding
+      </p>
+      <h3 className="mt-2 text-lg leading-snug text-stone-100">{question.prompt}</h3>
+      <div className="mt-4 space-y-2">
+        {question.choices.map((choice) => {
+          const selected = selectedChoiceId === choice.id;
+          return (
+            <button
+              key={choice.id}
+              type="button"
+              onClick={() =>
+                onStateChange({ selectedChoiceId: choice.id, submitting: false, result: null })
+              }
+              aria-pressed={selected}
+              disabled={state?.submitting || result?.correct}
+              className={`w-full rounded-xl border px-4 py-3 text-left font-sans text-sm leading-relaxed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-default ${
+                selected
+                  ? "border-amber-700 bg-amber-950/35 text-stone-100"
+                  : "border-stone-800 bg-stone-950/30 text-stone-400 hover:border-stone-600 hover:text-stone-200"
+              }`}
+            >
+              {choice.text}
+            </button>
+          );
+        })}
+      </div>
 
-      <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-4 bg-gradient-to-b from-[#0b0b0f] via-[#0b0b0f]/90 to-transparent">
-        <Link
-          to="/journeys"
-          className="rounded-full border border-stone-800 hover:border-stone-600 px-3 py-1.5 text-stone-500 hover:text-stone-300 transition-colors text-sm font-sans"
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!selectedChoiceId || state?.submitting || result?.correct}
+          className="rounded-full bg-stone-100 px-4 py-2 font-sans text-sm font-medium text-stone-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          ← all journeys
-        </Link>
-        {items.length > 0 && (
-          <div className="text-xs font-sans text-stone-600">
-            {walkedCount} of {items.length} walked
-          </div>
+          {state?.submitting ? "Checking…" : result?.correct ? "Answered" : "Check answer"}
+        </button>
+        {result && (
+          <p
+            className={`font-sans text-sm ${result.correct ? "text-emerald-300" : "text-amber-200"}`}
+            role="status"
+          >
+            {result.feedback}
+          </p>
+        )}
+        {state?.error && (
+          <p className="font-sans text-sm text-rose-300" role="alert">
+            {state.error}
+          </p>
         )}
       </div>
 
-      <div className="mx-auto max-w-2xl px-6 pb-40 pt-6">
+      {result && (
+        <div className="mt-5 border-t border-stone-800 pt-4">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-600">
+            Evidence from {result.evidence.bookTitle}
+          </p>
+          <blockquote className="mt-2 text-sm leading-relaxed text-stone-400">
+            “{result.evidence.excerpt}”
+          </blockquote>
+          <div className="mt-3">
+            <SourceLink source={result.evidence} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SourceCard({
+  item,
+  reviewed,
+  current,
+  onToggleReviewed,
+}: {
+  item: PodSessionItem;
+  reviewed: boolean;
+  current: boolean;
+  onToggleReviewed: () => void;
+}) {
+  return (
+    <article
+      className={`rounded-2xl border p-5 transition-colors sm:p-6 ${
+        current ? "border-amber-800/70 bg-amber-950/15" : "border-stone-800 bg-stone-900/30"
+      }`}
+    >
+      <div className="flex items-start gap-4">
+        <span
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border font-sans text-xs font-semibold ${
+            reviewed
+              ? "border-amber-500/70 bg-amber-400 text-stone-950"
+              : "border-stone-700 text-stone-500"
+          }`}
+        >
+          {reviewed ? "✓" : item.ordinal}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 font-sans text-[11px] uppercase tracking-[0.15em]">
+            <span className="text-amber-400/70">{ROLE_LABELS[item.role] ?? item.role}</span>
+            {item.source.chapterTitle && (
+              <span className="truncate normal-case tracking-normal text-stone-600">
+                {item.source.chapterTitle}
+              </span>
+            )}
+          </div>
+          {item.transition && (
+            <p className="mt-2 font-sans text-xs leading-relaxed text-stone-500">
+              {item.transition}
+            </p>
+          )}
+          <blockquote className="mt-3 text-base leading-relaxed text-stone-200">
+            {item.snippet}
+          </blockquote>
+          <p className="mt-4 font-sans text-xs text-stone-500">— {item.bookTitle}</p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <SourceLink source={item.source} onOpen={reviewed ? undefined : onToggleReviewed} />
+            <button
+              type="button"
+              onClick={onToggleReviewed}
+              aria-pressed={reviewed}
+              className={`rounded-full border px-3 py-1.5 font-sans text-xs transition-colors ${
+                reviewed
+                  ? "border-stone-700 text-stone-400 hover:text-stone-200"
+                  : "border-stone-800 text-stone-500 hover:border-stone-600 hover:text-stone-300"
+              }`}
+            >
+              {reviewed ? "Reviewed ✓" : "Mark reviewed"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function JourneyClient({ podId }: { podId: string }) {
+  const [session, setSession] = useState<PodSession | null>(null);
+  const [adjacent, setAdjacent] = useState<PodSummary[]>([]);
+  const [reviewed, setReviewed] = useState<Set<string>>(() => new Set());
+  const [answers, setAnswers] = useState<Record<string, AnswerState>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSession(null);
+    setAdjacent([]);
+    setAnswers({});
+    setError(null);
+    getPod(podId)
+      .then(({ session: nextSession, adjacent: nextAdjacent }) => {
+        if (!nextSession) {
+          setError("This Pod doesn’t have enough verified sources yet.");
+          return;
+        }
+        setSession(nextSession);
+        setAdjacent(nextAdjacent);
+        setAnswers(
+          Object.fromEntries(
+            nextSession.questions.flatMap((question) =>
+              question.savedAnswer
+                ? [
+                    [
+                      question.id,
+                      {
+                        selectedChoiceId: question.savedAnswer.selectedChoiceId,
+                        submitting: false,
+                        result: question.savedAnswer.result,
+                      },
+                    ],
+                  ]
+                : [],
+            ),
+          ),
+        );
+        setReviewed(
+          new Set([
+            ...nextSession.items.filter((item) => item.seen).map((item) => item.passageId),
+            ...nextSession.questions
+              .filter((question) => question.savedAnswer?.result.correct)
+              .map((question) => question.evidence.passageId),
+          ]),
+        );
+      })
+      .catch(() => setError("This Pod couldn't be loaded. Try returning to the Pod library."));
+  }, [podId]);
+
+  const questionsByOrdinal = useMemo(() => {
+    const grouped = new Map<number, PodQuestion[]>();
+    for (const question of session?.questions ?? []) {
+      grouped.set(question.afterOrdinal, [...(grouped.get(question.afterOrdinal) ?? []), question]);
+    }
+    return grouped;
+  }, [session]);
+
+  const reviewedCount = session?.items.filter((item) => reviewed.has(item.passageId)).length ?? 0;
+  const progress = session?.items.length ? reviewedCount / session.items.length : 0;
+  const currentOrdinal = session?.items.find((item) => !reviewed.has(item.passageId))?.ordinal;
+
+  const toggleReviewed = (passageId: string) => {
+    setReviewed((current) => {
+      const next = new Set(current);
+      if (next.has(passageId)) next.delete(passageId);
+      else next.add(passageId);
+      return next;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#0b0b0f] font-serif text-stone-200">
+      <header className="sticky top-0 z-20 border-b border-stone-900/80 bg-[#0b0b0f]/90 px-6 py-4 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
+          <Link
+            to="/pods"
+            className="rounded-full border border-stone-800 px-3 py-1.5 font-sans text-sm text-stone-500 transition-colors hover:border-stone-600 hover:text-stone-300"
+          >
+            ← All Pods
+          </Link>
+          {session && (
+            <div className="min-w-32 text-right font-sans text-xs text-stone-500">
+              <span>
+                {reviewedCount} of {session.items.length} reviewed
+              </span>
+              <div className="mt-1 h-1 overflow-hidden rounded-full bg-stone-800">
+                <div
+                  className="h-full rounded-full bg-amber-400 transition-[width] duration-300"
+                  style={{ width: `${Math.round(progress * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-6 pb-28 pt-9">
         {error ? (
-          <p className="text-stone-500 font-sans text-sm">{error}</p>
-        ) : !curriculum ? (
-          <p className="text-stone-600 font-sans text-sm">Lighting the lanterns…</p>
+          <div className="rounded-2xl border border-stone-800 bg-stone-900/30 p-6">
+            <p className="font-sans text-sm text-stone-400">{error}</p>
+            <Link
+              to="/pods"
+              className="mt-4 inline-block font-sans text-sm text-amber-300 hover:text-amber-200"
+            >
+              Browse Pods →
+            </Link>
+          </div>
+        ) : !session ? (
+          <p className="font-sans text-sm text-stone-600" role="status">
+            Gathering the sources…
+          </p>
         ) : (
           <>
-            <div className="text-xs uppercase tracking-[0.3em] text-amber-500/70 font-sans mb-3">
-              {curriculum.builder === "device" ? "A journey, named by your fleet" : "A journey"}
-            </div>
-            <h1 className="text-3xl text-stone-100 mb-12 leading-snug">{curriculum.title}</h1>
+            <p className="font-sans text-xs font-medium uppercase tracking-[0.26em] text-amber-500/70">
+              {session.items.length}-source Pod
+            </p>
+            <h1 className="mt-3 max-w-2xl text-3xl leading-tight text-stone-100 sm:text-4xl">
+              {session.title}
+            </h1>
+            <p className="mb-10 mt-4 max-w-xl font-sans text-sm leading-relaxed text-stone-500">
+              Read each source here without leaving the Pod. Questions appear immediately after the
+              passage they use; open the book only when you want the wider context.
+            </p>
 
-            <ol className="relative">
-              {/* the road: a dotted spine down the middle */}
-              <div
-                className="absolute left-1/2 top-2 bottom-2 -translate-x-1/2 w-px"
-                style={{
-                  backgroundImage:
-                    "repeating-linear-gradient(to bottom, rgba(235,179,77,0.35) 0 3px, transparent 3px 11px)",
-                }}
-              />
-
-              {items.map((item, idx) => {
-                const side = idx % 2 === 0 ? "left" : "right";
-                const isCurrent = idx === currentIdx;
-                const isSeen = seen.has(item.passageId);
-                const isOpen = openId === item.passageId;
-                const newModule = idx === 0 || items[idx - 1].module !== item.module;
+            <ol className="space-y-5">
+              {session.items.map((item, index) => {
+                const questions = questionsByOrdinal.get(item.ordinal) ?? [];
+                const startsModule = index === 0 || session.items[index - 1].module !== item.module;
                 return (
-                  <li key={item.passageId} ref={isCurrent ? currentRef : undefined}>
-                    {newModule && (
-                      <div className="relative flex items-center justify-center py-8">
-                        <div className="rounded-full border border-stone-800 bg-[#0b0b0f] px-4 py-1.5 font-sans text-[11px] uppercase tracking-[0.25em] text-stone-500">
+                  <li key={item.passageId}>
+                    {startsModule && (
+                      <div className="mb-3 mt-9 flex items-center gap-3 first:mt-0">
+                        <span className="font-sans text-xs font-semibold uppercase tracking-[0.2em] text-amber-400/70">
                           {item.module}
-                          {moduleComplete(item.module) && (
-                            <span className="ml-2 text-amber-400/90">✦ walked</span>
-                          )}
-                        </div>
+                        </span>
+                        <span className="h-px flex-1 bg-stone-800" />
                       </div>
                     )}
-
-                    <div
-                      className={`relative flex ${side === "left" ? "justify-start" : "justify-end"} py-3`}
-                    >
-                      {/* node marker on the spine */}
-                      <span
-                        className={`absolute left-1/2 top-8 -translate-x-1/2 z-10 flex h-5 w-5 items-center justify-center rounded-full border text-[10px] transition-colors ${
-                          isSeen
-                            ? "border-amber-500/80 bg-amber-400/90 text-[#0b0b0f]"
-                            : isCurrent
-                              ? "border-amber-400 bg-[#0b0b0f] text-amber-300 journey-glow"
-                              : "border-stone-700 bg-[#0b0b0f] text-stone-600"
-                        }`}
-                      >
-                        {isSeen ? "✓" : (ROLE_GLYPH[item.role] ?? "·")}
-                      </span>
-
-                      <button
-                        onClick={() => openNode(item)}
-                        className={`group w-[calc(50%-2.25rem)] text-left rounded-2xl border px-5 py-4 transition-all ${
-                          isOpen ? "w-full z-20" : ""
-                        } ${
-                          isCurrent
-                            ? "border-amber-800/80 bg-amber-950/20"
-                            : "border-stone-800 hover:border-stone-600 bg-stone-900/30 hover:bg-stone-900/60"
-                        } ${isSeen && !isOpen ? "opacity-70" : ""}`}
-                      >
-                        <div className="text-[11px] font-sans text-amber-200/60 mb-1.5 leading-snug">
-                          {item.transition}
-                        </div>
-                        <div
-                          className={`text-[15px] leading-relaxed ${isOpen ? "text-stone-200" : "text-stone-300 line-clamp-3"}`}
-                        >
-                          {isOpen ? (openText?.text ?? item.snippet) : item.snippet}
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <span className="text-xs font-sans text-stone-500 truncate">
-                            {ROLE_LABEL[item.role] ?? item.role} · {item.bookTitle}
-                          </span>
-                          {isOpen && openText && (
-                            <Link
-                              to={
-                                openText.spineIndex != null
-                                  ? `/book/${openText.bookId}/read?spine=${openText.spineIndex}`
-                                  : `/book/${openText.bookId}`
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              className="shrink-0 text-xs font-sans text-amber-300/90 hover:text-amber-200"
-                            >
-                              open in book →
-                            </Link>
-                          )}
-                        </div>
-                      </button>
-                    </div>
+                    <SourceCard
+                      item={item}
+                      reviewed={reviewed.has(item.passageId)}
+                      current={currentOrdinal === item.ordinal}
+                      onToggleReviewed={() => toggleReviewed(item.passageId)}
+                    />
+                    {questions.map((question) => (
+                      <div key={question.id} className="mt-4">
+                        <QuestionCard
+                          podId={session.podId}
+                          revision={session.revision}
+                          question={question}
+                          state={answers[question.id]}
+                          onStateChange={(nextState) =>
+                            setAnswers((current) => ({
+                              ...current,
+                              [question.id]: nextState,
+                            }))
+                          }
+                          onCorrect={() =>
+                            setReviewed((current) =>
+                              new Set(current).add(question.evidence.passageId),
+                            )
+                          }
+                        />
+                      </div>
+                    ))}
                   </li>
                 );
               })}
             </ol>
 
-            {/* the fork: where the road goes from here */}
             {adjacent.length > 0 && (
-              <div className="relative mt-4">
-                <svg
-                  viewBox="0 0 200 60"
-                  className="mx-auto block h-16 w-52"
-                  fill="none"
-                  aria-hidden
-                >
-                  <path
-                    d="M100 0 C100 18 60 28 30 54"
-                    stroke="rgba(235,179,77,0.35)"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 8"
-                  />
-                  <path
-                    d="M100 0 C100 18 140 28 170 54"
-                    stroke="rgba(235,179,77,0.35)"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 8"
-                  />
-                </svg>
-                <div className="flex gap-4">
-                  {adjacent.map((t) => (
+              <section className="mt-14 border-t border-stone-800 pt-8">
+                <p className="font-sans text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">
+                  Continue with another Pod
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  {adjacent.slice(0, 4).map((pod) => (
                     <Link
-                      key={t.id}
-                      to={`/journey/${t.id}`}
-                      className="group flex-1 rounded-2xl border border-stone-800 hover:border-amber-900/70 bg-stone-900/30 hover:bg-stone-900/60 px-5 py-4 transition-colors"
+                      key={pod.id}
+                      to={`/pod/${pod.id}`}
+                      className="rounded-2xl border border-stone-800 bg-stone-900/30 p-4 transition-colors hover:border-amber-900/70 hover:bg-stone-900/60"
                     >
-                      <div className="text-[11px] uppercase tracking-wider text-stone-600 font-sans mb-1">
-                        the road continues
-                      </div>
-                      <div className="text-base text-stone-200 group-hover:text-amber-100 transition-colors leading-snug">
-                        {t.label ?? "An unnamed thread"}
-                      </div>
-                      <div className="text-xs text-stone-500 font-sans mt-1">
-                        {t.size} passages · {t.bookCount} {t.bookCount === 1 ? "book" : "books"}
-                      </div>
+                      <h2 className="leading-snug text-stone-200">{pod.title}</h2>
+                      <p className="mt-2 font-sans text-xs text-stone-600">
+                        {pod.passageCount} {pod.passageCount === 1 ? "passage" : "passages"} ·{" "}
+                        {pod.bookCount} {pod.bookCount === 1 ? "book" : "books"} ·{" "}
+                        {pod.questionCount} {pod.questionCount === 1 ? "check" : "checks"}
+                      </p>
                     </Link>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
           </>
         )}
-      </div>
-
-      {/* continue: drift down the road to the glowing node */}
-      {currentIdx >= 0 && (
-        <div className="fixed bottom-0 inset-x-0 flex justify-center py-6 bg-gradient-to-t from-[#0b0b0f] via-[#0b0b0f]/85 to-transparent">
-          <button
-            onClick={scrollToCurrent}
-            className="rounded-full border border-amber-900/70 bg-amber-950/30 px-6 py-2.5 font-sans text-sm text-amber-200 hover:bg-amber-950/60 transition-colors"
-          >
-            continue the road →
-          </button>
-        </div>
-      )}
-
-      <style>{`
-        .journey-glow { box-shadow: 0 0 0 0 rgba(235,179,77,0.45); animation: journeyGlow 2.6s ease-in-out infinite; }
-        @keyframes journeyGlow {
-          0%, 100% { box-shadow: 0 0 6px 1px rgba(235,179,77,0.25); }
-          50% { box-shadow: 0 0 18px 5px rgba(235,179,77,0.45); }
-        }
-        .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-      `}</style>
+      </main>
     </div>
   );
 }

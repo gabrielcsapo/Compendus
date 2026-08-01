@@ -6,7 +6,7 @@
   "scripts": {
     "start": "pnpm run build && node --import tsx server.ts",
     "dev": "vite",
-    "build": "tsx scripts/build-worker.ts && tsx scripts/build-kernels.ts && react-flight-router build && tsx scripts/copy-migrations.ts",
+    "build": "tsx scripts/build-worker.ts && react-flight-router build && tsx scripts/copy-migrations.ts",
     "build:worker": "tsx scripts/build-worker.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

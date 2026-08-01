@@ -59,10 +59,6 @@ struct ContentView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var deepLinkedBook: DownloadedBook?
     @State private var showDataMigration = false
-    // Journeys is a first-class destination presented full-screen from the custom
-    // bottom bar (NOT a 6th TabView tab — a 6th tab triggers iOS's "More" overflow,
-    // which wraps tabs in an extra nav controller and shows a stray back chevron).
-    @State private var showJourneys = false
     #if targetEnvironment(macCatalyst)
     @State private var macSidebarSelection: MacSidebarItem = .deviceAll
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
@@ -275,7 +271,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             TabView(selection: $nav.selectedTab) {
                 DownloadsView()
-                    .tabItem { Label("Home", systemImage: "house") }
+                    .tabItem { Label("Today", systemImage: "house") }
                     .tag(0)
                     .toolbar(.hidden, for: .tabBar)
 
@@ -292,30 +288,26 @@ struct ContentView: View {
                 NavigationStack {
                     ProfileView()
                 }
-                    .tabItem { Label("Profile", systemImage: "person") }
+                    .tabItem { Label("Me", systemImage: "person") }
                     .tag(3)
                     .toolbar(.hidden, for: .tabBar)
 
                 WanderView()
                     .tabItem {
-                        Label("Wander", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                        Label("Explore", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                     }
                     .tag(4)
                     .toolbar(.hidden, for: .tabBar)
             }
 
-            // Integrated bottom bar: mini player + tab icons.
-            // Hidden on Wander (tag 4) for a full-screen, immersive experience.
-            // (Journeys is a full-screen cover, not a tab — see showJourneys.)
+            // Integrated bottom bar: mini player + five clear destinations.
+            // Hidden on Explore (tag 4) for a full-screen, immersive experience.
             if nav.selectedTab != 4 {
-                CustomBottomBar(selectedTab: $nav.selectedTab, showJourneys: $showJourneys)
+                CustomBottomBar(selectedTab: $nav.selectedTab)
                     .transition(.move(edge: .bottom))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: nav.selectedTab)
-        .fullScreenCover(isPresented: $showJourneys) {
-            JourneysView()
-        }
     }
 
     // MARK: - Deep Link
@@ -346,8 +338,6 @@ struct ContentView: View {
 
 struct CustomBottomBar: View {
     @Binding var selectedTab: Int
-    /// Journeys is presented full-screen (not a tab) — its bar item toggles this.
-    @Binding var showJourneys: Bool
     @Environment(AudiobookPlayer.self) private var player
     @Environment(ThemeManager.self) private var themeManager
     @Environment(ServerConfig.self) private var serverConfig
@@ -361,16 +351,15 @@ struct CustomBottomBar: View {
     private static let profileTabIndex = 3
 
     private let tabs: [TabItem] = [
-        TabItem(icon: "house", activeIcon: "house.fill", label: "Home"),
+        TabItem(icon: "house", activeIcon: "house.fill", label: "Today"),
         TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
         TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
-        TabItem(icon: "person", activeIcon: "person.fill", label: "Profile"),
+        TabItem(icon: "person", activeIcon: "person.fill", label: "Me"),
         TabItem(
             icon: "point.topleft.down.curvedto.point.bottomright.up",
             activeIcon: "point.topleft.down.curvedto.point.bottomright.up",
-            label: "Wander"
+            label: "Explore"
         ),
-        TabItem(icon: "signpost.right", activeIcon: "signpost.right.fill", label: "Journeys"),
     ]
 
     var body: some View {
@@ -385,16 +374,9 @@ struct CustomBottomBar: View {
             // Tab buttons
             HStack(spacing: 0) {
                 ForEach(0..<tabs.count, id: \.self) { index in
-                    // The last item (Journeys) opens a full-screen cover rather than
-                    // selecting a tab — keeps the TabView at 5 (no "More" overflow).
-                    let isJourneys = index == tabs.count - 1
-                    let active = isJourneys ? showJourneys : (selectedTab == index)
+                    let active = selectedTab == index
                     Button {
-                        if isJourneys {
-                            showJourneys = true
-                        } else {
-                            selectedTab = index
-                        }
+                        selectedTab = index
                     } label: {
                         VStack(spacing: 4) {
                             if index == Self.profileTabIndex {
@@ -414,6 +396,8 @@ struct CustomBottomBar: View {
                         .foregroundStyle(active ? themeManager.accentColor : .secondary)
                         .frame(maxWidth: .infinity)
                     }
+                    .accessibilityLabel(tabs[index].label)
+                    .accessibilityAddTraits(active ? .isSelected : [])
                 }
             }
             .padding(.top, 8)

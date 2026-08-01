@@ -60,7 +60,6 @@ const GROUPS: NavGroup[] = [
         badge: (c) => c.jobErrors,
         badgeTone: "attention",
       },
-      { to: "/admin/fleet", label: "Fleet", match: (p) => p.startsWith("/admin/fleet") },
       { to: "/admin/storage", label: "Storage", match: (p) => p.startsWith("/admin/storage") },
     ],
   },

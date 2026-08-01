@@ -1,20 +1,14 @@
 /**
- * Post-extraction processing — the second half of the analysis pipeline,
- * shared by BOTH execution paths:
- *
- *   - local: pipeline.ts runs GLiNER inline and calls applyExtraction()
- *   - fleet (fire-and-continue): pipeline.ts enqueues extract-entities and
- *     RETURNS; when a device posts the result, the kind's apply hook calls
- *     applyExtraction() and the book finalizes in the background.
+ * Post-extraction processing — the second half of the analysis pipeline.
+ * pipeline.ts runs GLiNER inline and calls applyExtraction().
  *
  * Everything downstream of "we have entity spans per passage" lives here:
  * mention insertion + cross-book resolution, typed relationship derivation,
  * YAKE concept keyphrases, canonical-mapping rebuild, stats, and the
  * book_analysis status finalize.
  *
- * Import-cycle guard: this module must never import pipeline.ts or
- * fabric/kinds.ts — kinds.ts imports US (for its apply hook) and pipeline
- * imports us too.
+ * Import-cycle guard: this module must never import pipeline.ts (it imports
+ * us).
  */
 import { randomUUID } from "crypto";
 import { and, eq, lt } from "drizzle-orm";
@@ -41,7 +35,7 @@ export interface ExtractedSpan {
 export interface ApplyExtractionInput {
   bookId: string;
   /** Passage ids in extraction order (the enqueue payload order) — texts are
-   * read from the DB here, so fabric payloads stay light (ids, not prose). */
+   * read from the DB here (ids, not prose). */
   passageIds: string[];
   /** Per-passage entity spans, aligned with `passageIds`. */
   entities: ExtractedSpan[][];
@@ -64,11 +58,9 @@ export interface ApplyExtractionResult {
  * longer exist — the book was re-analyzed while this result was in flight, so
  * applying would anchor mentions to deleted rows. The newer run owns the book.
  *
- * SERIALIZED: fire-and-continue means several fleet results can land at once
- * (each apply runs inside its result POST), stacking EntityResolver embeds on
- * top of the queue's own embedding work — concurrent applies OOM-killed the
- * 2-core container. One apply at a time keeps the memory envelope flat; the
- * fleet items just wait a few extra seconds in their HTTP requests.
+ * SERIALIZED: concurrent applies stack EntityResolver embeds on top of the
+ * queue's own embedding work and once OOM-killed the old 2-core container.
+ * One apply at a time keeps the memory envelope flat regardless of caller.
  */
 let applyChain: Promise<unknown> = Promise.resolve();
 
@@ -157,7 +149,7 @@ async function applyExtractionInner(
       // Whisper mangles proper nouns; transcripts pay a higher confidence
       // bar so mis-heard names don't pollute the canonical graph.
       if (sourceKind === "transcript" && ent.score < 0.65) continue;
-      // Fleet results carry type as a validated string; the resolver treats
+      // Extraction results carry type as a validated string; the resolver treats
       // unknown types like GLiNER's own labels (same cast the pipeline used).
       const entityId = await resolver.resolve({ name: ent.name, type: ent.type as EntityType });
       touched.add(entityId);
@@ -212,7 +204,7 @@ async function applyExtractionInner(
   // untouched, only the derived mapping + count caches change. DEBOUNCED:
   // both are O(corpus) synchronous better-sqlite3 work on the main thread —
   // at 40k+ passages they block the event loop for minutes, taking the whole
-  // server offline (HTTP dead, fleet backoffs) once per applied book. They're
+  // server offline (HTTP dead) once per applied book. They're
   // derived caches, so intermediate books finalize with slightly-stale
   // canonical counts that the next recompute trues up.
   if (Date.now() - lastGlobalRecompute > RECOMPUTE_EVERY_MS) {
@@ -236,7 +228,7 @@ const CONCEPT_MAX_MENTIONS = 5;
  * Run YAKE over the whole book, keep the distinctive *multi-word* concepts, and
  * ground each to the passages that contain it. Single-word phrases are dropped:
  * they overlap GLiNER's named entities and are where its stopword noise lives.
- * Operates on passage chunks (not source sections) so the fleet apply path —
+ * Operates on passage chunks (not source sections) so every caller —
  * which only has the enqueue payload — produces identical concepts to local.
  * Returns the number of grounded mentions written.
  */

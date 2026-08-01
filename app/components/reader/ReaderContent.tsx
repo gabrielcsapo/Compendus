@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageContent, ReaderHighlight, FullTextContentResponse } from "@/lib/reader/types";
 import type { ReaderSettings } from "@/lib/reader/settings";
 import { THEMES, FONTS } from "@/lib/reader/settings";
+import { AudiobookPlayerView } from "../audio/AudiobookPlayerView";
 import type { AudioChapter } from "@/lib/types";
 import { HighlightToolbar, HighlightEditToolbar } from "./HighlightToolbar";
 import {
@@ -11,7 +12,6 @@ import {
   applyHighlightsToDOM,
   calculateToolbarPosition,
 } from "./utils/highlightUtils";
-import { AudioLyrics } from "./AudioLyrics";
 import { resolveInternalLink, getFootnoteContent } from "@/actions/reader";
 
 /**
@@ -177,8 +177,8 @@ export function ReaderContent({
   textPageIndex,
   onTextTotalPagesChange,
   onChapterChange,
-  audioChapters,
-  audioDuration,
+  audioChapters: _audioChapters,
+  audioDuration: _audioDuration,
   coverPath,
   highlights,
   onAddHighlight,
@@ -272,14 +272,14 @@ export function ReaderContent({
       );
     case "audio":
       return (
-        <AudioContent
+        <AudiobookPlayerView
           content={content!}
           settings={settings}
-          chapters={audioChapters}
-          totalDuration={audioDuration}
           bookId={bookId}
           hasTranscript={hasTranscript}
           coverPath={coverPath}
+          isJumpNavigation={isJumpNavigation}
+          onNavigateToPosition={onNavigateToPosition}
         />
       );
     default:
@@ -1814,315 +1814,6 @@ function ImageContent({
           100% { opacity: 0; }
         }
       `}</style>
-    </div>
-  );
-}
-
-/**
- * Audio content renderer (Audiobooks)
- */
-function AudioContent({
-  content,
-  settings,
-  chapters: _chapters,
-  totalDuration,
-  bookId,
-  hasTranscript,
-  coverPath,
-}: {
-  content: PageContent;
-  settings: ReaderSettings;
-  chapters?: AudioChapter[];
-  totalDuration?: number;
-  bookId?: string;
-  hasTranscript?: boolean;
-  coverPath?: string;
-}) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(content.startTime || 0);
-  const [showLyrics, setShowLyrics] = useState(false);
-  const [volume, setVolume] = useState(settings.audioVolume);
-  const [browserDuration, setBrowserDuration] = useState(0);
-
-  const theme = THEMES[settings.theme];
-  const duration = totalDuration || browserDuration || content.endTime || 0;
-
-  // Sync playback speed
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = settings.audioPlaybackSpeed;
-    }
-  }, [settings.audioPlaybackSpeed]);
-
-  // Sync volume
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-    }
-  }, [volume]);
-
-  // Jump to chapter start time
-  useEffect(() => {
-    if (audioRef.current && content.startTime !== undefined) {
-      audioRef.current.currentTime = content.startTime;
-    }
-  }, [content.startTime]);
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
-    }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
-  };
-
-  const skipBack = () => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 15);
-    }
-  };
-
-  const skipForward = () => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 30);
-    }
-  };
-
-  const seekTo = (time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    }
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const coverUrl = bookId && coverPath ? `/covers/${bookId}.jpg` : null;
-
-  return (
-    <div className="h-full flex flex-col relative overflow-hidden" style={{ color: "#fff" }}>
-      {/* Vibrant blurred cover background (Spotify-style) */}
-      {coverUrl && (
-        <img
-          src={coverUrl}
-          aria-hidden="true"
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
-          style={{
-            filter: "blur(60px) saturate(1.8)",
-            transform: "scale(1.15)",
-            opacity: 0.7,
-          }}
-        />
-      )}
-      {/* Dark gradient overlay — heavier at bottom for controls readability */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            "linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.20) 40%, rgba(0,0,0,0.60) 100%)",
-        }}
-      />
-
-      <audio
-        ref={audioRef}
-        src={content.audioUrl}
-        preload="metadata"
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={() => {
-          if (audioRef.current && isFinite(audioRef.current.duration)) {
-            setBrowserDuration(audioRef.current.duration);
-          }
-        }}
-        onDurationChange={() => {
-          if (audioRef.current && isFinite(audioRef.current.duration)) {
-            setBrowserDuration(audioRef.current.duration);
-          }
-        }}
-      />
-
-      {/* Scrollable content area */}
-      <div className="relative flex-1 flex flex-col items-center justify-center gap-6 px-8 py-10 overflow-y-auto">
-        {/* Cover art */}
-        {coverUrl && !showLyrics && (
-          <img
-            src={coverUrl}
-            alt="Album art"
-            className="w-56 h-56 object-cover rounded-xl shadow-2xl flex-shrink-0"
-            style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
-          />
-        )}
-
-        {/* Lyrics display */}
-        {showLyrics && bookId && (
-          <div className="w-full max-w-lg">
-            <AudioLyrics bookId={bookId} currentTime={currentTime} onSeek={seekTo} theme={theme} />
-          </div>
-        )}
-
-        {/* Chapter info */}
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-1 drop-shadow">
-            {content.chapterTitle || "Now Playing"}
-          </h2>
-          {content.chapter && (
-            <p className="text-sm" style={{ color: "rgba(255,255,255,0.65)" }}>
-              Chapter {content.chapter.index + 1}
-            </p>
-          )}
-        </div>
-
-        {/* Progress bar */}
-        <div className="w-full max-w-lg">
-          <input
-            type="range"
-            min={0}
-            max={duration}
-            value={currentTime}
-            onChange={handleSeek}
-            className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-            style={{ accentColor: "#fff" }}
-          />
-          <div
-            className="flex justify-between text-xs mt-1.5"
-            style={{ color: "rgba(255,255,255,0.65)" }}
-          >
-            <span>{formatTime(currentTime)}</span>
-            <span>-{formatTime(Math.max(0, duration - currentTime))}</span>
-          </div>
-        </div>
-
-        {/* Playback controls */}
-        <div className="flex items-center gap-8">
-          <button
-            onClick={skipBack}
-            className="opacity-90 hover:opacity-100 transition-opacity"
-            aria-label="Skip back 15 seconds"
-          >
-            <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
-              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">
-                15
-              </text>
-            </svg>
-          </button>
-
-          <button
-            onClick={togglePlay}
-            className="opacity-95 hover:opacity-100 transition-opacity"
-            aria-label={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? (
-              <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" />
-              </svg>
-            ) : (
-              <svg className="w-16 h-16" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" />
-              </svg>
-            )}
-          </button>
-
-          <button
-            onClick={skipForward}
-            className="opacity-90 hover:opacity-100 transition-opacity"
-            aria-label="Skip forward 30 seconds"
-          >
-            <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
-              <text x="9" y="15" fontSize="5.5" fontWeight="bold" fill="currentColor">
-                30
-              </text>
-            </svg>
-          </button>
-        </div>
-
-        {/* Volume + lyrics row */}
-        <div className="flex items-center justify-between w-full max-w-lg gap-4">
-          {/* Volume */}
-          <div className="flex items-center gap-2 flex-1">
-            <svg
-              className="w-4 h-4 flex-shrink-0 opacity-70"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path d="M3 9v6h4l5 5V4L7 9H3z" />
-            </svg>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="flex-1 h-1 rounded-lg appearance-none cursor-pointer"
-              style={{ accentColor: "#fff" }}
-            />
-            <svg
-              className="w-4 h-4 flex-shrink-0 opacity-70"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-            </svg>
-          </div>
-
-          {/* Lyrics toggle */}
-          {hasTranscript && bookId && (
-            <button
-              onClick={() => setShowLyrics(!showLyrics)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
-              style={{
-                backgroundColor: showLyrics ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)",
-                color: "#fff",
-              }}
-              title={showLyrics ? "Hide lyrics" : "Show lyrics"}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              Lyrics
-            </button>
-          )}
-        </div>
-
-        {/* Speed */}
-        <p className="text-xs" style={{ color: "rgba(255,255,255,0.50)" }}>
-          {settings.audioPlaybackSpeed}x speed
-        </p>
-      </div>
     </div>
   );
 }

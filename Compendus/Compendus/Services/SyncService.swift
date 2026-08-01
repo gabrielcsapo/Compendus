@@ -15,7 +15,7 @@ import CCReader
 @Observable
 @MainActor
 class SyncService {
-    static let backgroundTaskIdentifier = "com.compendus.data-sync"
+    nonisolated static let backgroundTaskIdentifier = "com.compendus.data-sync"
 
     let apiService: APIService
     var modelContainer: ModelContainer?
@@ -29,6 +29,13 @@ class SyncService {
 
     init(apiService: APIService) {
         self.apiService = apiService
+    }
+
+    /// Immediately reflect a queued Set Aside edit in Today while the durable
+    /// update syncs in the background.
+    func hideRemoteBookFromToday(bookId: String) {
+        remoteBooksWithProgress.removeAll { $0.id == bookId }
+        remoteBooksWithHighlights.removeAll { $0.id == bookId }
     }
 
     // MARK: - Per-Profile Last Sync Time
@@ -89,6 +96,7 @@ class SyncService {
     func sync(container: ModelContainer) async -> Bool {
         guard !isSyncing else { return false }
         guard apiService.config.isConfigured, apiService.config.isProfileSelected else { return false }
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else { return false }
         guard let profileId = apiService.config.selectedProfileId else { return false }
 
         isSyncing = true
@@ -99,7 +107,7 @@ class SyncService {
 
         print("[Sync] ========== Starting sync ==========")
         print("[Sync] Profile: \(profileId)")
-        print("[Sync] Server: \(apiService.config.serverURL ?? "nil")")
+        print("[Sync] Server: \(apiService.config.serverURL)")
         print("[Sync] Since: \(since?.description ?? "nil (full sync)")")
 
         // Wrap the entire sync in a 60-second timeout to prevent indefinite hangs
@@ -175,9 +183,12 @@ class SyncService {
     private func pullReadingProgress(since: Date?, profileId: String, modelContext: ModelContext) async throws {
         // Always fetch all reading progress (no `since` filter) so we can discover
         // remote books with progress that aren't downloaded locally. The reading
-        // progress dataset is small (one record per book the user has interacted with).
-        // The `since`-based conflict resolution still applies for local book updates.
-        guard let url = apiService.config.apiURL("/api/sync/reading-progress") else {
+        // progress rows and device positions remain complete. Book metadata is only
+        // needed for active, unfinished remote books; asking the server for that
+        // subset avoids decoding a full Book for every historical progress row.
+        // Servers that predate this query option safely ignore it and retain the old
+        // response shape.
+        guard let url = apiService.config.apiURL("/api/sync/reading-progress?bookMetadata=active") else {
             print("[Sync:Pull:Progress] Skipped — no API URL")
             return
         }
@@ -205,7 +216,8 @@ class SyncService {
                 // Collect books with progress that aren't downloaded locally
                 if let book = record.book,
                    (record.readingProgress ?? 0) > 0,
-                   !(record.isRead ?? false) {
+                   !(record.isRead ?? false),
+                   !(record.isSetAside ?? false) {
                     remoteBooks.append(book)
                 }
                 continue
@@ -222,6 +234,7 @@ class SyncService {
                 }
                 localBook.lastReadAt = record.lastReadAt
                 localBook.isRead = record.isRead ?? false
+                localBook.isSetAside = record.isSetAside ?? false
                 if let rating = record.rating {
                     localBook.rating = rating
                 }
@@ -517,7 +530,7 @@ class SyncService {
         for book in books {
             let marker = dirtyMarker(book)
             let willPush = marker.map { since == nil || $0 > since! } ?? false
-            print("[Sync:Push:Progress]   Book '\(book.title ?? book.id)' — progress=\(book.readingProgress), marker=\(marker?.description ?? "nil"), lastReadAt=\(book.lastReadAt?.description ?? "nil"), willPush=\(willPush)")
+            print("[Sync:Push:Progress]   Book '\(book.title)' — progress=\(book.readingProgress), marker=\(marker?.description ?? "nil"), lastReadAt=\(book.lastReadAt?.description ?? "nil"), willPush=\(willPush)")
         }
 
         // Filter to books modified since last sync
@@ -545,13 +558,14 @@ class SyncService {
             // Stamp updatedAt at send time. The server records this device's own
             // per-device row (keyed by deviceId), so a device never clobbers
             // another device's position; updatedAt only orders this device's own
-            // writes and gates book-level fields (isRead/rating/review).
+            // writes and gates book-level fields (isRead/isSetAside/rating/review).
             let body = ServerReadingProgress(
                 bookId: book.id,
                 readingProgress: book.readingProgress,
                 lastPosition: book.lastPosition,
                 lastReadAt: book.lastReadAt,
                 isRead: book.isRead,
+                isSetAside: book.isSetAside,
                 rating: book.rating,
                 review: book.review,
                 updatedAt: Date(),
@@ -564,7 +578,7 @@ class SyncService {
                 try await putJSON(url: url, body: body)
                 pushed += 1
                 print("[Sync:Push:Progress]   ✓ Success")
-            } catch APIError.serverError(let code, let msg) where code == 404 {
+            } catch APIError.serverError(let code, _) where code == 404 {
                 skippedFK += 1
                 print("[Sync:Push:Progress]   ✗ 404 — book not on server, skipping")
             } catch {
@@ -723,15 +737,6 @@ class SyncService {
 
     // MARK: - HTTP Helpers
 
-    /// ISO8601 formatter that handles fractional seconds (JavaScript's toISOString() includes .000)
-    private static let iso8601WithFractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let iso8601Basic = ISO8601DateFormatter()
-
     private func fetchJSON<T: Decodable>(url: URL) async throws -> T {
         var request = URLRequest(url: url)
         if let profileId = apiService.config.selectedProfileId {
@@ -739,7 +744,7 @@ class SyncService {
         }
 
         do {
-            let (data, response) = try await apiService.session.data(for: request)
+            let (data, response) = try await apiService.performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -752,8 +757,10 @@ class SyncService {
             decoder.dateDecodingStrategy = .custom { decoder in
                 let container = try decoder.singleValueContainer()
                 let string = try container.decode(String.self)
-                if let date = Self.iso8601WithFractional.date(from: string) { return date }
-                if let date = Self.iso8601Basic.date(from: string) { return date }
+                let fractional = ISO8601DateFormatter()
+                fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = fractional.date(from: string) { return date }
+                if let date = ISO8601DateFormatter().date(from: string) { return date }
                 throw DecodingError.dataCorruptedError(
                     in: container,
                     debugDescription: "Invalid ISO8601 date: \(string)"
@@ -789,7 +796,7 @@ class SyncService {
         }
 
         do {
-            let (data, response) = try await apiService.session.data(for: request)
+            let (data, response) = try await apiService.performDataRequest(request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
             }
@@ -870,6 +877,7 @@ private struct ServerReadingProgress: Codable {
     let lastPosition: String?
     let lastReadAt: Date?
     let isRead: Bool?
+    let isSetAside: Bool?
     let rating: Int?
     let review: String?
     let updatedAt: Date

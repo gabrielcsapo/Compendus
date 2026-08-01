@@ -25,6 +25,7 @@ struct AudiobookPlayerView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var showingChapters = false
+    @State private var scrubberDraft: Double?
     /// Brief visual confirmation after the user taps the bookmark button —
     /// flips the SF Symbol to `.fill` for ~1.2s before fading back.
     @State private var justBookmarked = false
@@ -50,7 +51,6 @@ struct AudiobookPlayerView: View {
     @State private var loadedTranscript: Transcript?
     @State private var showBookDetail = false
     @State private var showsChrome = false
-    @State private var chromeHideTask: Task<Void, Never>? = nil
     @State private var showingTranscribeChooser = false
     /// When live transcribing, we pause playback until the transcript has
     /// buffered at least 30 s ahead of this position, then auto-resume.
@@ -199,42 +199,51 @@ struct AudiobookPlayerView: View {
                         VStack(spacing: 10) {
                             Spacer(minLength: 0)
 
-                            // Circular scrubber with cover art inside
-                            let scrubberSize = min(geometry.size.width - 40, geometry.size.height * 0.45)
-                            CircularScrubberView(
-                                currentTime: player.currentTime,
-                                duration: player.duration,
-                                onSeek: { player.seek(to: $0) },
-                                coverImage: CoverImageDecoder.decode(bookId: book.id, data: book.coverData),
-                                bookFormat: book.format,
-                                chapters: book.chapters ?? []
-                            )
-                            .frame(width: scrubberSize, height: scrubberSize)
+                            // Familiar artwork + linear timeline. Dragging keeps
+                            // a local preview and performs one seek on release,
+                            // avoiding repeated player seeks and haptics.
+                            let artworkSize = min(geometry.size.width - 88, geometry.size.height * 0.36)
+                            LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
+                            .frame(width: artworkSize, height: artworkSize)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
                             .onTapGesture { showBookDetail = true }
-                            // P3.2 — long-press cover for quick moment bookmark.
-                            // Spotify / Audible-style affordance.
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                bookmarkCurrentMoment()
-                            }
+
+                            Slider(
+                                value: Binding(
+                                    get: { scrubberDraft ?? player.currentTime },
+                                    set: { scrubberDraft = $0 }
+                                ),
+                                in: 0...max(1, player.duration),
+                                onEditingChanged: { isEditing in
+                                    if !isEditing, let destination = scrubberDraft {
+                                        player.seek(to: destination)
+                                        scrubberDraft = nil
+                                    }
+                                }
+                            )
+                            .tint(.accentColor)
+                            .frame(maxWidth: artworkSize)
+                            .accessibilityLabel("Playback position")
 
                             // Elapsed / remaining time — constrained to the
-                            // scrubber width and centered so the right-aligned
+                            // timeline width and centered so the right-aligned
                             // "remaining" label can't run off the screen edge.
                             HStack {
-                                Text(formatTime(player.currentTime))
+                                let displayedTime = scrubberDraft ?? player.currentTime
+                                Text(formatTime(displayedTime))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
                                 Spacer()
-                                Text("-\(formatTime(max(0, player.duration - player.currentTime)))")
+                                Text("-\(formatTime(max(0, player.duration - displayedTime)))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
                             }
-                            .frame(maxWidth: scrubberSize)
+                            .frame(maxWidth: artworkSize)
 
-                            // Title, author, narrator — tap to reveal/hide the
-                            // chrome row (transcribe / AirPlay / sleep / stop).
+                            // Title, author, narrator
                             VStack(spacing: 4) {
                                 Text(book.title)
                                     .font(.title3)
@@ -252,11 +261,7 @@ struct AudiobookPlayerView: View {
                                     .lineLimit(2)
                             }
                             .padding(.horizontal, 20)
-                            .contentShape(Rectangle())
-                            .onTapGesture { toggleChrome() }
-                            .accessibilityAction(named: showsChrome ? "Hide more actions" : "Show more actions") {
-                                toggleChrome()
-                            }
+                            .accessibilityElement(children: .combine)
 
                             // Current chapter — primary navigation affordance
                             if let chapter = player.currentChapter {
@@ -569,8 +574,12 @@ struct AudiobookPlayerView: View {
 
     private var playerControls: some View {
         VStack(spacing: 0) {
-            // 6-button transport row (chapters, bookmark, back, play, fwd, speed)
+            // The five controls needed during ordinary listening.
             HStack {
+                Spacer()
+
+                chaptersButton
+
                 Spacer()
 
                 // Skip back — configurable interval
@@ -640,20 +649,31 @@ struct AudiobookPlayerView: View {
 
                 Spacer()
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, 4)
 
-            // Utility row — always visible. Corners: chapters/detect (sparkle)
-            // far-left, bookmark far-right. Middle: dictation (transcribe),
-            // AirPlay, sleep timer, stop.
-            HStack(spacing: 0) {
+            Button {
+                toggleChrome()
+            } label: {
+                HStack(spacing: 5) {
+                    Text(showsChrome ? "Fewer controls" : "More controls")
+                    Image(systemName: showsChrome ? "chevron.down" : "ellipsis")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(height: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows sleep timer, AirPlay, bookmarks, transcription, and stop")
+
+            // Less-frequent tools stay one explicit tap away instead of
+            // competing with transport controls on every listening session.
+            if showsChrome {
+                HStack(spacing: 0) {
                 // Each item takes an equal slot (.frame(maxWidth: .infinity)) so
                 // the icons are spaced uniformly regardless of their own widths
                 // (e.g. the sleep timer's optional countdown, the invisible
-                // AirPlay view). Sparkle far-left, bookmark far-right.
-
-                // Sparkle / chapters — left corner
-                chaptersButton
-                    .frame(maxWidth: .infinity)
+                // AirPlay view). Stop is far-left, bookmark far-right.
 
                 // Stop
                 Button {
@@ -716,6 +736,8 @@ struct AudiobookPlayerView: View {
                 } // HStack
                 .padding(.horizontal, 4)
                 .padding(.bottom, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .padding(.horizontal, 20)
         .padding(.bottom)
@@ -756,23 +778,6 @@ struct AudiobookPlayerView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
             showsChrome.toggle()
         }
-        if showsChrome {
-            scheduleChromeHide()
-        } else {
-            chromeHideTask?.cancel()
-            chromeHideTask = nil
-        }
-    }
-
-    private func scheduleChromeHide() {
-        chromeHideTask?.cancel()
-        chromeHideTask = Task {
-            try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled else { return }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                showsChrome = false
-            }
-        }
     }
 
     // MARK: - Sleep Timer
@@ -782,9 +787,11 @@ struct AudiobookPlayerView: View {
         let fireDate = Date().addingTimeInterval(Double(minutes) * 60)
         sleepTimerFireDate = fireDate
         sleepTimer = Timer.scheduledTimer(withTimeInterval: Double(minutes) * 60, repeats: false) { _ in
-            player.pause()
-            sleepTimerFireDate = nil
-            sleepTimer = nil
+            Task { @MainActor in
+                player.pause()
+                sleepTimerFireDate = nil
+                sleepTimer = nil
+            }
         }
     }
 
@@ -799,9 +806,11 @@ struct AudiobookPlayerView: View {
         let fireDate = Date().addingTimeInterval(secondsRemaining)
         sleepTimerFireDate = fireDate
         sleepTimer = Timer.scheduledTimer(withTimeInterval: secondsRemaining, repeats: false) { _ in
-            player.pause()
-            sleepTimerFireDate = nil
-            sleepTimer = nil
+            Task { @MainActor in
+                player.pause()
+                sleepTimerFireDate = nil
+                sleepTimer = nil
+            }
         }
     }
 
@@ -1034,15 +1043,16 @@ struct ChaptersListView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                List(chapters) { chapter in
+                List(Array(chapters.enumerated()), id: \.element.id) { index, chapter in
+                    let isCurrent = index == currentChapterIndex
                     Button {
                         onSelect(chapter)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(chapter.title)
-                                    .foregroundStyle(isCurrentChapter(chapter) ? themeManager.accentColor : Color.primary)
-                                    .fontWeight(isCurrentChapter(chapter) ? .semibold : .regular)
+                                    .foregroundStyle(isCurrent ? themeManager.accentColor : Color.primary)
+                                    .fontWeight(isCurrent ? .semibold : .regular)
 
                                 HStack(spacing: 8) {
                                     Text(chapter.startTimeDisplay)
@@ -1050,7 +1060,7 @@ struct ChaptersListView: View {
                                         .foregroundStyle(.secondary)
 
                                     // Chapter progress indicator
-                                    if let progress = chapterProgress(chapter) {
+                                    if let progress = chapterProgress(at: index) {
                                         ProgressView(value: progress)
                                             .frame(width: 50)
                                             .tint(themeManager.accentColor)
@@ -1060,7 +1070,7 @@ struct ChaptersListView: View {
 
                             Spacer()
 
-                            if isCurrentChapter(chapter) {
+                            if isCurrent {
                                 Image(systemName: "speaker.wave.2.fill")
                                     .foregroundStyle(themeManager.accentColor)
                                     .symbolEffect(.variableColor.iterative, isActive: true)
@@ -1072,7 +1082,8 @@ struct ChaptersListView: View {
                 .onAppear {
                     // Scroll to the current chapter so users don't land on
                     // Chapter 1 when they're 46 chapters in.
-                    if let current = chapters.first(where: { isCurrentChapter($0) }) {
+                    if let index = currentChapterIndex {
+                        let current = chapters[index]
                         // Defer slightly so the List has time to lay out before
                         // we scroll — otherwise the anchor doesn't take effect.
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -1095,15 +1106,15 @@ struct ChaptersListView: View {
         }
     }
 
-    private func isCurrentChapter(_ chapter: Chapter) -> Bool {
-        guard let index = chapters.firstIndex(where: { $0.id == chapter.id }) else { return false }
-        let nextChapterStart = index + 1 < chapters.count ? chapters[index + 1].startTime : Double.infinity
-        return currentTime >= chapter.startTime && currentTime < nextChapterStart
+    private var currentChapterIndex: Int? {
+        guard !chapters.isEmpty else { return nil }
+        return chapters.lastIndex { $0.startTime <= currentTime } ?? 0
     }
 
     /// Calculate the progress within a chapter (0.0 to 1.0)
-    private func chapterProgress(_ chapter: Chapter) -> Double? {
-        guard let index = chapters.firstIndex(where: { $0.id == chapter.id }) else { return nil }
+    private func chapterProgress(at index: Int) -> Double? {
+        guard chapters.indices.contains(index) else { return nil }
+        let chapter = chapters[index]
         let nextChapterStart = index + 1 < chapters.count ? chapters[index + 1].startTime : totalDuration
         let chapterDuration = nextChapterStart - chapter.startTime
 

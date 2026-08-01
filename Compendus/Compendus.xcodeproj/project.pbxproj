@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		36EA78AEF80572E668BF61EC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3198DB17E9FF90C3612D619A /* Foundation.framework */; };
+		A1B2C3D4E5F60718293A4B5C /* OfflineHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5D /* OfflineHardeningTests.swift */; };
 		AA00000001000002PTTSMDL0 /* KokoroModel in Resources */ = {isa = PBXBuildFile; fileRef = AA00000001000001PTTSMDL0 /* KokoroModel */; };
 		F91E18572F3679000029A1F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F91E18582F3679000029A1F0 /* ZIPFoundation */; };
 		F91E18752F37E6270029A1F0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F91E18742F37E6270029A1F0 /* WidgetKit.framework */; };
@@ -53,6 +54,7 @@
 /* Begin PBXFileReference section */
 		3198DB17E9FF90C3612D619A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		3D17E6D8AC7806D10F5B92E4 /* CompendusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CompendusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F60718293A4B5D /* OfflineHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineHardeningTests.swift; sourceTree = "<group>"; };
 		AA00000001000001PTTSMDL0 /* KokoroModel */ = {isa = PBXFileReference; lastKnownFileType = folder; path = KokoroModel; sourceTree = "<group>"; };
 		F91E180A2F366F9C0029A1F0 /* Compendus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Compendus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F91E18732F37E6270029A1F0 /* CompendusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CompendusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -133,6 +135,7 @@
 		0A957213575147E9065818B7 /* CompendusTests */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F60718293A4B5D /* OfflineHardeningTests.swift */,
 			);
 			path = CompendusTests;
 			sourceTree = SOURCE_ROOT;
@@ -324,6 +327,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F60718293A4B5C /* OfflineHardeningTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -424,10 +428,12 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Compendus/Info.plist;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Compendus uses speech recognition to generate transcripts for audiobook lyrics display.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "Launch Screen";
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -438,7 +444,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-lc++";
-				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus;
+				PRODUCT_BUNDLE_IDENTIFIER = com.csapo.Compendus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -483,10 +489,12 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Compendus/Info.plist;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Compendus uses speech recognition to generate transcripts for audiobook lyrics display.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = NO;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = "Launch Screen";
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -497,7 +505,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "-lc++";
-				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus;
+				PRODUCT_BUNDLE_IDENTIFIER = com.csapo.Compendus;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -550,7 +558,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = LXUHPDSG76;
+				DEVELOPMENT_TEAM = PYQ4EQ49YL;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -612,7 +620,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = LXUHPDSG76;
+				DEVELOPMENT_TEAM = PYQ4EQ49YL;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -652,7 +660,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus.CompendusWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.csapo.Compendus.CompendusWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = auto;
@@ -689,7 +697,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.gabrielcsapo.Compendus.CompendusWidget;
+				PRODUCT_BUNDLE_IDENTIFIER = com.csapo.Compendus.CompendusWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = auto;

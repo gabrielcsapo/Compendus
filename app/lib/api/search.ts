@@ -50,6 +50,7 @@ interface ApiBook {
   chapters: ApiChapter[] | null;
   hasTranscript: boolean;
   isRead: boolean;
+  isSetAside: boolean;
   rating: number | null;
   review: string | null;
   readingProgress: number | null;
@@ -101,7 +102,7 @@ interface ApiErrorResponse {
 
 /**
  * Transform internal Book to public API format.
- * When userState is provided, reading state fields (isRead, rating, review)
+ * When userState is provided, reading state fields (isRead, isSetAside, rating, review)
  * come from userBookState instead of the deprecated columns on books.
  */
 export function toApiBook(
@@ -109,7 +110,13 @@ export function toApiBook(
   baseUrl: string,
   userState?: Pick<
     UserBookState,
-    "isRead" | "rating" | "review" | "readingProgress" | "lastReadAt" | "lastPosition"
+    | "isRead"
+    | "isSetAside"
+    | "rating"
+    | "review"
+    | "readingProgress"
+    | "lastReadAt"
+    | "lastPosition"
   > | null,
 ): ApiBook {
   // Parse chapters JSON if present
@@ -151,6 +158,7 @@ export function toApiBook(
     chapters,
     hasTranscript: !!book.transcriptPath,
     isRead: userState ? (userState.isRead ?? false) : (book.isRead ?? false),
+    isSetAside: userState?.isSetAside ?? false,
     rating: userState ? (userState.rating ?? null) : (book.rating ?? null),
     review: userState ? (userState.review ?? null) : (book.review ?? null),
     readingProgress: userState?.readingProgress ?? null,
@@ -172,7 +180,13 @@ async function getUserBookStates(
     string,
     Pick<
       UserBookState,
-      "isRead" | "rating" | "review" | "readingProgress" | "lastReadAt" | "lastPosition"
+      | "isRead"
+      | "isSetAside"
+      | "rating"
+      | "review"
+      | "readingProgress"
+      | "lastReadAt"
+      | "lastPosition"
     >
   >
 > {
@@ -182,6 +196,7 @@ async function getUserBookStates(
     .select({
       bookId: userBookState.bookId,
       isRead: userBookState.isRead,
+      isSetAside: userBookState.isSetAside,
       rating: userBookState.rating,
       review: userBookState.review,
       readingProgress: userBookState.readingProgress,

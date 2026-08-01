@@ -1,38 +1,16 @@
 "use client";
 
-import { useState, useEffect, useRef, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-flight-router/client";
-import { getCoverUrl } from "../lib/cover";
-import { getBooks, getBooksCount, getUnmatchedBooksCount, getFormatCounts } from "../actions/books";
+import type { ReactNode } from "react";
+import { Link } from "react-flight-router/client";
+import type { getBooks, getFormatCounts } from "../actions/books";
 import { SeriesCard } from "../components/SeriesCard";
 import { BookCover } from "../components/BookCover";
-import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/series";
-import { getExploreData, type ExploreData } from "../actions/explore";
+import type { ExploreData } from "../actions/explore";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
 import { LibraryExploreView } from "../components/LibraryExploreView";
 import { SortDropdown, type SortOption } from "../components/SortDropdown";
 import { TypeTabs, type TypeFilter } from "../components/TypeTabs";
 import { FormatDropdown } from "../components/FormatDropdown";
-import type { BookType } from "../lib/book-types";
-
-const BOOKS_PER_PAGE = 24;
-
-function getSortParams(sort: SortOption): {
-  orderBy: "title" | "createdAt";
-  order: "asc" | "desc";
-} {
-  switch (sort) {
-    case "title-asc":
-      return { orderBy: "title", order: "asc" };
-    case "title-desc":
-      return { orderBy: "title", order: "desc" };
-    case "oldest":
-      return { orderBy: "createdAt", order: "asc" };
-    case "recent":
-    default:
-      return { orderBy: "createdAt", order: "desc" };
-  }
-}
 
 type LibraryData = {
   view: "series" | "books" | "explore";
@@ -55,147 +33,13 @@ type LibraryData = {
 
 export default function LibraryPage({
   initialData,
-  initialSearchParamsKey,
   exploreSlot,
 }: {
-  initialData?: LibraryData;
-  initialSearchParamsKey?: string;
-  /** Server-streamed explore sections, used on initial load before any client-side refetch. */
+  initialData: LibraryData;
+  /** Server-streamed Home sections. */
   exploreSlot?: ReactNode;
 }) {
-  const [searchParams] = useSearchParams();
-  const [data, setData] = useState<LibraryData | null>(initialData ?? null);
-  const [loading, setLoading] = useState(!initialData);
-  const skippedInitial = useRef(false);
-
-  const view = searchParams.get("view");
-  const seriesFilter = searchParams.get("series");
-  const sort = (searchParams.get("sort") as SortOption) || "recent";
-  const typeParam = searchParams.get("type") as BookType | null;
-  const type: TypeFilter =
-    typeParam && ["audiobook", "ebook", "comic"].includes(typeParam) ? typeParam : "all";
-  const formatParam = searchParams.get("format");
-  const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
-
-  useEffect(() => {
-    if (
-      !skippedInitial.current &&
-      initialData &&
-      initialSearchParamsKey === searchParams.toString()
-    ) {
-      skippedInitial.current = true;
-      return;
-    }
-    skippedInitial.current = true;
-
-    let cancelled = false;
-    setLoading(true);
-
-    async function loadData() {
-      const { orderBy, order } = getSortParams(sort);
-      const typeFilter = type !== "all" ? type : undefined;
-
-      // Default explore view (no view param, no series filter)
-      if (!view && !seriesFilter) {
-        const exploreData = await getExploreData(undefined, typeFilter);
-        return {
-          view: "explore" as const,
-          exploreData,
-          seriesList: [] as LibraryData["seriesList"],
-          seriesFilter: null,
-          books: [],
-          totalCount: exploreData.totalCount,
-          unmatchedCount: exploreData.unmatchedCount,
-          currentSort: sort,
-          currentType: type,
-          currentFormats: format ?? [],
-          formatCounts: [],
-          otherFormatBooks: [],
-        };
-      }
-
-      // Series grid view
-      if (view === "series") {
-        const rawSeriesList = await getSeriesWithCovers(typeFilter);
-        const seriesList = rawSeriesList.map((s) => ({
-          ...s,
-          coverBooks: s.coverBooks.map((b) => ({
-            id: b.id,
-            coverUrl: getCoverUrl(b),
-          })),
-        }));
-        return {
-          view: "series" as const,
-          seriesList,
-          seriesFilter: null,
-          books: [],
-          totalCount: 0,
-          unmatchedCount: 0,
-          currentSort: sort,
-          currentType: type,
-          currentFormats: format ?? [],
-          formatCounts: [],
-          otherFormatBooks: [],
-        };
-      }
-
-      const [books, totalCount, unmatchedCount, formatCounts, otherFormatBooks] = await Promise.all(
-        [
-          getBooks({
-            limit: BOOKS_PER_PAGE,
-            offset: 0,
-            orderBy,
-            order,
-            type: typeFilter,
-            format,
-            series: seriesFilter || undefined,
-          }),
-          getBooksCount(typeFilter, format, seriesFilter || undefined),
-          getUnmatchedBooksCount(),
-          getFormatCounts(typeFilter),
-          // When viewing a series with a type filter, also get books in other formats
-          seriesFilter && typeFilter
-            ? getSeriesBooksOtherFormats(seriesFilter, typeFilter)
-            : Promise.resolve([]),
-        ],
-      );
-
-      return {
-        view: "books" as const,
-        seriesList: [] as LibraryData["seriesList"],
-        seriesFilter,
-        books,
-        totalCount,
-        unmatchedCount,
-        currentSort: sort,
-        currentType: type,
-        currentFormats: format ?? [],
-        formatCounts,
-        otherFormatBooks,
-      };
-    }
-
-    loadData().then((result) => {
-      if (!cancelled) {
-        setData(result);
-        setLoading(false);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [searchParams.toString()]);
-
-  if (loading || !data) {
-    return (
-      <main className="container my-8 px-6 mx-auto">
-        <div className="flex items-center justify-center py-16">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      </main>
-    );
-  }
+  const data = initialData;
 
   const {
     view: currentView,
@@ -212,7 +56,13 @@ export default function LibraryPage({
   } = data;
 
   return (
-    <main className="container my-8 px-6 mx-auto">
+    <main
+      className={
+        currentView === "explore"
+          ? "my-8 w-full max-w-none px-4 sm:px-6 lg:px-8"
+          : "container my-8 px-6 mx-auto"
+      }
+    >
       {/* Header */}
       <div className="flex flex-col gap-4 mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -234,17 +84,21 @@ export default function LibraryPage({
               </>
             ) : (
               <>
-                <h1 className="text-2xl font-bold text-foreground">Library</h1>
+                <h1 className="text-2xl font-bold text-foreground">
+                  {currentView === "explore" ? "Today" : "Library"}
+                </h1>
                 <p className="text-foreground-muted">
-                  {currentView === "series"
-                    ? `${seriesList.length} ${seriesList.length === 1 ? "series" : "series"}`
-                    : `${totalCount} ${totalCount === 1 ? "book" : "books"}`}
+                  {currentView === "explore"
+                    ? "Pick up where you left off"
+                    : currentView === "series"
+                      ? `${seriesList.length} ${seriesList.length === 1 ? "series" : "series"}`
+                      : `${totalCount} ${totalCount === 1 ? "book" : "books"}`}
                 </p>
               </>
             )}
           </div>
           <div className="flex items-center gap-2">
-            {!currentSeriesFilter && unmatchedCount > 0 && (
+            {!currentSeriesFilter && currentView !== "explore" && unmatchedCount > 0 && (
               <Link
                 to="/admin/unmatched"
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
@@ -260,11 +114,11 @@ export default function LibraryPage({
                 <span className="font-medium">{unmatchedCount}</span>
               </Link>
             )}
-            {/* Browse by links — only on explore view */}
+            {/* Home has two clear exits: browse the catalog or explore ideas. */}
             {!currentSeriesFilter && currentView === "explore" && (
               <>
                 <Link
-                  to="/collections"
+                  to="/library"
                   className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -275,10 +129,10 @@ export default function LibraryPage({
                       d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                     />
                   </svg>
-                  Collections
+                  Browse all
                 </Link>
                 <Link
-                  to="/tags"
+                  to="/wander"
                   className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -289,13 +143,29 @@ export default function LibraryPage({
                       d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
                     />
                   </svg>
+                  Explore
+                </Link>
+              </>
+            )}
+            {!currentSeriesFilter && currentView !== "explore" && (
+              <>
+                <Link
+                  to="/collections"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
+                >
+                  Collections
+                </Link>
+                <Link
+                  to="/tags"
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
+                >
                   Tags
                 </Link>
               </>
             )}
           </div>
         </div>
-        {!currentSeriesFilter && (
+        {!currentSeriesFilter && currentView !== "explore" && (
           <div className="flex flex-wrap items-center gap-3">
             {/* PRIMARY: Content-type filter — always visible, matches iOS */}
             <TypeTabs
@@ -324,25 +194,6 @@ export default function LibraryPage({
                 role="tablist"
                 aria-label="View mode"
               >
-                <Link
-                  to={`/library${currentType !== "all" ? `?type=${currentType}` : ""}`}
-                  title="Explore — curated sections"
-                  aria-label="Explore view"
-                  className={`p-1.5 rounded-md transition-colors ${
-                    currentView === "explore"
-                      ? "bg-primary text-white"
-                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 6h16M4 10h16M4 14h16M4 18h16"
-                    />
-                  </svg>
-                </Link>
                 <Link
                   to={`/library?view=grid${currentType !== "all" ? `&type=${currentType}` : ""}${currentSort !== "recent" ? `&sort=${currentSort}` : ""}`}
                   title="Browse — full grid"
@@ -389,8 +240,7 @@ export default function LibraryPage({
         )}
       </div>
 
-      {/* Explore view — initial load streams server sections (exploreSlot);
-          a client-side filter refetch populates data.exploreData and renders inline. */}
+      {/* Home sections stream from the server after the header is ready. */}
       {currentView === "explore" &&
         (data.exploreData ? <LibraryExploreView data={data.exploreData} /> : exploreSlot)}
 

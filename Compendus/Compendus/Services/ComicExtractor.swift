@@ -44,7 +44,9 @@ struct ComicPageInfo {
 }
 
 @Observable
-class ComicExtractor {
+nonisolated final class ComicExtractor: @unchecked Sendable {
+
+    @ObservationIgnored private let lock = NSRecursiveLock()
 
     // Supported image extensions for comic pages
     private let imageExtensions = ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
@@ -63,12 +65,19 @@ class ComicExtractor {
 
     /// Get page count from a local comic file
     func getPageCount(from fileURL: URL, format: String) throws -> Int {
-        let pages = try getPageList(from: fileURL, format: format)
-        return pages.count
+        try lock.withLock {
+            try getPageList(from: fileURL, format: format).count
+        }
     }
 
     /// Get list of pages from a local comic file
     func getPageList(from fileURL: URL, format: String) throws -> [ComicPageInfo] {
+        try lock.withLock {
+            try getPageListLocked(from: fileURL, format: format)
+        }
+    }
+
+    private func getPageListLocked(from fileURL: URL, format: String) throws -> [ComicPageInfo] {
         let cacheKey = fileURL.path
 
         // Return cached if available
@@ -104,6 +113,12 @@ class ComicExtractor {
 
     /// Extract a specific page from a local comic file
     func extractPage(from fileURL: URL, format: String, pageIndex: Int) throws -> Data {
+        try lock.withLock {
+            try extractPageLocked(from: fileURL, format: format, pageIndex: pageIndex)
+        }
+    }
+
+    private func extractPageLocked(from fileURL: URL, format: String, pageIndex: Int) throws -> Data {
         let lowercasedFormat = format.lowercased()
 
         guard lowercasedFormat == "cbz" else {
@@ -140,16 +155,19 @@ class ComicExtractor {
 
     /// Clear all caches and remove extracted directories
     func clearCache() {
+        lock.withLock {
         // Remove all extracted directories
         for (_, extractedDir) in extractedArchiveCache {
             try? FileManager.default.removeItem(at: extractedDir)
         }
         extractedArchiveCache.removeAll()
         pageListCache.removeAll()
+        }
     }
 
     /// Clear cache for a specific book
     func clearCache(for fileURL: URL) {
+        lock.withLock {
         let cacheKey = fileURL.path
 
         // Remove extracted directory
@@ -159,6 +177,7 @@ class ComicExtractor {
 
         extractedArchiveCache.removeValue(forKey: cacheKey)
         pageListCache.removeValue(forKey: cacheKey)
+        }
     }
 
     // MARK: - Private Extraction

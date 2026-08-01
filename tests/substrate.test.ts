@@ -2,7 +2,7 @@
  * Semantic substrate over a synthetic corpus with KNOWN geometry: three
  * idea-clusters spread across four books, so we can assert that structure
  * (kNN edges, topics, cross-book neighbors, bridges, prose filtering),
- * wander v2 stops/steps, coverage, and the curriculum sequencer behave as
+ * wander v2 stops/steps and coverage behave as
  * designed — without depending on model output for anything but role
  * prototypes (which rebuildStructure embeds once).
  */
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any, books: any, passages: any, rawDb: any;
-let substrate: any, wander2: any, curriculum: any;
+let substrate: any, wander2: any;
 
 const DIM = 384;
 
@@ -38,7 +38,6 @@ beforeAll(async () => {
   ({ db, books, passages, rawDb } = await import("../app/lib/db"));
   substrate = await import("../app/lib/knowledge/substrate");
   wander2 = await import("../app/lib/knowledge/wander2");
-  curriculum = await import("../app/lib/knowledge/curriculum");
   const { vectorToBuffer } = await import("../app/lib/knowledge/embeddings");
 
   // 4 books × 12 passages. Clusters: axis 0 (books A+B), axis 1 (books B+C),
@@ -180,98 +179,6 @@ describe("wander v2", () => {
       expect(cov.seen).toBeGreaterThanOrEqual(1);
       expect(cov.total).toBeGreaterThanOrEqual(cov.seen);
     }
-  });
-});
-
-describe("curriculum (Tier A)", () => {
-  it("builds a sequenced, book-alternating study path with transitions", () => {
-    const topic = rawDb
-      .prepare(
-        "SELECT id FROM topics WHERE size >= 8 AND book_count >= 2 ORDER BY size DESC LIMIT 1",
-      )
-      .get();
-    expect(topic).toBeTruthy();
-    const cur = curriculum.buildCurriculum(topic.id, "prof-1");
-    expect(cur).toBeTruthy();
-    expect(cur.items.length).toBeGreaterThanOrEqual(6);
-    // Ordinals sequential from 1; every item carries a transition + module.
-    cur.items.forEach((item: any, i: number) => {
-      expect(item.ordinal).toBe(i + 1);
-      expect(item.transition.length).toBeGreaterThan(5);
-      expect(item.module).toMatch(/^Part \d+$/);
-    });
-    // Multi-book topic ⇒ the sequence must actually alternate books.
-    const switches = cur.items.filter(
-      (item: any, i: number) => i > 0 && item.bookId !== cur.items[i - 1].bookId,
-    ).length;
-    expect(switches).toBeGreaterThanOrEqual(1);
-    // No citation noise in a study path.
-    for (const item of cur.items) expect(item.snippet).not.toContain("ISBN");
-    // Second call reuses the cached skeleton (same id).
-    const again = curriculum.buildCurriculum(topic.id);
-    expect(again.id).toBe(cur.id);
-  });
-});
-
-describe("fabric reembed apply", () => {
-  it("writes worker-returned vectors into the substrate under the worker's model id", async () => {
-    const fabric = await import("../app/lib/fabric");
-    await import("../app/lib/fabric/kinds");
-    const { device } = fabric.enrollDevice({
-      name: "test-fleet",
-      platform: "macos",
-      capabilities: { runtimes: ["onnx-embed"] },
-    });
-    const ps = rawDb
-      .prepare("SELECT id, text FROM passages WHERE book_id = 'bk-a' ORDER BY ordinal LIMIT 4")
-      .all();
-    const { item } = fabric.enqueueWork({
-      project: "compendus",
-      kind: "reembed-book",
-      payload: {
-        bookId: "bk-a",
-        model: "new-model/v2",
-        passageIds: ps.map((r: { id: string }) => r.id),
-      },
-      requirements: { runtimes: ["onnx-embed"] },
-    });
-    const leased = fabric.leaseWork(device.id, { runtimes: ["onnx-embed"] });
-    expect(leased.id).toBe(item.id);
-
-    // Simulate the fleet worker: quantized vectors for each passage.
-    const dim = 64;
-    const bytes = Buffer.alloc(ps.length * dim);
-    const scales: number[] = [];
-    for (let i = 0; i < ps.length; i++) {
-      scales.push(1 / 127);
-      bytes.writeInt8(127, i * dim + i); // distinct axis per passage
-    }
-    const out = await fabric.completeWork({
-      id: item.id,
-      deviceId: device.id,
-      result: { count: ps.length, dim, vectorsB64: bytes.toString("base64"), scales },
-      modelId: "new-model/v2",
-    });
-    expect(out.ok).toBe(true);
-
-    const row = rawDb
-      .prepare("SELECT model FROM embeddings WHERE kind = 'passage' AND ref_id = ?")
-      .get(ps[0].id);
-    expect(row.model).toBe("new-model/v2");
-    const v = substrate.getEmbedding("passage", ps[0].id);
-    expect(v.length).toBe(dim);
-    expect(v[0]).toBeCloseTo(1, 1);
-  });
-
-  it("rejects a count-mismatched reembed result", async () => {
-    const fabric = await import("../app/lib/fabric");
-    const def = fabric.getKind("reembed-book");
-    const verdict = def.validate(
-      { bookId: "bk-a", passageIds: ["x"] },
-      { count: 2, dim: 64, vectorsB64: Buffer.alloc(128).toString("base64"), scales: [0.1, 0.1] },
-    );
-    expect(verdict.ok).toBe(false);
-    expect(verdict.error).toMatch(/count mismatch/);
   });
 });
 

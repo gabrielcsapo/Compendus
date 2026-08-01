@@ -26,18 +26,20 @@ struct ReaderSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Typography is why most readers open this sheet. Keep the
+                // highest-frequency controls above the fold.
+                if format == .epub {
+                    fontSection
+                    fontSizeSection
+                    lineHeightSection
+                    textPreviewSection
+                }
+
                 themeSection
                 displaySection
 
                 if format == .epub || format == .comic {
                     layoutSection
-                }
-
-                if format == .epub {
-                    fontSection
-                    textPreviewSection
-                    fontSizeSection
-                    lineHeightSection
                 }
 
                 if format == .pdf {

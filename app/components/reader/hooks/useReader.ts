@@ -429,9 +429,12 @@ export function useReader({
     currentPositionRef.current = pos;
   }, [currentPage, pageContent, isColumnPaginated, clientTotalPages, bookInfo, nativePdfMode]);
 
-  // Start a reading session when the book info loads, end it on unmount
+  // Start a reading session when the book info loads, end it on unmount.
+  // Audiobooks are excluded: the global AudiobookProvider owns their sessions
+  // (listening continues after the reader closes, so mount-scoped sessions lie).
   useEffect(() => {
     if (!bookInfo) return;
+    if (["m4b", "mp3", "m4a"].includes(bookInfo.format)) return;
 
     const startPosition = initialPosition > 0 ? initialPosition.toString() : undefined;
     createReadingSession(bookId, startPosition)
@@ -703,6 +706,9 @@ export function useReader({
 
   // Save progress
   const saveProgress = useCallback(async () => {
+    // Audio positions are exact-second saves owned by the AudiobookProvider;
+    // the reader's chapter-granular save would clobber them.
+    if (pageContent?.type === "audio") return;
     const position = nativePdfPosition ?? columnPosition ?? pageContent?.position;
     if (position === undefined || position === null) return;
 

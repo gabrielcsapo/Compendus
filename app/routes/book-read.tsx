@@ -1,6 +1,21 @@
 import { getRequest } from "react-flight-router/server";
 import { getBook } from "../actions/books";
 import { ReaderShell } from "../components/reader/ReaderShell";
+import { parseAudioPosition } from "../lib/audio-position";
+import type { AudiobookTrack } from "../components/audio/AudiobookProvider";
+import type { AudioChapter } from "../lib/types";
+
+const AUDIOBOOK_FORMATS = ["m4b", "mp3", "m4a"];
+
+function parseJsonArray<T>(json: string | null | undefined): T[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 export default async function BookReader({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
@@ -27,11 +42,44 @@ export default async function BookReader({ params }: { params?: Record<string, s
       : undefined;
 
   const deepLink = sp.get("position") != null ? Number(sp.get("position")) : NaN;
+  const hasDeepLink = Number.isFinite(deepLink) && deepLink >= 0 && deepLink <= 1;
   const initialPosition = initialLocator
     ? 0 // locator drives navigation; don't also jump to stale saved progress
-    : Number.isFinite(deepLink) && deepLink >= 0 && deepLink <= 1
+    : hasDeepLink
       ? deepLink
       : book.readingProgress || 0;
+
+  // Audiobooks: hand the global player everything it needs (serializable) plus
+  // the exact resume second from the iOS-compatible audio lastPosition shape.
+  const isAudio = AUDIOBOOK_FORMATS.includes(book.format);
+  let audioTrack: AudiobookTrack | undefined;
+  let initialAudioTime = 0;
+  let forceAudioSeek = false;
+  if (isAudio) {
+    const duration = book.duration || 0;
+    const audioPos = parseAudioPosition(book.lastPosition);
+    if (hasDeepLink) {
+      initialAudioTime = deepLink * duration;
+      forceAudioSeek = true;
+    } else if (audioPos) {
+      initialAudioTime = audioPos.timestamp;
+    } else {
+      initialAudioTime = (book.readingProgress || 0) * duration;
+    }
+    audioTrack = {
+      bookId: book.id,
+      title: book.title,
+      authors: parseJsonArray<string>(book.authors),
+      coverUrl: book.coverPath ? `/covers/${book.id}.jpg` : null,
+      audioUrl: `/books/${book.id}.${book.format}`,
+      format: book.format,
+      duration,
+      chapters: parseJsonArray<AudioChapter>(book.chapters),
+      hasTranscript: Boolean(book.transcriptPath),
+      series: book.series,
+      seriesNumber: book.seriesNumber,
+    };
+  }
 
   return (
     <ReaderShell
@@ -40,6 +88,9 @@ export default async function BookReader({ params }: { params?: Record<string, s
       initialLocator={initialLocator}
       returnUrl={`/book/${book.id}`}
       bookFormat={book.format}
+      audioTrack={audioTrack}
+      initialAudioTime={initialAudioTime}
+      forceAudioSeek={forceAudioSeek}
     />
   );
 }

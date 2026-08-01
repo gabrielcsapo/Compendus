@@ -58,12 +58,26 @@ export const requireProfile = createMiddleware(async (c, next) => {
   await next();
 });
 
+/** Require an explicit iOS header or web cookie for raw/downloadable content.
+ * The single-profile compatibility fallback must never silently authorize files.
+ */
+export const requireExplicitProfile = createMiddleware(async (c, next) => {
+  const suppliedProfile = c.req.header("X-Profile-Id") || getCookie(c, "compendus-profile");
+  // Ensure the resolved profile is the credential the caller supplied. An
+  // invalid header must never be replaced by the legacy one-profile fallback.
+  if (!suppliedProfile || !c.get("profileId") || c.get("profileId") !== suppliedProfile) {
+    return c.json({ success: false, error: "Profile required", code: "NO_PROFILE" }, 401);
+  }
+  await next();
+});
+
 /**
  * Middleware that requires the current profile to be an admin.
  * Returns 403 if not admin.
  */
 export const requireAdmin = createMiddleware(async (c, next) => {
-  if (!c.get("profileId")) {
+  const suppliedProfile = c.req.header("X-Profile-Id") || getCookie(c, "compendus-profile");
+  if (!suppliedProfile || !c.get("profileId") || c.get("profileId") !== suppliedProfile) {
     return c.json({ success: false, error: "Profile required", code: "NO_PROFILE" }, 401);
   }
   if (!c.get("isAdmin")) {

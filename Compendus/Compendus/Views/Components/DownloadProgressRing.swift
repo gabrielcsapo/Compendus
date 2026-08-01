@@ -94,7 +94,7 @@ struct AnimatedDownloadButton: View {
         case .idle:
             Image(systemName: "arrow.down.circle")
                 .symbolEffect(.bounce, value: state.isIdle)
-        case .downloading(let progress):
+        case .downloading:
             ZStack {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))

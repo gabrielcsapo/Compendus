@@ -14,14 +14,15 @@ export const routes: RouteConfig[] = [
       { id: "search", path: "search", component: () => import("./routes/search.js") },
       { id: "wander", path: "wander", component: () => import("./routes/wander.js") },
       { id: "journeys", path: "journeys", component: () => import("./routes/journeys.js") },
-      {
-        id: "fleet-worker",
-        path: "fleet-worker",
-        component: () => import("./routes/fleet-worker.js"),
-      },
+      { id: "pods", path: "pods", component: () => import("./routes/journeys.js") },
       {
         id: "journey",
         path: "journey/:topicId",
+        component: () => import("./routes/journey.js"),
+      },
+      {
+        id: "pod",
+        path: "pod/:podId",
         component: () => import("./routes/journey.js"),
       },
       { id: "entity", path: "entity/:id", component: () => import("./routes/entity.js") },
@@ -80,11 +81,6 @@ export const routes: RouteConfig[] = [
             id: "admin-duplicates",
             path: "duplicates",
             component: () => import("./routes/admin-duplicates.js"),
-          },
-          {
-            id: "admin-fleet",
-            path: "fleet",
-            component: () => import("./routes/admin-fleet.js"),
           },
         ],
       },

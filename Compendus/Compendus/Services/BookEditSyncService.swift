@@ -13,7 +13,7 @@ import UIKit
 @Observable
 @MainActor
 class BookEditSyncService {
-    static let backgroundTaskIdentifier = "com.compendus.edit-sync"
+    nonisolated static let backgroundTaskIdentifier = "com.compendus.edit-sync"
 
     let apiService: APIService
     var modelContainer: ModelContainer?
@@ -85,6 +85,10 @@ class BookEditSyncService {
 
     @discardableResult
     func processPendingEditsWithContext(_ modelContext: ModelContext) async -> Bool {
+        guard ConnectivityMonitor.shared.permitsNetworkRequests else {
+            updatePendingStatus(modelContext: modelContext)
+            return false
+        }
         guard !isSyncing else { return false }
         isSyncing = true
         defer {
@@ -109,7 +113,7 @@ class BookEditSyncService {
                 try? modelContext.save()
             } catch let error as APIError {
                 switch error {
-                case .networkError:
+                case .networkError, .offline:
                     // Network unavailable — stop processing, try again later
                     edit.retryCount += 1
                     try? modelContext.save()

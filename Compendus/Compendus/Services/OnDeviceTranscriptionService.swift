@@ -11,7 +11,7 @@
 //
 
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import BackgroundTasks
 import UIKit
 import CCReader
@@ -39,7 +39,7 @@ class OnDeviceTranscriptionService {
         }
     }
 
-    static let backgroundTaskIdentifier = "com.compendus.transcription"
+    nonisolated static let backgroundTaskIdentifier = "com.compendus.transcription"
 
     var state: TranscriptionState = .idle
 
@@ -455,8 +455,6 @@ class OnDeviceTranscriptionService {
         startTime: Double,
         endTime: Double
     ) async throws -> [Float] {
-        let asset = AVURLAsset(url: sourceURL)
-
         // Target format: 16 kHz, mono, Float32
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,

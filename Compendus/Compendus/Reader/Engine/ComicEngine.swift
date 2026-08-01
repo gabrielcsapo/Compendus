@@ -142,7 +142,6 @@ class ComicEngine: ReaderEngine {
         }
 
         do {
-            // Run ZIP extraction off the main thread to avoid UI freeze
             let extractor = comicExtractor
             let format = book.format
             let count = try await Task.detached(priority: .userInitiated) {
@@ -201,7 +200,6 @@ class ComicEngine: ReaderEngine {
 
         if canExtractLocally && hasLocalFile, let fileURL = book.fileURL {
             do {
-                // Run page extraction off the main thread to avoid UI freeze
                 let extractor = comicExtractor
                 let format = book.format
                 let data = try await Task.detached(priority: .userInitiated) {
@@ -367,7 +365,9 @@ class ComicEngine: ReaderEngine {
         currentSettings = settings
         pageViewController?.applyTheme(settings.theme)
         updateSpreadMode(
-            for: pageViewController?.view.bounds.size ?? UIScreen.main.bounds.size,
+            for: pageViewController?.view.window?.windowScene?.screen.bounds.size
+                ?? pageViewController?.view.bounds.size
+                ?? CGSize(width: 390, height: 844),
             settings: settings
         )
     }
@@ -406,7 +406,8 @@ class ComicEngine: ReaderEngine {
             return cached
         }
         guard let full = await loadPageImage(page) else { return nil }
-        let scaled = full.thumbnail(maxDimension: max(size.width, size.height) * UIScreen.main.scale) ?? full
+        let displayScale = pageViewController?.view.traitCollection.displayScale ?? 1
+        let scaled = full.thumbnail(maxDimension: max(size.width, size.height) * displayScale) ?? full
         ThumbnailCache.shared.store(scaled, bookId: book.id, page: page)
         return scaled
     }
