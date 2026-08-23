@@ -59,9 +59,9 @@ export function ReaderToolbar({
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 border-b"
+      className="flex items-center justify-between px-3 sm:px-5 py-2.5 border-b backdrop-blur-xl"
       style={{
-        backgroundColor: theme.background,
+        backgroundColor: `${theme.background}F2`,
         borderColor: `${theme.foreground}20`,
       }}
     >
@@ -70,7 +70,7 @@ export function ReaderToolbar({
         {onClose && (
           <button
             onClick={onClose}
-            className="p-2 rounded-md hover:bg-black/10 transition-colors"
+            className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             aria-label="Close reader"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,7 +86,7 @@ export function ReaderToolbar({
 
         <button
           onClick={onToggleSidebar}
-          className="p-2 rounded-md hover:bg-black/10 transition-colors"
+          className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
           aria-label="Toggle sidebar"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,7 +102,7 @@ export function ReaderToolbar({
 
       {/* Center section - title and page info */}
       <div className="flex-1 text-center">
-        <h1 className="text-sm font-medium truncate max-w-md mx-auto">{title}</h1>
+        <h1 className="reading-title text-sm truncate max-w-md mx-auto">{title}</h1>
         <div
           className="flex items-center justify-center gap-2 text-xs"
           style={{ color: theme.muted }}
@@ -147,7 +147,7 @@ export function ReaderToolbar({
         {onToggleSearch && (
           <button
             onClick={onToggleSearch}
-            className="p-2 rounded-md hover:bg-black/10 transition-colors"
+            className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             aria-label="Search"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,7 +165,7 @@ export function ReaderToolbar({
         {isTextContent && onToggleReadAloud && (
           <button
             onClick={onToggleReadAloud}
-            className="p-2 rounded-md hover:bg-black/10 transition-colors"
+            className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
             style={{
               color: readAloudActive ? theme.accent : undefined,
             }}
@@ -185,7 +185,7 @@ export function ReaderToolbar({
         {/* Bookmark */}
         <button
           onClick={onAddBookmark}
-          className="p-2 rounded-md hover:bg-black/10 transition-colors"
+          className="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
           aria-label={hasBookmark ? "Remove bookmark" : "Add bookmark"}
         >
           <svg
@@ -206,7 +206,7 @@ export function ReaderToolbar({
         {/* Reader settings (typography) — Aa to match iOS / Apple Books / Kindle */}
         <button
           onClick={onToggleSettings}
-          className="px-2 py-1.5 rounded-md hover:bg-black/10 transition-colors font-serif"
+          className="px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors font-serif"
           aria-label="Reader settings"
           title="Reader settings"
         >

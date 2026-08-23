@@ -202,11 +202,11 @@ struct AudiobookPlayerView: View {
                             // Familiar artwork + linear timeline. Dragging keeps
                             // a local preview and performs one seek on release,
                             // avoiding repeated player seeks and haptics.
-                            let artworkSize = min(geometry.size.width - 88, geometry.size.height * 0.36)
+                            let artworkWidth = min(geometry.size.width - 140, geometry.size.height * 0.24)
                             LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
-                            .frame(width: artworkSize, height: artworkSize)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .shadow(color: .black.opacity(0.22), radius: 16, y: 8)
+                            .frame(width: artworkWidth, height: artworkWidth * 1.5)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: .black.opacity(0.18), radius: 18, y: 10)
                             .onTapGesture { showBookDetail = true }
 
                             Slider(
@@ -223,7 +223,7 @@ struct AudiobookPlayerView: View {
                                 }
                             )
                             .tint(.accentColor)
-                            .frame(maxWidth: artworkSize)
+                            .frame(maxWidth: artworkWidth)
                             .accessibilityLabel("Playback position")
 
                             // Elapsed / remaining time — constrained to the
@@ -241,7 +241,7 @@ struct AudiobookPlayerView: View {
                                     .foregroundStyle(.secondary)
                                     .monospacedDigit()
                             }
-                            .frame(maxWidth: artworkSize)
+                            .frame(maxWidth: artworkWidth)
 
                             // Title, author, narrator
                             VStack(spacing: 4) {
@@ -290,7 +290,7 @@ struct AudiobookPlayerView: View {
                 .animation(.easeInOut(duration: 0.3), value: showLyrics)
                 } // ZStack (bloom zone)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Vibrant blurred cover (Spotify-style). Painted as a BACKGROUND
+                // The artwork adds a restrained atmosphere behind the controls.
                 // (and clipped) so it can't influence the bloom's layout — as a
                 // sizing child, the `.aspectRatio(.fill)` + blur made the zone
                 // wider than the screen and shoved all content to the right.
@@ -299,9 +299,9 @@ struct AudiobookPlayerView: View {
                         Image(uiImage: uiImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .saturation(1.8)
-                            .blur(radius: 50)
-                            .opacity(0.65)
+                            .saturation(0.7)
+                            .blur(radius: 64)
+                            .opacity(0.16)
                     }
                 }
                 .clipped()

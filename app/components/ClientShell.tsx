@@ -8,6 +8,7 @@ import { GlobalUploadDropzone } from "./GlobalUploadDropzone";
 import { SearchInput } from "./SearchInput";
 import { Footer } from "./Footer";
 import { CompendusLogo } from "./CompendusLogo";
+import { CompendusWordmark } from "./CompendusWordmark";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { ToastProvider } from "./ToastContext";
 import { AudiobookProvider } from "./audio/AudiobookProvider";
@@ -255,10 +256,10 @@ function NavLink({
       location.pathname.startsWith(to + "/") ||
       location.pathname.startsWith(to + "?");
 
-  // Icon links are square buttons (match the Wander button); text links keep padding.
+  // Primary destinations are always named; books should be the visual emphasis.
   const layout = icon
     ? "flex items-center justify-center w-9 h-9 rounded-lg transition-colors"
-    : "px-3 py-2 rounded-lg font-medium transition-colors";
+    : "px-2 py-2 text-sm rounded-lg font-medium transition-colors sm:px-3 sm:text-base";
 
   return (
     <Link
@@ -337,67 +338,42 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
         <MilestoneTracker />
         <header
           ref={headerRef}
-          className="sticky top-0 z-40 backdrop-blur-md bg-background/80 border-b border-border"
+          className="sticky top-0 z-40 backdrop-blur-xl bg-background/88 border-b border-border/80"
         >
-          <nav className="container px-6 py-4 mx-auto">
-            <ul className="flex gap-2 flex-wrap items-center">
-              <li className="font-bold text-xl mr-4">
-                <Link
-                  to="/"
-                  className="text-primary hover:text-primary-hover transition-colors flex items-center gap-2"
-                >
-                  <CompendusLogo />
-                  Compendus
-                </Link>
-              </li>
+          <nav className="mx-auto flex w-full max-w-[90rem] items-center px-5 py-3 sm:px-8 lg:px-11">
+            <Link
+              to="/"
+              className="flex shrink-0 items-center gap-2.5 text-xl font-extrabold tracking-[-0.025em] text-foreground transition-colors hover:text-primary"
+            >
+              <CompendusLogo className="h-7 w-7" />
+              <CompendusWordmark className="hidden h-[1.35rem] w-auto md:block" />
+              <span className="sr-only">Compendus</span>
+            </Link>
+
+            <ul className="ml-3 flex items-center gap-1 sm:ml-8 sm:gap-2">
               <li>
-                <NavLink to="/library" icon ariaLabel="Library" title="Library">
-                  <svg
-                    className="w-5 h-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                  </svg>
+                <NavLink to="/" exact>
+                  Today
                 </NavLink>
               </li>
               <li>
-                <Link
-                  to="/wander"
-                  aria-label="Wander the Living Library"
-                  title="Wander"
-                  className="flex items-center justify-center w-9 h-9 rounded-lg text-foreground-muted hover:text-primary hover:bg-surface-elevated transition-colors"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M5 19c3 0 3-5 6-5s3 5 6 5" opacity="0.5" />
-                    <path d="M5 14c3 0 3-9 7-9 2.5 0 3 4 0 4" />
-                    <circle cx="5" cy="19" r="1.4" fill="currentColor" stroke="none" />
-                    <circle cx="17" cy="19" r="1.4" fill="currentColor" stroke="none" />
-                  </svg>
-                </Link>
+                <NavLink to="/library">Library</NavLink>
               </li>
-              <li className="flex-1 min-w-[12rem]">
+              <li>
+                <NavLink to="/wander">Wander</NavLink>
+              </li>
+            </ul>
+
+            <ul className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+              <li>
                 <SearchInput />
               </li>
               {profileLoaded && profile && (
-                <li>
+                <li className="hidden sm:block">
                   <ProfileDropdown profile={profile} />
                 </li>
               )}
-              <li>
+              <li className="hidden sm:block">
                 <DarkModeToggle />
               </li>
             </ul>
@@ -405,7 +381,7 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
         </header>
         <GlobalNavigationLoadingBar />
         <SearchCommandPalette />
-        {isAdmin && <GlobalUploadDropzone />}
+        {isAdmin && location.pathname.startsWith("/library") && <GlobalUploadDropzone />}
         <div className="flex-1" style={{ paddingBottom: "var(--listen-bar-height, 0px)" }}>
           {children}
         </div>

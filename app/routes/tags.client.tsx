@@ -85,26 +85,31 @@ export default function Tags({
   }
 
   return (
-    <main className="container my-8 px-6 mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Tags</h1>
-        <p className="text-foreground-muted">
+    <main className="mx-auto my-10 w-full max-w-[90rem] px-5 sm:my-14 sm:px-8 lg:px-11">
+      <div className="mb-9 border-b border-border pb-8">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary">
           {tags.length} {tags.length === 1 ? "tag" : "tags"}
+        </p>
+        <h1 className="text-5xl font-extrabold leading-[.95] tracking-[-.06em] text-foreground sm:text-6xl">
+          Browse by subject.
+        </h1>
+        <p className="mt-3 text-base text-foreground-muted">
+          Follow a thread across formats, authors, and shelves.
         </p>
       </div>
 
       {/* Tag cloud */}
-      <div className="bg-surface border border-border rounded-xl p-6 mb-8">
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-10">
+        <div className="grid grid-cols-1 overflow-hidden rounded-2xl border border-border bg-surface sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {tags.length > 0 ? (
             tags.map((tag) => (
               <Link
                 key={tag.id}
                 to={`/tags?tag=${tag.id}`}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full transition-all duration-200 ${
+                className={`flex min-w-0 items-center justify-between gap-4 border-b border-border px-4 py-3 text-sm transition-colors last:border-b-0 sm:border-r ${
                   selectedTag?.id === tag.id
-                    ? "bg-primary text-white shadow-md"
-                    : "bg-surface-elevated text-foreground hover:bg-primary-light hover:text-primary"
+                    ? "bg-primary text-white"
+                    : "text-foreground hover:bg-primary-light hover:text-primary"
                 }`}
                 style={
                   tag.color && selectedTag?.id !== tag.id
@@ -115,11 +120,11 @@ export default function Tags({
                     : undefined
                 }
               >
-                {tag.name}
+                <span className="truncate font-medium">{tag.name}</span>
                 <span
-                  className={`text-xs ${selectedTag?.id === tag.id ? "text-white/70" : "text-foreground-muted"}`}
+                  className={`shrink-0 text-xs tabular-nums ${selectedTag?.id === tag.id ? "text-white/70" : "text-foreground-muted"}`}
                 >
-                  ({tag.count})
+                  {tag.count}
                 </span>
               </Link>
             ))

@@ -29,9 +29,7 @@ struct ProfilePickerView: View {
             Spacer()
 
             VStack(spacing: 16) {
-                Image(systemName: "books.vertical.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.accent)
+                CompendusMarkView(size: 72)
 
                 Text("Who's Reading?")
                     .font(.largeTitle)

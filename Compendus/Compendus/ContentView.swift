@@ -280,32 +280,24 @@ struct ContentView: View {
                     .tag(1)
                     .toolbar(.hidden, for: .tabBar)
 
-                HighlightsView()
-                    .tabItem { Label("Highlights", systemImage: "highlighter") }
+                WanderView()
+                    .tabItem {
+                        Label("Wander", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    }
                     .tag(2)
                     .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack {
                     ProfileView()
                 }
-                    .tabItem { Label("Me", systemImage: "person") }
+                    .tabItem { Label("You", systemImage: "person") }
                     .tag(3)
                     .toolbar(.hidden, for: .tabBar)
-
-                WanderView()
-                    .tabItem {
-                        Label("Explore", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                    }
-                    .tag(4)
-                    .toolbar(.hidden, for: .tabBar)
             }
 
-            // Integrated bottom bar: mini player + five clear destinations.
-            // Hidden on Explore (tag 4) for a full-screen, immersive experience.
-            if nav.selectedTab != 4 {
-                CustomBottomBar(selectedTab: $nav.selectedTab)
-                    .transition(.move(edge: .bottom))
-            }
+            // Integrated mini player and four durable destinations.
+            CustomBottomBar(selectedTab: $nav.selectedTab)
+                .transition(.move(edge: .bottom))
         }
         .animation(.easeInOut(duration: 0.25), value: nav.selectedTab)
     }
@@ -353,13 +345,12 @@ struct CustomBottomBar: View {
     private let tabs: [TabItem] = [
         TabItem(icon: "house", activeIcon: "house.fill", label: "Today"),
         TabItem(icon: "books.vertical", activeIcon: "books.vertical.fill", label: "Library"),
-        TabItem(icon: "highlighter", activeIcon: "highlighter", label: "Highlights"),
-        TabItem(icon: "person", activeIcon: "person.fill", label: "Me"),
         TabItem(
             icon: "point.topleft.down.curvedto.point.bottomright.up",
             activeIcon: "point.topleft.down.curvedto.point.bottomright.up",
-            label: "Explore"
+            label: "Wander"
         ),
+        TabItem(icon: "person", activeIcon: "person.fill", label: "You"),
     ]
 
     var body: some View {
@@ -400,10 +391,10 @@ struct CustomBottomBar: View {
                     .accessibilityAddTraits(active ? .isSelected : [])
                 }
             }
-            .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
         }
-        .background(.ultraThinMaterial)
+        .background(.regularMaterial)
     }
 }
 
@@ -476,9 +467,7 @@ struct ServerSetupView: View {
                 Spacer()
 
                 VStack(spacing: 16) {
-                    Image(systemName: "books.vertical.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(.accent)
+                    CompendusMarkView(size: 104)
 
                     Text("Connect to your library server")
                         .font(.title3)

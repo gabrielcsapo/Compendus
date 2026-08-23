@@ -4,6 +4,7 @@ import { DarkModeToggle } from "./DarkModeToggle";
 import { SearchModal } from "./SearchModal";
 import { Sidebar } from "./Sidebar";
 import { CompendusLogo } from "@app/components/CompendusLogo";
+import { CompendusWordmark } from "@app/components/CompendusWordmark";
 
 export function DocsLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -48,7 +49,8 @@ export function DocsLayout() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 shrink-0">
             <CompendusLogo className="w-6 h-6 text-primary" />
-            <span className="font-semibold text-foreground">Compendus</span>
+            <CompendusWordmark className="h-[1.15rem] w-auto text-foreground" />
+            <span className="sr-only">Compendus</span>
             <span className="text-xs text-foreground-muted bg-surface-elevated px-2 py-0.5 rounded-full">
               Docs
             </span>

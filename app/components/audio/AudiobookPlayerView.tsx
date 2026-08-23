@@ -178,32 +178,35 @@ export function AudiobookPlayerView({
   const multiChapter = chapters.length > 1;
 
   return (
-    <div className="h-full flex flex-col relative overflow-hidden" style={{ color: "#fff" }}>
-      {/* Vibrant blurred cover background (Spotify-style) */}
+    <div
+      className="h-full flex flex-col relative overflow-hidden bg-[#0e1512]"
+      style={{ color: "#eef3ef" }}
+    >
+      {/* Artwork is atmosphere, never competition for the listening controls. */}
       {coverUrl && (
         <img
           src={coverUrl}
           aria-hidden="true"
           className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
-          style={{ filter: "blur(60px) saturate(1.8)", transform: "scale(1.15)", opacity: 0.7 }}
+          style={{ filter: "blur(72px) saturate(.65)", transform: "scale(1.1)", opacity: 0.16 }}
         />
       )}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            "linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.20) 40%, rgba(0,0,0,0.60) 100%)",
+            "linear-gradient(to bottom, rgba(14,21,18,.55) 0%, rgba(14,21,18,.82) 55%, #0e1512 100%)",
         }}
       />
 
       {/* Scrollable content area */}
-      <div className="relative flex-1 flex flex-col items-center justify-center gap-6 px-8 py-10 overflow-y-auto">
+      <div className="relative flex-1 flex flex-col items-center justify-center gap-5 px-6 sm:px-8 py-8 overflow-y-auto">
         {coverUrl && !showLyrics && (
           <img
             src={coverUrl}
             alt="Album art"
-            className="w-56 h-56 object-cover rounded-xl shadow-2xl flex-shrink-0"
-            style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }}
+            className="w-44 h-64 sm:w-48 sm:h-72 object-cover rounded-lg flex-shrink-0"
+            style={{ boxShadow: "0 24px 64px rgba(0,0,0,0.35)" }}
           />
         )}
 
@@ -214,15 +217,20 @@ export function AudiobookPlayerView({
         )}
 
         {/* Chapter info */}
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-1 drop-shadow">{chapterTitle}</h2>
+        <div className="text-center max-w-lg">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-[#9ccab8] mb-2">
+            Now listening
+          </p>
+          <h2 className="reading-title text-3xl sm:text-4xl mb-1">
+            {track?.title ?? chapterTitle}
+          </h2>
+          <p className="text-sm text-white/55 mb-1">{track?.authors?.join?.(", ") ?? ""}</p>
           {multiChapter && (
             <button
               onClick={() => setShowChapters(true)}
-              className="text-sm hover:text-white transition-colors"
-              style={{ color: "rgba(255,255,255,0.65)" }}
+              className="text-sm text-white/70 hover:text-white transition-colors"
             >
-              Chapter {currentChapterIndex + 1} of {chapters.length} ▾
+              {chapterTitle} · Chapter {currentChapterIndex + 1} of {chapters.length} ▾
             </button>
           )}
         </div>
@@ -236,7 +244,7 @@ export function AudiobookPlayerView({
             value={Math.min(currentTime, duration || 0)}
             onChange={handleSeekInput}
             className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-            style={{ accentColor: "#fff" }}
+            style={{ accentColor: "#f1c84b" }}
             aria-label="Seek"
           />
           <div
@@ -257,7 +265,7 @@ export function AudiobookPlayerView({
         <div className="flex items-center gap-8">
           <button
             onClick={() => skipBy(-skipBack)}
-            className="opacity-90 hover:opacity-100 transition-opacity"
+            className="text-white/72 hover:text-white transition-colors"
             aria-label={`Skip back ${skipBack} seconds`}
           >
             <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
@@ -276,7 +284,7 @@ export function AudiobookPlayerView({
 
           <button
             onClick={toggle}
-            className="opacity-95 hover:opacity-100 transition-opacity"
+            className="text-[#eef3ef] hover:scale-[1.03] transition-transform"
             aria-label={isPlaying ? "Pause" : "Play"}
           >
             {isPlaying ? (
@@ -292,7 +300,7 @@ export function AudiobookPlayerView({
 
           <button
             onClick={() => skipBy(skipForward)}
-            className="opacity-90 hover:opacity-100 transition-opacity"
+            className="text-white/72 hover:text-white transition-colors"
             aria-label={`Skip forward ${skipForward} seconds`}
           >
             <svg className="w-9 h-9" fill="currentColor" viewBox="0 0 24 24">
@@ -328,7 +336,7 @@ export function AudiobookPlayerView({
               value={volume}
               onChange={(e) => setVolume(parseFloat(e.target.value))}
               className="flex-1 h-1 rounded-lg appearance-none cursor-pointer"
-              style={{ accentColor: "#fff" }}
+              style={{ accentColor: "#f1c84b" }}
               aria-label="Volume"
             />
             <svg
@@ -345,7 +353,7 @@ export function AudiobookPlayerView({
               <button
                 onClick={() => setShowChapters(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors text-xs"
-                style={{ backgroundColor: "rgba(255,255,255,0.10)", color: "#fff" }}
+                style={{ backgroundColor: "rgba(255,255,255,0.07)", color: "#eef3ef" }}
                 title="Chapters"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -365,7 +373,7 @@ export function AudiobookPlayerView({
                 onClick={() => setShowLyrics(!showLyrics)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors text-xs"
                 style={{
-                  backgroundColor: showLyrics ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)",
+                  backgroundColor: showLyrics ? "rgba(156,202,184,0.22)" : "rgba(255,255,255,0.07)",
                   color: "#fff",
                 }}
                 title={showLyrics ? "Hide lyrics" : "Show lyrics"}
@@ -386,7 +394,7 @@ export function AudiobookPlayerView({
               onClick={() => setShowSleepTimer(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors text-xs tabular-nums"
               style={{
-                backgroundColor: sleepTimer ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)",
+                backgroundColor: sleepTimer ? "rgba(156,202,184,0.22)" : "rgba(255,255,255,0.07)",
                 color: "#fff",
               }}
               title="Sleep timer"

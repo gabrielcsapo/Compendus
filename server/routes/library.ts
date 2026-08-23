@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { getBooks } from "../../app/actions/books";
-import type { BookType } from "../../app/lib/book-types";
+import type { BookType, ReadingState } from "../../app/lib/book-types";
 
 type SortOption = "recent" | "oldest" | "title-asc" | "title-desc";
 
@@ -35,6 +35,11 @@ libraryRoutes.get("/api/library", async (c) => {
   const formatParam = c.req.query("format");
   const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
   const series = c.req.query("series") || undefined;
+  const stateParam = c.req.query("state");
+  const readingState: ReadingState | undefined =
+    stateParam && ["in-progress", "unread", "finished"].includes(stateParam)
+      ? (stateParam as ReadingState)
+      : undefined;
   const { orderBy, order } = getSortParams(sort);
 
   const books = await getBooks({
@@ -44,6 +49,7 @@ libraryRoutes.get("/api/library", async (c) => {
     order,
     type,
     format,
+    readingState,
     series,
     profileId,
   });

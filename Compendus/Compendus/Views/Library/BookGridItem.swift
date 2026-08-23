@@ -25,8 +25,7 @@ struct BookGridItem: View {
             // Cover image with overlays
             CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
             .aspectRatio(bookAspectRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+            .bookObjectStyle()
             .overlay(alignment: .topTrailing) {
                 if isDownloaded {
                     Image(systemName: "arrow.down.circle.fill")
@@ -147,8 +146,7 @@ struct DownloadedBookGridItem: View {
             // Cover image
             LocalCoverImage(bookId: book.id, coverData: book.coverData, format: book.format)
             .aspectRatio(bookAspectRatio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+            .bookObjectStyle()
             .overlay(alignment: .topLeading) {
                 if book.isRead {
                     Image(systemName: "checkmark.circle.fill")

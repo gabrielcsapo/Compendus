@@ -1,6 +1,7 @@
 import { CCD_VERSION } from "./content-ast/types";
 
 export type BookType = "audiobook" | "ebook" | "comic";
+export type ReadingState = "in-progress" | "unread" | "finished";
 
 const AUDIOBOOK_FORMATS = ["m4b", "mp3", "m4a"];
 const COMIC_FORMATS = ["cbr", "cbz"];

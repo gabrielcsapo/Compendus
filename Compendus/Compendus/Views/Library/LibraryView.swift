@@ -281,7 +281,24 @@ struct LibraryView: View {
             #else
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(totalCount.formatted()) titles")
+                                .font(.caption2.weight(.bold))
+                                .textCase(.uppercase)
+                                .tracking(1.2)
+                                .foregroundStyle(.tint)
+                            Text("Library")
+                                .font(.largeTitle.weight(.bold))
+                                .tracking(-1.1)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    .padding(.bottom, 12)
+
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                             .foregroundStyle(.secondary)

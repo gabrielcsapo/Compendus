@@ -19,8 +19,7 @@ struct HeroContinueReadingCard: View {
                 // Cover image
                 coverImage
                     .frame(width: 90, height: 135)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                    .bookObjectStyle()
 
                 // Info
                 VStack(alignment: .leading, spacing: 6) {

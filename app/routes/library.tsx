@@ -4,7 +4,8 @@ import { getSeriesWithCovers, getSeriesBooksOtherFormats } from "../actions/seri
 import { ExploreSections } from "../components/ExploreSections";
 import { EmptyLibrary } from "../components/EmptyLibrary";
 import { getCoverUrl } from "../lib/cover";
-import type { BookType } from "../lib/book-types";
+import type { BookType, ReadingState } from "../lib/book-types";
+import type { LibraryDensity } from "../components/LibraryToolbar";
 import type { SortOption } from "../components/SortDropdown";
 import type { TypeFilter } from "../components/TypeTabs";
 import LibraryClient from "./library.client";
@@ -49,6 +50,12 @@ async function LibraryData() {
     typeParam && ["audiobook", "ebook", "comic"].includes(typeParam) ? typeParam : "all";
   const formatParam = searchParams.get("format");
   const format = formatParam ? formatParam.split(",").filter(Boolean) : undefined;
+  const stateParam = searchParams.get("state");
+  const readingState: ReadingState | undefined =
+    stateParam && ["in-progress", "unread", "finished"].includes(stateParam)
+      ? (stateParam as ReadingState)
+      : undefined;
+  const density: LibraryDensity = searchParams.get("density") === "compact" ? "compact" : "covers";
 
   const { orderBy, order } = getSortParams(sort);
   const typeFilter = type !== "all" ? type : undefined;
@@ -75,6 +82,9 @@ async function LibraryData() {
           currentSort: sort,
           currentType: type,
           currentFormats: format ?? [],
+          currentReadingState: readingState,
+          currentDensity: density,
+          typeCounts: { ebook: 0, audiobook: 0, comic: 0 },
           formatCounts: [],
           otherFormatBooks: [],
         }}
@@ -86,7 +96,12 @@ async function LibraryData() {
   }
 
   if (view === "series") {
-    const rawSeriesList = await getSeriesWithCovers(typeFilter);
+    const [rawSeriesList, ebookCount, audiobookCount, comicCount] = await Promise.all([
+      getSeriesWithCovers(typeFilter),
+      getBooksCount("ebook"),
+      getBooksCount("audiobook"),
+      getBooksCount("comic"),
+    ]);
     const seriesList = rawSeriesList.map((s) => ({
       ...s,
       coverBooks: s.coverBooks.map((b) => ({
@@ -105,7 +120,10 @@ async function LibraryData() {
           unmatchedCount: 0,
           currentSort: sort,
           currentType: type,
-          currentFormats: format ?? [],
+          currentFormats: [],
+          currentReadingState: undefined,
+          currentDensity: "covers",
+          typeCounts: { ebook: ebookCount, audiobook: audiobookCount, comic: comicCount },
           formatCounts: [],
           otherFormatBooks: [],
         }}
@@ -113,7 +131,16 @@ async function LibraryData() {
     );
   }
 
-  const [books, totalCount, unmatchedCount, formatCounts, otherFormatBooks] = await Promise.all([
+  const [
+    books,
+    totalCount,
+    unmatchedCount,
+    formatCounts,
+    otherFormatBooks,
+    ebookCount,
+    audiobookCount,
+    comicCount,
+  ] = await Promise.all([
     getBooks({
       limit: BOOKS_PER_PAGE,
       offset: 0,
@@ -121,14 +148,18 @@ async function LibraryData() {
       order,
       type: typeFilter,
       format,
+      readingState,
       series: seriesFilter || undefined,
     }),
-    getBooksCount(typeFilter, format, seriesFilter || undefined),
+    getBooksCount(typeFilter, format, seriesFilter || undefined, readingState),
     getUnmatchedBooksCount(),
     getFormatCounts(typeFilter),
     seriesFilter && typeFilter
       ? getSeriesBooksOtherFormats(seriesFilter, typeFilter)
       : Promise.resolve([]),
+    getBooksCount("ebook"),
+    getBooksCount("audiobook"),
+    getBooksCount("comic"),
   ]);
 
   return (
@@ -143,6 +174,9 @@ async function LibraryData() {
         currentSort: sort,
         currentType: type,
         currentFormats: format ?? [],
+        currentReadingState: readingState,
+        currentDensity: density,
+        typeCounts: { ebook: ebookCount, audiobook: audiobookCount, comic: comicCount },
         formatCounts,
         otherFormatBooks,
       }}

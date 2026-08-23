@@ -13,7 +13,7 @@ import Observation
 import SwiftData
 import UIKit
 
-final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPNowPlayingTemplateObserver {
 
     private var interfaceController: CPInterfaceController?
     private var tabBarTemplate: CPTabBarTemplate?
@@ -33,6 +33,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         let tabBar = makeTabBar()
         self.tabBarTemplate = tabBar
         interfaceController.setRootTemplate(tabBar, animated: false, completion: nil)
+        CPNowPlayingTemplate.shared.add(self)
         startObserving()
     }
 
@@ -40,6 +41,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         _ templateApplicationScene: CPTemplateApplicationScene,
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
+        CPNowPlayingTemplate.shared.remove(self)
         stopObserving()
         self.interfaceController = nil
         self.tabBarTemplate = nil
@@ -259,17 +261,26 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func presentNowPlayingIfNeeded() {
         guard let controller = interfaceController else { return }
         let nowPlaying = CPNowPlayingTemplate.shared
+        let chapters = AppDelegate.shared?.audiobookPlayer?.currentBook?.chapters ?? []
 
-        if let chapters = AppDelegate.shared?.audiobookPlayer?.currentBook?.chapters,
-           !chapters.isEmpty,
-           let chapterIcon = UIImage(systemName: "list.bullet") {
+        nowPlaying.isUpNextButtonEnabled = !chapters.isEmpty
+        nowPlaying.upNextTitle = "Chapters"
+        nowPlaying.isAlbumArtistButtonEnabled = false
+
+        var controls: [CPNowPlayingButton] = []
+
+        if !chapters.isEmpty, let chapterIcon = UIImage(systemName: "list.bullet") {
             let chapterButton = CPNowPlayingImageButton(image: chapterIcon) { [weak self] _ in
                 self?.pushChapterList(chapters: chapters)
             }
-            nowPlaying.updateNowPlayingButtons([chapterButton])
-        } else {
-            nowPlaying.updateNowPlayingButtons([])
+            controls.append(chapterButton)
         }
+
+        let rateButton = CPNowPlayingPlaybackRateButton { [weak self] _ in
+            self?.cyclePlaybackRate()
+        }
+        controls.append(rateButton)
+        nowPlaying.updateNowPlayingButtons(controls)
 
         if controller.topTemplate !== nowPlaying {
             controller.pushTemplate(nowPlaying, animated: true, completion: nil)
@@ -280,6 +291,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         guard let player = AppDelegate.shared?.audiobookPlayer else { return }
         let items = chapters.map { chapter -> CPListItem in
             let item = CPListItem(text: chapter.title, detailText: chapter.startTimeDisplay)
+            let end = chapter.endTime ?? .infinity
+            item.isPlaying = player.currentTime >= chapter.startTime && player.currentTime < end
             item.handler = { _, completion in
                 Task { @MainActor in
                     player.seek(to: chapter.startTime)
@@ -290,6 +303,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
         let template = CPListTemplate(title: "Chapters", sections: [CPListSection(items: items)])
         interfaceController?.pushTemplate(template, animated: true, completion: nil)
+    }
+
+    private func cyclePlaybackRate() {
+        guard let player = AppDelegate.shared?.audiobookPlayer else { return }
+        let rates: [Float] = [0.75, 1, 1.25, 1.5, 2]
+        let nextRate = rates.first { $0 > player.playbackRate + 0.01 } ?? rates[0]
+        player.setPlaybackRate(nextRate)
+    }
+
+    // MARK: - Now Playing observer
+
+    func nowPlayingTemplateUpNextButtonTapped(_ nowPlayingTemplate: CPNowPlayingTemplate) {
+        guard let chapters = AppDelegate.shared?.audiobookPlayer?.currentBook?.chapters,
+              !chapters.isEmpty else { return }
+        pushChapterList(chapters: chapters)
     }
 
     // MARK: - Data

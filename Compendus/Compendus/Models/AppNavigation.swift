@@ -9,12 +9,12 @@ import SwiftUI
 
 @Observable
 class AppNavigation {
-    /// 0 = Today, 1 = Library, 2 = Highlights, 3 = Me, 4 = Explore
+    /// 0 = Today, 1 = Library, 2 = Wander, 3 = You
     var selectedTab: Int = 0 {
         didSet {
-            if selectedTab == 4, oldValue != 4 {
+            if selectedTab == 2, oldValue != 2 {
                 previousTabBeforeExplore = oldValue
-            } else if selectedTab != 4 {
+            } else if selectedTab != 2 {
                 previousTabBeforeExplore = selectedTab
             }
         }

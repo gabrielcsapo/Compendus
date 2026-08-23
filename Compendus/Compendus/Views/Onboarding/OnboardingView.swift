@@ -36,15 +36,19 @@ struct OnboardingView: View {
                     VStack(spacing: Spacing.xxl) {
                         Spacer()
 
-                        ZStack {
-                            Circle()
-                                .fill(Color.accentColor.opacity(Opacity.light))
-                                .frame(width: 140, height: 140)
+                        if index == 0 {
+                            CompendusMarkView(size: 116)
+                        } else {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.accentColor.opacity(Opacity.light))
+                                    .frame(width: 140, height: 140)
 
-                            Image(systemName: page.icon)
-                                .font(.system(size: 60))
-                                .foregroundStyle(.accent)
-                                .symbolRenderingMode(.hierarchical)
+                                Image(systemName: page.icon)
+                                    .font(.system(size: 60))
+                                    .foregroundStyle(.accent)
+                                    .symbolRenderingMode(.hierarchical)
+                            }
                         }
 
                         VStack(spacing: Spacing.sm) {

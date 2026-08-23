@@ -3,9 +3,11 @@
 import { useRef, useState } from "react";
 import { Link, useRouter } from "react-flight-router/client";
 import { BookCover } from "./BookCover";
+import { BookObject } from "./BookObject";
 import { useToast } from "./ToastContext";
 import { setBookAside } from "../actions/books";
 import type { BookWithState } from "../actions/books";
+import { getBookType } from "../lib/book-types";
 
 interface BookCarouselProps {
   title: string;
@@ -53,7 +55,7 @@ export function BookCarousel({
     <section>
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-lg font-bold text-foreground">{title}</h2>
+          <h2 className="text-2xl font-bold tracking-[-0.035em] text-foreground">{title}</h2>
           {subtitle && <p className="mt-0.5 text-xs text-foreground-muted">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-2">
@@ -99,7 +101,7 @@ export function BookCarousel({
       </div>
       <div
         ref={scrollRef}
-        className="flex gap-3 overflow-x-auto pb-1"
+        className="-mx-5 -mt-6 flex gap-4 overflow-x-auto px-5 pb-6 pt-6"
         style={{ scrollbarWidth: "none" }}
       >
         {visibleBooks.map((book) => {
@@ -110,18 +112,18 @@ export function BookCarousel({
           } catch {}
 
           return (
-            <article key={book.id} className="relative flex-none w-[clamp(8rem,9vw,10.5rem)] group">
+            <article
+              key={book.id}
+              className="group relative w-[clamp(9.5rem,14vw,12rem)] flex-none"
+            >
               <Link to={`/book/${book.id}`} className="block">
-                <div
-                  className="aspect-[2/3] rounded-lg overflow-hidden shadow-sm group-hover:shadow-md transition-shadow"
+                <BookObject
+                  type={getBookType(book.format, book.bookTypeOverride)}
                   style={{ backgroundColor: book.coverColor || undefined }}
                 >
-                  <BookCover
-                    book={book}
-                    imgClassName="group-hover:scale-105 transition-transform duration-300"
-                  />
-                </div>
-                <p className="text-xs font-medium text-foreground mt-1.5 line-clamp-2 leading-tight">
+                  <BookCover book={book} />
+                </BookObject>
+                <p className="mt-2 line-clamp-2 text-sm font-semibold leading-tight text-foreground transition-colors group-hover:text-primary">
                   {book.title}
                 </p>
                 {authors.length > 0 && (
@@ -137,7 +139,7 @@ export function BookCarousel({
                 {progressPercent > 0 && (
                   <div className="mt-1.5 h-0.5 bg-surface-elevated rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-primary rounded-full"
+                      className="h-full bg-accent rounded-full"
                       style={{ width: `${progressPercent}%` }}
                     />
                   </div>

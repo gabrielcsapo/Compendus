@@ -1,6 +1,7 @@
 import { Link, Outlet } from "react-router";
 import { DarkModeToggle } from "./DarkModeToggle";
 import { CompendusLogo } from "@app/components/CompendusLogo";
+import { CompendusWordmark } from "@app/components/CompendusWordmark";
 
 export function LandingLayout() {
   return (
@@ -11,7 +12,8 @@ export function LandingLayout() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 shrink-0">
             <CompendusLogo className="w-6 h-6 text-primary" />
-            <span className="font-semibold text-foreground">Compendus</span>
+            <CompendusWordmark className="h-[1.15rem] w-auto text-foreground" />
+            <span className="sr-only">Compendus</span>
           </Link>
 
           <div className="flex-1" />

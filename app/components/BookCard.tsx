@@ -3,12 +3,11 @@ import { Link } from "react-flight-router/client";
 import type { Book } from "../lib/db/schema";
 import { AuthorLinks } from "./AuthorLink";
 import { BookCover } from "./BookCover";
+import { BookObject } from "./BookObject";
 import {
   getBookType,
   isConvertibleFormat,
   getConversionTarget,
-  isReflowableFormat,
-  ccdStatusOf,
   type BookType,
 } from "../lib/book-types";
 
@@ -32,146 +31,107 @@ function TypeIcon({ type }: { type: BookType }) {
       </svg>
     );
   }
+  if (type === "comic") {
+    return (
+      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="2" strokeWidth={2} />
+        <path strokeLinecap="round" strokeWidth={2} d="M12 4v16M4 12h16" />
+      </svg>
+    );
+  }
   return null;
 }
 
-function getBadgeStyles(type: BookType, convertible?: boolean): string {
-  if (type === "audiobook") {
-    return "bg-accent-light text-accent";
-  }
-  if (convertible) {
-    return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
-  }
-  return "bg-primary-light text-primary";
+function formatDuration(seconds: number): string {
+  const totalMinutes = Math.max(1, Math.round(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
+
+function getCoverMeta(book: Book, type: BookType): string | null {
+  if (type === "audiobook" && book.duration && book.duration > 0) {
+    return formatDuration(book.duration);
+  }
+  if (type === "comic" && book.pageCount && book.pageCount > 0) {
+    return `${book.pageCount} pages`;
+  }
+  return null;
+}
+
+const embeddedLabelShadow = {
+  textShadow: "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.72)",
+};
 
 export const BookCard = memo(function BookCard({ book, size = "default" }: BookCardProps) {
   const authors = useMemo(() => (book.authors ? JSON.parse(book.authors) : []), [book.authors]);
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
   const bookType = getBookType(book.format, book.bookTypeOverride);
   const compact = size === "compact";
-
-  // Reflowable books (epub/mobi/azw3) read through CCD; gate the quick "Read"
-  // overlay on its readiness. PDFs read natively and comics/audio aren't gated.
-  const ccdStatus = isReflowableFormat(book.format) ? ccdStatusOf(book) : "ready";
-  const ccdReady = ccdStatus === "ready";
+  const coverMeta = getCoverMeta(book, bookType);
+  const hasEmbeddedFormatLabel = bookType === "audiobook" || bookType === "comic";
 
   return (
-    <div className="group relative bg-surface border border-border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30">
-      {/* Cover with quick action overlay */}
-      <Link
-        to={`/book/${book.id}`}
-        className="block aspect-[2/3] w-full overflow-hidden bg-surface-elevated relative"
-        style={{ backgroundColor: book.coverColor || undefined }}
-      >
-        <BookCover
-          book={book}
-          imgClassName="group-hover:scale-105 transition-transform duration-300"
-        />
+    <article className="book-card group relative z-0 min-w-0 hover:z-20 focus-within:z-20">
+      {/* BookObject owns the type-gated physical hover behavior. */}
+      <Link to={`/book/${book.id}`} className="relative block w-full">
+        <BookObject type={bookType} style={{ backgroundColor: book.coverColor || undefined }}>
+          <BookCover book={book} />
 
-        {/* Format badge overlay */}
-        {book.convertedEpubPath && isConvertibleFormat(book.format) ? (
-          <span
-            className={`absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full uppercase tracking-wide bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 shadow-sm`}
-          >
-            <TypeIcon type={bookType} />
-            {getConversionTarget(book.format)}
-          </span>
-        ) : (
-          <span
-            className={`absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full uppercase tracking-wide ${getBadgeStyles(bookType, isConvertibleFormat(book.format))} shadow-sm`}
-          >
-            <TypeIcon type={bookType} />
-            {book.format}
-            {isConvertibleFormat(book.format) && (
-              <svg
-                className="w-3 h-3 opacity-70"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+          {/* Option C treats format metadata as part of the jacket, not a floating badge. */}
+          {hasEmbeddedFormatLabel ? (
+            <span
+              className="absolute right-3 top-3 z-20 inline-flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-[0.15em] text-white"
+              style={embeddedLabelShadow}
+            >
+              <TypeIcon type={bookType} />
+              {bookType === "audiobook"
+                ? "Audio"
+                : book.seriesNumber
+                  ? `Issue ${book.seriesNumber}`
+                  : "Comic"}
+            </span>
+          ) : book.convertedEpubPath && isConvertibleFormat(book.format) ? (
+            <span className="absolute right-2 top-2 z-20 inline-flex items-center rounded-full bg-black/55 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-white shadow-sm backdrop-blur-md">
+              {getConversionTarget(book.format)}
+            </span>
+          ) : null}
+
+          {coverMeta && (
+            <span
+              className="absolute bottom-3 right-3 z-20 text-[9px] font-bold tracking-[0.08em] text-white tabular-nums"
+              style={embeddedLabelShadow}
+            >
+              {coverMeta}
+            </span>
+          )}
+
+          {/* Read badge */}
+          {book.isRead && (
+            <span
+              className="absolute left-2 top-2 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-success text-white shadow-sm"
+              title="Read"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  strokeWidth={3}
+                  d="M5 13l4 4L19 7"
                 />
               </svg>
-            )}
-          </span>
-        )}
-
-        {/* Read badge */}
-        {book.isRead && (
-          <span
-            className="absolute top-2 left-2 w-6 h-6 rounded-full bg-success text-white flex items-center justify-center shadow-sm"
-            title="Read"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={3}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          </span>
-        )}
+            </span>
+          )}
+        </BookObject>
       </Link>
 
-      {/* Hover overlay with quick action - positioned absolutely over the card */}
-      <div className="absolute inset-0 aspect-[2/3] bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
-        {ccdReady ? (
-          <Link
-            to={`/book/${book.id}/read`}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium text-sm hover:bg-primary-hover transition-colors shadow-lg pointer-events-auto"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-              />
-            </svg>
-            {progressPercent > 0 ? "Continue" : "Read"}
-          </Link>
-        ) : (
-          <span
-            className="flex items-center gap-2 px-4 py-2 bg-black/50 text-white/90 rounded-lg font-medium text-xs shadow-lg"
-            title={
-              ccdStatus === "failed"
-                ? "This book couldn't be prepared for reading."
-                : "This book is still being prepared for reading."
-            }
-          >
-            {ccdStatus === "failed" ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-                Unavailable
-              </>
-            ) : (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Preparing…
-              </>
-            )}
-          </span>
-        )}
-      </div>
-
       {/* Info */}
-      <div className={compact ? "p-2" : "p-4"}>
+      <div className={compact ? "px-0.5 pt-2" : "px-0.5 pb-2 pt-3"}>
         <Link to={`/book/${book.id}`} className="block">
           <h3
-            className={`font-semibold line-clamp-2 mb-1 text-foreground ${compact ? "text-xs" : "text-sm"}`}
+            className={`mb-1 line-clamp-2 font-semibold leading-snug text-foreground transition-colors group-hover:text-primary ${compact ? "text-xs" : "text-[13px]"}`}
           >
             {book.title}
           </h3>
@@ -202,14 +162,18 @@ export const BookCard = memo(function BookCard({ book, size = "default" }: BookC
         {progressPercent > 0 && (
           <div className="mt-2">
             <div
-              className={`bg-surface-elevated rounded-full overflow-hidden ${compact ? "h-1" : "h-1.5"}`}
+              className={`bg-surface-elevated rounded-full overflow-hidden ${compact ? "h-1" : "h-1"}`}
             >
               <div
-                className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300"
+                className="h-full bg-accent rounded-full transition-all duration-300"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            {!compact && <p className="text-xs text-foreground-muted mt-1">{progressPercent}%</p>}
+            {!compact && (
+              <p className="mt-1 text-[10px] font-medium text-foreground-muted">
+                {progressPercent}% read
+              </p>
+            )}
           </div>
         )}
 
@@ -235,6 +199,6 @@ export const BookCard = memo(function BookCard({ book, size = "default" }: BookC
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 });

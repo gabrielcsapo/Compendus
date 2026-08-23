@@ -7,6 +7,7 @@ import { getBooks } from "../actions/books";
 import { getCuratedDiscovery } from "../lib/discovery/curation";
 import { resolveProfileId } from "../lib/profile";
 import type { BookType } from "../lib/book-types";
+import { ContinueReadingHero } from "./ContinueReadingHero";
 
 // Each section is its own async server component awaiting only its own data,
 // wrapped in a Suspense boundary so it streams in independently. Cheap,
@@ -16,13 +17,13 @@ import type { BookType } from "../lib/book-types";
 async function ContinueReadingSection({ typeFilter }: { typeFilter?: BookType }) {
   const books = await getInProgressBooks(undefined, typeFilter);
   if (books.length === 0) return null;
-  return <BookCarousel title="Continue Reading" books={books.slice(0, 10)} allowSetAside />;
+  return <ContinueReadingHero book={books[0]} />;
 }
 
 async function ReadNextSection() {
   const items = await getReadNextInSeries();
   if (items.length === 0) return null;
-  return <BookCarousel title="Read Next in Series" books={items.slice(0, 10).map((r) => r.book)} />;
+  return <BookCarousel title="Next in the story" books={items.slice(0, 10).map((r) => r.book)} />;
 }
 
 async function RecentlyAddedSection({ typeFilter }: { typeFilter?: BookType }) {
@@ -30,7 +31,8 @@ async function RecentlyAddedSection({ typeFilter }: { typeFilter?: BookType }) {
   if (books.length === 0) return null;
   return (
     <BookCarousel
-      title="Recently Added"
+      title="On your shelf"
+      subtitle="Not a feed. Just the books you’ve already chosen."
       books={books.slice(0, 10)}
       seeAllHref="/library?view=grid"
     />
@@ -64,18 +66,18 @@ async function CuratedDiscoverySections({ typeFilter }: { typeFilter?: BookType 
  */
 export function ExploreSections({ typeFilter }: { typeFilter?: BookType }) {
   return (
-    <div className="space-y-10 pb-8">
+    <div className="space-y-12 pb-12 sm:space-y-16">
       <Suspense fallback={<CarouselSkeleton titleWidth="w-40" />}>
         <ContinueReadingSection typeFilter={typeFilter} />
+      </Suspense>
+      <Suspense fallback={<CarouselSkeleton titleWidth="w-36" />}>
+        <RecentlyAddedSection typeFilter={typeFilter} />
       </Suspense>
       <Suspense fallback={<CarouselSkeleton titleWidth="w-44" />}>
         <ReadNextSection />
       </Suspense>
       <Suspense fallback={<CarouselSkeleton titleWidth="w-44" />}>
         <CuratedDiscoverySections typeFilter={typeFilter} />
-      </Suspense>
-      <Suspense fallback={<CarouselSkeleton titleWidth="w-36" />}>
-        <RecentlyAddedSection typeFilter={typeFilter} />
       </Suspense>
     </div>
   );

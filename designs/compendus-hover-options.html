@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Compendus · Cover hover studies</title>
+    <style>
+      :root {
+        --paper: #f4f6f2;
+        --paper-strong: #fffefa;
+        --ink: #15201b;
+        --muted: #68716c;
+        --line: #d9dfda;
+        --forest: #2f674f;
+        --forest-deep: #173a2d;
+        --sage: #d9e8df;
+        --yellow: #efc650;
+        --page: #e7e0cf;
+        --page-dark: #c9c2b1;
+        --serif: Iowan Old Style, Baskerville, Georgia, serif;
+        --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 78% -20%, rgba(207, 225, 215, 0.62), transparent 34rem),
+          var(--paper);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .shell {
+        width: min(1440px, calc(100% - 48px));
+        margin: 0 auto;
+      }
+
+      header {
+        min-height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+      }
+      .mark {
+        width: 25px;
+        height: 29px;
+        background: url("../public/brand/compendus-mark.svg") center / contain no-repeat;
+      }
+      .brand-type {
+        width: 112px;
+        height: 23px;
+        background: url("../public/brand/compendus-wordmark.svg") center / contain no-repeat;
+      }
+      .utility {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .intro {
+        padding: 78px 0 54px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 410px);
+        gap: 72px;
+        align-items: end;
+      }
+
+      .eyebrow {
+        color: var(--forest);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 14px 0 17px;
+        max-width: 850px;
+        font-size: clamp(48px, 6vw, 86px);
+        line-height: 0.94;
+        letter-spacing: -0.065em;
+      }
+      .lede {
+        margin: 0;
+        max-width: 660px;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.55;
+      }
+      .intro-note {
+        padding: 22px 24px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.55);
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .intro-note strong {
+        color: var(--ink);
+      }
+
+      .study {
+        padding: 35px 0 62px;
+        border-top: 1px solid var(--line);
+      }
+      .study-heading {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 36px;
+        margin-bottom: 31px;
+      }
+      .option-label {
+        margin: 0 0 8px;
+        color: var(--forest);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      h2 {
+        margin: 0;
+        font-size: clamp(28px, 3vw, 42px);
+        letter-spacing: -0.045em;
+      }
+      .description {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+        align-self: end;
+      }
+      .recommend {
+        display: inline-flex;
+        margin-left: 10px;
+        padding: 6px 9px;
+        transform: translateY(-4px);
+        border-radius: 999px;
+        background: var(--yellow);
+        font-size: 10px;
+        font-weight: 850;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .comparison {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.56);
+      }
+
+      .specimen {
+        min-width: 0;
+        padding: 40px 26px 26px;
+        border-right: 1px solid var(--line);
+      }
+      .specimen:last-child {
+        border-right: 0;
+      }
+      .stage {
+        position: relative;
+        display: grid;
+        min-height: 286px;
+        place-items: center;
+        perspective: 1100px;
+        border-radius: 14px;
+        background: linear-gradient(160deg, #edf1ec, #e6ebe6);
+        overflow: hidden;
+      }
+      .stage::after {
+        content: "";
+        position: absolute;
+        left: 12%;
+        right: 12%;
+        bottom: 25px;
+        height: 1px;
+        background: #ccd4ce;
+      }
+
+      .media-object {
+        position: relative;
+        z-index: 1;
+        width: 146px;
+        aspect-ratio: 2 / 3;
+        border: 0;
+        padding: 0;
+        color: inherit;
+        background: transparent;
+        cursor: pointer;
+        outline: none;
+        transform-style: preserve-3d;
+      }
+
+      .page-block {
+        position: absolute;
+        z-index: 0;
+        inset: 3px -6px -5px 7px;
+        border-radius: 6px 13px 13px 6px;
+        background:
+          repeating-linear-gradient(0deg, transparent 0 3px, rgba(83, 73, 53, 0.09) 3px 4px),
+          linear-gradient(90deg, var(--page), #fbf6e9 58%, var(--page-dark));
+        box-shadow: 0 12px 22px rgba(22, 37, 29, 0.15);
+        transition:
+          transform 440ms cubic-bezier(0.2, 0.72, 0.18, 1),
+          box-shadow 440ms ease;
+      }
+
+      .front {
+        position: absolute;
+        z-index: 2;
+        inset: 0;
+        overflow: hidden;
+        border-radius: 7px 12px 12px 7px;
+        box-shadow:
+          inset 3px 0 4px rgba(5, 10, 8, 0.28),
+          0 14px 24px rgba(20, 34, 27, 0.2);
+        transform-origin: 3px 50%;
+        transform-style: preserve-3d;
+        transition:
+          transform 440ms cubic-bezier(0.2, 0.72, 0.18, 1),
+          box-shadow 440ms ease,
+          filter 300ms ease;
+        backface-visibility: hidden;
+      }
+      .front::before {
+        content: "";
+        position: absolute;
+        z-index: 4;
+        inset: 0 auto 0 8px;
+        width: 1px;
+        background: rgba(255, 255, 255, 0.35);
+        box-shadow: -2px 0 3px rgba(0, 0, 0, 0.24);
+      }
+      .front::after {
+        content: "";
+        position: absolute;
+        z-index: 4;
+        inset: 0;
+        background: linear-gradient(
+          105deg,
+          rgba(255, 255, 255, 0.3),
+          transparent 18%,
+          transparent 75%,
+          rgba(255, 255, 255, 0.13)
+        );
+        opacity: 0.72;
+        transition:
+          transform 500ms ease,
+          opacity 300ms ease;
+      }
+      .art {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 16px 14px 13px;
+        text-align: left;
+      }
+      .art small {
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.72;
+      }
+      .art strong {
+        font-family: var(--serif);
+        font-size: 25px;
+        line-height: 0.9;
+        letter-spacing: -0.05em;
+      }
+      .art span {
+        font-size: 8px;
+        font-weight: 650;
+        opacity: 0.8;
+      }
+      .book-art {
+        color: #f8f1d6;
+        background:
+          radial-gradient(circle at 70% 25%, #557b66, transparent 23%),
+          linear-gradient(145deg, #19382c, #366049 55%, #b88838);
+      }
+      .audio-art {
+        color: #ecf3ee;
+        background:
+          radial-gradient(
+            circle at 48% 37%,
+            transparent 0 18%,
+            rgba(239, 198, 80, 0.95) 18.5% 21%,
+            transparent 21.5%
+          ),
+          radial-gradient(circle at 48% 37%, #203f34 0 35%, transparent 35.5%),
+          linear-gradient(145deg, #88a898, #284c3d);
+      }
+      .comic-art {
+        color: #10261c;
+        background:
+          radial-gradient(circle at 77% 15%, #fff7c7 0 8%, transparent 8.5%),
+          linear-gradient(135deg, #f0c64d 0 46%, #d96946 46% 62%, #f6eedc 62%);
+      }
+      .comic-art strong {
+        max-width: 100px;
+        font-family: Impact, Haettenschweiler, sans-serif;
+        font-size: 30px;
+        line-height: 0.78;
+        text-transform: uppercase;
+        transform: rotate(-4deg);
+      }
+
+      .type-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding-top: 19px;
+      }
+      .type-row strong {
+        font-size: 14px;
+        letter-spacing: -0.02em;
+      }
+      .type-row span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .reaction {
+        margin: 12px 0 0;
+        min-height: 38px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      /* A — quiet, shared movement */
+      .quiet .media-object {
+        transition: transform 440ms cubic-bezier(0.2, 0.72, 0.18, 1);
+      }
+      .quiet .media-object:hover,
+      .quiet .media-object:focus-visible {
+        transform: translateY(-10px) rotateY(-4deg) rotateX(1.5deg);
+      }
+      .quiet .media-object:hover .front,
+      .quiet .media-object:focus-visible .front {
+        box-shadow:
+          inset 3px 0 4px rgba(5, 10, 8, 0.26),
+          10px 22px 30px rgba(20, 34, 27, 0.24);
+      }
+      .quiet .media-object:hover .page-block,
+      .quiet .media-object:focus-visible .page-block {
+        transform: translate(2px, 2px);
+      }
+
+      /* B — literally cracks the cover; the physical reading cue */
+      .crack .media-object {
+        transition: transform 450ms cubic-bezier(0.2, 0.72, 0.18, 1);
+      }
+      .crack .media-object:hover,
+      .crack .media-object:focus-visible {
+        transform: translateY(-6px) rotateY(-2deg);
+      }
+      .crack .media-object:hover .front,
+      .crack .media-object:focus-visible .front {
+        transform: rotateY(-13deg) translateZ(2px);
+        box-shadow:
+          inset 3px 0 4px rgba(5, 10, 8, 0.24),
+          14px 20px 27px rgba(20, 34, 27, 0.22);
+      }
+      .crack .media-object:hover .page-block,
+      .crack .media-object:focus-visible .page-block {
+        transform: translateX(4px) scaleX(1.025);
+        box-shadow: 6px 16px 23px rgba(22, 37, 29, 0.19);
+      }
+      .crack .media-object:hover .front::after,
+      .crack .media-object:focus-visible .front::after {
+        transform: translateX(-28%);
+        opacity: 0.44;
+      }
+
+      /* C — physical motion changes with the format */
+      .format .media-object {
+        transition: transform 450ms cubic-bezier(0.2, 0.72, 0.18, 1);
+      }
+      .format .book-object:hover,
+      .format .book-object:focus-visible {
+        transform: translate(-3px, -7px) rotateY(-9deg);
+      }
+      .format .book-object:hover .page-block,
+      .format .book-object:focus-visible .page-block {
+        transform: translateX(5px);
+      }
+      .format .audio-object {
+        transform-style: flat;
+      }
+      .format .audio-object .page-block {
+        z-index: 1;
+        inset: 45px auto auto 12px;
+        width: 128px;
+        height: 128px;
+        border: 1px solid rgba(78, 92, 85, 0.28);
+        border-radius: 50%;
+        background:
+          radial-gradient(
+            circle,
+            transparent 0 7px,
+            rgba(255, 255, 255, 0.92) 7.5px 10px,
+            rgba(91, 111, 102, 0.5) 10.5px 12px,
+            transparent 12.5px
+          ),
+          conic-gradient(
+            from 18deg,
+            #d8e5df,
+            #fff5bd 12%,
+            #d9a6cf 20%,
+            #91c9df 29%,
+            #eef3ef 40%,
+            #efc650 48%,
+            #dfece6 59%,
+            #99d4bd 68%,
+            #dba9cf 77%,
+            #f4f7f5 89%,
+            #d8e5df
+          );
+        box-shadow: 2px 11px 20px rgba(22, 37, 29, 0.2);
+      }
+      .format .audio-object .front {
+        z-index: 3;
+      }
+      .format .audio-object .page-block::after {
+        content: "";
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 17px;
+        height: 17px;
+        border: 1px solid rgba(54, 72, 63, 0.38);
+        border-radius: 50%;
+        background: rgba(245, 248, 246, 0.78);
+        box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.55);
+        transform: translate(-50%, -50%);
+      }
+      .format .audio-object:hover,
+      .format .audio-object:focus {
+        transform: translateY(-7px);
+      }
+      .format .audio-object:hover .front,
+      .format .audio-object:focus .front {
+        transform: translate(-4px, -3px) rotateZ(-0.7deg);
+      }
+      .format .audio-object:hover .page-block,
+      .format .audio-object:focus .page-block {
+        animation: cd-peek-forward 460ms cubic-bezier(0.18, 0.76, 0.2, 1) both;
+        box-shadow: 7px 13px 20px rgba(22, 37, 29, 0.22);
+      }
+      @keyframes cd-peek-forward {
+        from {
+          transform: translateX(0) rotate(0deg) scale(0.97);
+        }
+        to {
+          transform: translateX(30px) rotate(72deg) scale(0.98);
+        }
+      }
+      .format .comic-object:hover,
+      .format .comic-object:focus-visible {
+        transform: translateY(-7px) rotateZ(-1deg);
+      }
+      .format .comic-object:hover .front,
+      .format .comic-object:focus-visible .front {
+        transform: translate(-4px, -3px) rotateZ(-1.5deg);
+        box-shadow:
+          6px 6px 0 #f0c64d,
+          12px 12px 0 #d96946,
+          16px 23px 28px rgba(20, 34, 27, 0.2);
+      }
+      .format .comic-object:hover .page-block,
+      .format .comic-object:focus-visible .page-block {
+        transform: translate(7px, 7px);
+      }
+
+      .verdict {
+        margin: 0 0 80px;
+        padding: 28px 30px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 20px;
+        align-items: center;
+        border-radius: 18px;
+        color: #edf6f0;
+        background: var(--forest-deep);
+      }
+      .verdict-icon {
+        width: 42px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        color: var(--forest-deep);
+        background: var(--yellow);
+        font-family: var(--serif);
+        font-size: 23px;
+      }
+      .verdict strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 16px;
+      }
+      .verdict span {
+        color: #b9cdc1;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .verdict-tag {
+        padding: 9px 12px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 999px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 800px) {
+        .shell {
+          width: min(100% - 28px, 600px);
+        }
+        .utility {
+          display: none;
+        }
+        .intro,
+        .study-heading {
+          grid-template-columns: 1fr;
+          gap: 22px;
+        }
+        .intro {
+          padding: 53px 0 42px;
+        }
+        .comparison {
+          grid-template-columns: 1fr;
+        }
+        .specimen {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .specimen:last-child {
+          border-bottom: 0;
+        }
+        .verdict {
+          grid-template-columns: auto 1fr;
+        }
+        .verdict-tag {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="shell">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span
+        ><span class="brand-type" aria-label="Compendus"></span>
+      </div>
+      <div class="utility">Motion study · Hover or tab into each cover</div>
+    </header>
+
+    <main class="shell">
+      <section class="intro">
+        <div>
+          <div class="eyebrow">Cover behavior</div>
+          <h1>Make it feel worth picking up.</h1>
+          <p class="lede">
+            Three ways a cover can respond without turning the library into a wall of buttons. Every
+            option keeps the actual artwork intact.
+          </p>
+        </div>
+        <aside class="intro-note">
+          <strong>How to compare</strong><br />Move across the ebook, audiobook, and comic in each
+          row. Look for weight, page depth, and whether the motion makes the format clearer.
+        </aside>
+      </section>
+
+      <section class="study quiet">
+        <div class="study-heading">
+          <div>
+            <p class="option-label">Option A · Universal</p>
+            <h2>Quiet shelf lift</h2>
+          </div>
+          <p class="description">
+            The whole volume rises and turns toward you. Calm, legible, and consistent across every
+            format—the safest extension of what is shipped now.
+          </p>
+        </div>
+        <div class="comparison">
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object book-object" aria-label="Preview ebook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art book-art"
+                    ><small>A field guide</small><strong>Moss &amp;<br />Memory</strong
+                    ><span>Eva North</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Ebook</strong><span>Lift + turn</span></div>
+            <p class="reaction">Feels like selecting a volume from a table.</p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object audio-object" aria-label="Preview audiobook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art audio-art"
+                    ><small>An audio essay</small><strong>The Listening<br />Room</strong
+                    ><span>6h 42m</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Audiobook</strong><span>Lift + turn</span></div>
+            <p class="reaction">Consistent, although it says little about sound.</p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object comic-object" aria-label="Preview comic hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art comic-art"
+                    ><small>Issue no. 08</small><strong>Light<br />Years</strong
+                    ><span>Alba Studio</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Comic</strong><span>Lift + turn</span></div>
+            <p class="reaction">Polished and quiet enough for dense shelves.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="study crack">
+        <div class="study-heading">
+          <div>
+            <p class="option-label">Option B · Tactile</p>
+            <h2>Crack the cover <span class="recommend">Recommended</span></h2>
+          </div>
+          <p class="description">
+            The front cover opens a few degrees while the page block holds still. This is the most
+            book-like gesture and stays restrained enough for the Compendus reading-room direction.
+          </p>
+        </div>
+        <div class="comparison">
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object book-object" aria-label="Preview ebook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art book-art"
+                    ><small>A field guide</small><strong>Moss &amp;<br />Memory</strong
+                    ><span>Eva North</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Ebook</strong><span>Cover opens 13°</span></div>
+            <p class="reaction">A direct invitation to read; page depth becomes obvious.</p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object audio-object" aria-label="Preview audiobook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art audio-art"
+                    ><small>An audio essay</small><strong>The Listening<br />Room</strong
+                    ><span>6h 42m</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Audiobook</strong><span>Cover opens 13°</span></div>
+            <p class="reaction">Still feels like a story object, though less audio-specific.</p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object comic-object" aria-label="Preview comic hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art comic-art"
+                    ><small>Issue no. 08</small><strong>Light<br />Years</strong
+                    ><span>Alba Studio</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Comic</strong><span>Cover opens 13°</span></div>
+            <p class="reaction">Feels like thumbing open an issue at the shop.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="study format" id="format-aware">
+        <div class="study-heading">
+          <div>
+            <p class="option-label">Option C · Expressive</p>
+            <h2>Let the format answer</h2>
+          </div>
+          <p class="description">
+            Each object reveals its nature: a book pulls open, a compact disc peeks from behind the
+            audiobook cover, and a comic splits into offset color panels.
+          </p>
+        </div>
+        <div class="comparison">
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object book-object" aria-label="Preview ebook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art book-art"
+                    ><small>A field guide</small><strong>Moss &amp;<br />Memory</strong
+                    ><span>Eva North</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Ebook</strong><span>Pull from shelf</span></div>
+            <p class="reaction">A firmer perspective turn emphasizes the spine.</p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object audio-object" aria-label="Preview audiobook hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art audio-art"
+                    ><small>An audio essay</small><strong>The Listening<br />Room</strong
+                    ><span>6h 42m</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Audiobook</strong><span>CD peeks out</span></div>
+            <p class="reaction">
+              The disc stays underneath and reveals only a reflective crescent.
+            </p>
+          </article>
+          <article class="specimen">
+            <div class="stage">
+              <button class="media-object comic-object" aria-label="Preview comic hover">
+                <span class="page-block"></span
+                ><span class="front"
+                  ><span class="art comic-art"
+                    ><small>Issue no. 08</small><strong>Light<br />Years</strong
+                    ><span>Alba Studio</span></span
+                  ></span
+                >
+              </button>
+            </div>
+            <div class="type-row"><strong>Comic</strong><span>Panel offset</span></div>
+            <p class="reaction">Energetic and unmistakably comic without covering the art.</p>
+          </article>
+        </div>
+      </section>
+
+      <aside class="verdict">
+        <div class="verdict-icon">C</div>
+        <div>
+          <strong>Selected direction: Let the format answer</strong
+          ><span
+            >Books pull from the shelf, audiobook discs peek from underneath, and comic panels
+            separate—three physical gestures with one shared pace and weight.</span
+          >
+        </div>
+        <div class="verdict-tag">460ms · one motion · no overlay</div>
+      </aside>
+    </main>
+  </body>
+</html>

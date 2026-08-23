@@ -45,10 +45,10 @@ extension AppTheme {
 
     static let defaultTheme = AppTheme(
         id: "default",
-        name: "Default",
+        name: "Juniper",
         isBuiltIn: true,
-        accentLightHex: "#3B86F6",
-        accentDarkHex: "#5A9DF6"
+        accentLightHex: "#245C49",
+        accentDarkHex: "#9CCAB8"
     )
 
     static let rose = AppTheme(

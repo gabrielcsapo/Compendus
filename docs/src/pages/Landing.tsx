@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { CodeBlock } from "@app/components/docs";
 import { CompendusLogo } from "@app/components/CompendusLogo";
+import { CompendusWordmark } from "@app/components/CompendusWordmark";
 import { ShowcaseBookCard } from "../components/ShowcaseBookCard";
 import { mockBooks } from "../data/mockBooks";
 
@@ -284,7 +285,7 @@ export default function Landing() {
               </div>
               <div className="flex items-center gap-0.5 ml-4">
                 <CompendusLogo className="w-5 h-5 text-primary" />
-                <span className="text-sm font-bold text-primary ml-1.5">Compendus</span>
+                <CompendusWordmark className="ml-1.5 h-3.5 w-auto text-primary" />
               </div>
             </div>
 
@@ -403,7 +404,7 @@ export default function Landing() {
               {/* Faux nav */}
               <div className="flex items-center gap-0.5 ml-4">
                 <CompendusLogo className="w-5 h-5 text-primary" />
-                <span className="text-sm font-bold text-primary ml-1.5 mr-3">Compendus</span>
+                <CompendusWordmark className="ml-1.5 mr-3 h-3.5 w-auto text-primary" />
                 {fakeNavItems.map((item, i) => (
                   <span
                     key={item}

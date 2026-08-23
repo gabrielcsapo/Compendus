@@ -47,15 +47,15 @@ export function MiniListenBar() {
 
   return (
     <div
-      className="fixed bottom-0 inset-x-0 z-40 bg-background/90 backdrop-blur-md border-t border-border cursor-pointer"
+      className="fixed bottom-0 inset-x-0 z-40 bg-[#151e1a]/96 text-white backdrop-blur-xl border-t border-white/10 cursor-pointer"
       onClick={() => navigate(readerPath!)}
       role="button"
       aria-label={`Open player for ${track.title}`}
     >
       {/* Hairline progress strip */}
-      <div className="h-[2px] w-full bg-border">
+      <div className="h-[2px] w-full bg-white/10">
         <div
-          className="h-full bg-primary transition-[width]"
+          className="h-full bg-[#f1c84b] transition-[width]"
           style={{ width: `${progress * 100}%` }}
         />
       </div>
@@ -75,11 +75,9 @@ export function MiniListenBar() {
         )}
 
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-foreground truncate">{track.title}</div>
+          <div className="text-sm font-medium text-white truncate">{track.title}</div>
           {chapterTitle && (
-            <div className="text-xs text-foreground-muted truncate hidden sm:block">
-              {chapterTitle}
-            </div>
+            <div className="text-xs text-white/55 truncate hidden sm:block">{chapterTitle}</div>
           )}
         </div>
 
@@ -88,7 +86,7 @@ export function MiniListenBar() {
             e.stopPropagation();
             skipBy(-15);
           }}
-          className="p-2 text-foreground-muted hover:text-foreground transition-colors"
+          className="p-2 text-white/55 hover:text-white transition-colors"
           aria-label="Skip back 15 seconds"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -101,7 +99,7 @@ export function MiniListenBar() {
             e.stopPropagation();
             toggle();
           }}
-          className="p-1.5 text-foreground hover:text-primary transition-colors"
+          className="p-1.5 text-white hover:text-[#f1c84b] transition-colors"
           aria-label={isPlaying ? "Pause" : "Play"}
         >
           {isPlaying ? (
@@ -120,7 +118,7 @@ export function MiniListenBar() {
             e.stopPropagation();
             skipBy(30);
           }}
-          className="p-2 text-foreground-muted hover:text-foreground transition-colors"
+          className="p-2 text-white/55 hover:text-white transition-colors"
           aria-label="Skip forward 30 seconds"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -128,7 +126,7 @@ export function MiniListenBar() {
           </svg>
         </button>
 
-        <span className="text-xs text-foreground-muted tabular-nums hidden sm:block">
+        <span className="text-xs text-white/55 tabular-nums hidden sm:block">
           -{formatAudioTime(Math.max(0, duration - currentTime))}
         </span>
 
@@ -137,7 +135,7 @@ export function MiniListenBar() {
             e.stopPropagation();
             stop();
           }}
-          className="p-2 text-foreground-muted hover:text-foreground transition-colors"
+          className="p-2 text-white/45 hover:text-white transition-colors"
           aria-label="Stop listening"
           title="Stop (position is saved)"
         >

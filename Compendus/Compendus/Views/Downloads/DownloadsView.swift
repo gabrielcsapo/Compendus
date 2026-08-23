@@ -391,6 +391,24 @@ struct DownloadsView: View {
 
     private var booksScrollContent: some View {
         ScrollView {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(Date.now, format: .dateTime.weekday(.wide).month(.wide).day())
+                    .font(.caption.weight(.semibold))
+                    .textCase(.uppercase)
+                    .tracking(1.2)
+                    .foregroundStyle(.tint)
+                Text("Make a little room.")
+                    .font(.system(.largeTitle, design: .serif, weight: .medium))
+                    .tracking(-0.8)
+                Text("Your books are waiting where you left them.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 22)
+            .padding(.bottom, 4)
+
             // Continue Reading section (local + remote books with progress)
             if showsContinueReading {
                 ContinueReadingSection(
@@ -442,49 +460,12 @@ struct DownloadsView: View {
             }
 
             if !books.isEmpty {
-                OfflineReadinessCard(books: books)
-                    .padding(.top, 12)
+                Text("Downloaded books stay available from Library, even when you’re offline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
             }
-
-            deviceBrowseControls
-
-            LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(cachedFilteredBooks) { book in
-                    NavigationLink(value: book) {
-                        DownloadedBookGridItem(book: book, onSeriesTap: { seriesName in
-                            seriesSheet = DownloadSeriesSheet(id: seriesName)
-                        })
-                    }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            toggleReadStatus(for: book)
-                        } label: {
-                            Label(
-                                book.isRead ? "Mark as Unread" : "Mark as Read",
-                                systemImage: book.isRead ? "checkmark.circle.fill" : "checkmark.circle"
-                            )
-                        }
-
-                        if book.isSetAside {
-                            Button {
-                                restoreToToday(book)
-                            } label: {
-                                Label("Return to Today", systemImage: "arrow.uturn.backward.circle")
-                            }
-                        }
-
-                        Button(role: .destructive) {
-                            bookToDelete = book
-                            showingDeleteConfirmation = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 20)
         }
         .scrollDismissesKeyboard(.interactively)
     }
@@ -541,9 +522,9 @@ struct DownloadsView: View {
     private var maybeNextSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Maybe Next")
+                Text("On your shelf")
                     .font(.title3.weight(.semibold))
-                Text("A few gentle possibilities from your library")
+                Text("Not a feed. Just the books you’ve already chosen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -863,8 +844,7 @@ private struct TodaySuggestionCard: View {
             CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format)
                 .aspectRatio(LibraryLayout.coverAspect, contentMode: .fit)
                 .frame(width: width)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .shadow(color: .black.opacity(0.14), radius: 3, y: 2)
+                .bookObjectStyle()
 
             Text(book.title)
                 .font(.caption.weight(.medium))

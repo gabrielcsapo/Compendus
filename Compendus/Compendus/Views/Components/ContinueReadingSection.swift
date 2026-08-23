@@ -238,8 +238,7 @@ struct ContinueReadingCard: View {
                 // Cover image
                 coverImage
                     .frame(width: coverWidth, height: coverHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+                    .bookObjectStyle()
 
                 // Progress bar overlay
                 if item.readingProgress > 0 {

@@ -8,6 +8,17 @@
 
 import SwiftUI
 
+// MARK: - Brand Palette
+
+enum CompendusColor {
+    static let ink = Color(red: 23 / 255, green: 32 / 255, blue: 28 / 255)
+    static let juniper = Color(red: 36 / 255, green: 92 / 255, blue: 73 / 255)
+    static let eveningJuniper = Color(red: 156 / 255, green: 202 / 255, blue: 184 / 255)
+    static let bookmark = Color(red: 241 / 255, green: 200 / 255, blue: 75 / 255)
+    static let mist = Color(red: 243 / 255, green: 246 / 255, blue: 244 / 255)
+    static let eveningPaper = Color(red: 14 / 255, green: 21 / 255, blue: 18 / 255)
+}
+
 // MARK: - Spacing
 
 enum Spacing {

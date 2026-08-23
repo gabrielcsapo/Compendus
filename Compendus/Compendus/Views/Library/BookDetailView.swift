@@ -276,8 +276,7 @@ struct BookDetailView: View {
             CachedCoverImage(bookId: book.id, hasCover: book.coverUrl != nil, format: book.format, useThumbnail: false)
                 .aspectRatio(2/3, contentMode: .fit)
                 .frame(width: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                .bookObjectStyle(cornerRadius: 10)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Self.heroHeight)

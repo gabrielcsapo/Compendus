@@ -26,7 +26,7 @@ import type { Book, NewBookEdit } from "../lib/db/schema";
 import type { BookFormat } from "../lib/types";
 import { v4 as uuid } from "uuid";
 import { randomUUID } from "crypto";
-import { getFormatsByType, type BookType } from "../lib/book-types";
+import { getFormatsByType, type BookType, type ReadingState } from "../lib/book-types";
 import { resolveProfileId } from "../lib/profile";
 
 /**
@@ -68,6 +68,7 @@ interface GetBooksOptions {
   tagId?: string;
   search?: string;
   series?: string;
+  readingState?: ReadingState;
   /** Restrict to a specific set of book ids (ignored when empty). */
   ids?: string[];
   profileId?: string;
@@ -111,15 +112,10 @@ function overlayUserState(row: {
   };
 }
 
-function buildBookConditions({
-  format,
-  type,
-  search,
-  series,
-  ids,
-  collectionId,
-  tagId,
-}: GetBooksOptions): SQL[] {
+function buildBookConditions(
+  { format, type, search, series, readingState, ids, collectionId, tagId }: GetBooksOptions,
+  hasProfile = false,
+): SQL[] {
   const conditions: SQL[] = [];
 
   if (format) {
@@ -149,6 +145,25 @@ function buildBookConditions({
 
   if (series) {
     conditions.push(eq(books.series, series));
+  }
+
+  if (readingState) {
+    const effectiveIsRead = hasProfile
+      ? sql`COALESCE(${userBookState.isRead}, ${books.isRead}, 0)`
+      : sql`COALESCE(${books.isRead}, 0)`;
+    const effectiveProgress = hasProfile
+      ? sql`COALESCE(${userBookState.readingProgress}, ${books.readingProgress}, 0)`
+      : sql`COALESCE(${books.readingProgress}, 0)`;
+
+    if (readingState === "in-progress") {
+      conditions.push(
+        sql`${effectiveIsRead} = 0 AND ${effectiveProgress} > 0 AND ${effectiveProgress} < 1`,
+      );
+    } else if (readingState === "unread") {
+      conditions.push(sql`${effectiveIsRead} = 0 AND ${effectiveProgress} <= 0`);
+    } else {
+      conditions.push(sql`(${effectiveIsRead} = 1 OR ${effectiveProgress} >= 1)`);
+    }
   }
 
   if (ids && ids.length > 0) {
@@ -202,7 +217,7 @@ export async function getBooks(options: GetBooksOptions = {}): Promise<BookWithS
   const { limit = 50, offset = 0, orderBy = "createdAt", order = "desc" } = options;
   const profileId = options.profileId ?? resolveProfileId();
 
-  const conditions = buildBookConditions(options);
+  const conditions = buildBookConditions(options, Boolean(profileId));
   const ordering = buildBookOrder(orderBy, order, options.series, Boolean(profileId));
 
   // When profileId is provided, LEFT JOIN userBookState to overlay per-profile reading state
@@ -915,44 +930,32 @@ export async function getBooksCount(
   type?: BookType,
   format?: string | string[],
   series?: string,
+  readingState?: ReadingState,
+  explicitProfileId?: string,
 ): Promise<number> {
-  const conditions = [];
+  const profileId = explicitProfileId ?? resolveProfileId();
+  const conditions = buildBookConditions(
+    { type, format, series, readingState },
+    Boolean(profileId),
+  );
 
-  if (type) {
-    const formats = getFormatsByType(type);
-    conditions.push(
-      sql`(
-        (${books.format} IN (${sql.join(
-          formats.map((f) => sql`${f}`),
-          sql`, `,
-        )}) AND ${books.bookTypeOverride} IS NULL)
-        OR ${books.bookTypeOverride} = ${type}
-      )`,
-    );
-  }
-
-  if (format) {
-    const fmts = Array.isArray(format) ? format : [format];
-    conditions.push(inArray(books.format, fmts));
-  }
-
-  if (series) {
-    conditions.push(eq(books.series, series));
-  }
-
-  if (conditions.length > 0) {
-    const result = await db
+  if (profileId) {
+    let query = db
       .select({ count: sql<number>`count(*)` })
       .from(books)
-      .where(and(...conditions))
-      .get();
+      .leftJoin(userBookState, userStateJoinOn(profileId))
+      .$dynamic();
+    if (conditions.length > 0) query = query.where(and(...conditions));
+    const result = await query.get();
     return result?.count || 0;
   }
 
-  const result = await db
+  let query = db
     .select({ count: sql<number>`count(*)` })
     .from(books)
-    .get();
+    .$dynamic();
+  if (conditions.length > 0) query = query.where(and(...conditions));
+  const result = await query.get();
   return result?.count || 0;
 }
 

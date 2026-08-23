@@ -31,15 +31,15 @@ export function SpeedMenu() {
         onClick={() => setOpen((v) => !v)}
         className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
         style={{
-          backgroundColor: open ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)",
-          color: "#fff",
+          backgroundColor: open ? "rgba(156,202,184,0.22)" : "rgba(255,255,255,0.07)",
+          color: "#eef3ef",
         }}
         aria-label="Playback speed"
       >
         {label} speed
       </button>
       {open && (
-        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 rounded-xl bg-black/85 backdrop-blur-xl border border-white/10 p-3 z-30 shadow-2xl">
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 rounded-xl bg-[#151e1a]/95 backdrop-blur-xl border border-white/10 p-3 z-30 shadow-2xl">
           <div className="flex flex-wrap gap-1.5 justify-center">
             {PLAYBACK_SPEEDS.map((s) => (
               <button
@@ -64,7 +64,7 @@ export function SpeedMenu() {
               value={playbackRate}
               onChange={(e) => setRate(parseFloat(e.target.value))}
               className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-              style={{ accentColor: "#fff" }}
+              style={{ accentColor: "#f1c84b" }}
               aria-label="Fine speed control"
             />
             <div className="flex justify-between text-[10px] text-white/50 mt-1">

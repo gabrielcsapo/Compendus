@@ -13,6 +13,30 @@
 }
 
 @font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/source-sans-3-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Sans 3";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/source-sans-3-bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Literata";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/literata-regular.woff2") format("woff2");
+}
+
+@font-face {
   font-family: "Inter";
   font-style: italic;
   font-weight: 100 900;
@@ -32,6 +56,8 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    min-height: 100vh;
+    letter-spacing: -0.006em;
     transition:
       background-color var(--transition-base),
       color var(--transition-base);
@@ -39,6 +65,258 @@
 
   * {
     @apply outline-primary;
+  }
+}
+
+@layer components {
+  .reading-title {
+    font-family:
+      "Literata",
+      Iowan Old Style,
+      Palatino,
+      serif;
+    letter-spacing: -0.035em;
+  }
+
+  .quiet-panel {
+    @apply bg-surface border border-border rounded-2xl;
+    box-shadow: var(--shadow-paper);
+  }
+
+  .bookmark-progress {
+    background: linear-gradient(to right, var(--color-accent), var(--color-accent));
+  }
+
+  .refine-control {
+    @apply rounded-lg border border-border bg-transparent px-2.5 py-2 text-xs font-semibold text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground;
+  }
+
+  .refine-control-active {
+    @apply border-primary/50 bg-primary-light text-primary;
+  }
+
+  /* A single, type-gated physical object system for every library cover. */
+  .book-object {
+    position: relative;
+    isolation: isolate;
+    aspect-ratio: 2 / 3;
+    padding: 0 4px 3px 0;
+    transform-style: preserve-3d;
+    filter: drop-shadow(0 2px 2px rgba(23, 32, 28, 0.08))
+      drop-shadow(0 14px 16px rgba(23, 32, 28, 0.12));
+    transition:
+      filter 460ms ease,
+      transform 460ms cubic-bezier(0.18, 0.76, 0.2, 1);
+  }
+
+  .book-object::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset: 5px 0 0 8px;
+    border: 1px solid rgba(75, 64, 48, 0.14);
+    border-radius: 5px 13px 13px 5px;
+    background: repeating-linear-gradient(
+      to bottom,
+      #f7f3e9 0,
+      #f7f3e9 2px,
+      #d9d2c5 2.5px,
+      #f1ebdf 3px
+    );
+    transition:
+      opacity 300ms ease,
+      transform 460ms cubic-bezier(0.18, 0.76, 0.2, 1);
+  }
+
+  .book-object-surface {
+    position: absolute;
+    z-index: 3;
+    inset: 0 4px 3px 0;
+    overflow: hidden;
+    border: 1px solid rgba(20, 24, 22, 0.08);
+    border-radius: 8px 13px 13px 8px;
+    background: var(--color-surface-elevated);
+    box-shadow:
+      inset 1px 0 rgba(255, 255, 255, 0.2),
+      inset -1px 0 rgba(0, 0, 0, 0.06);
+    transform-origin: left center;
+    transition:
+      box-shadow 460ms ease,
+      transform 460ms cubic-bezier(0.18, 0.76, 0.2, 1);
+  }
+
+  .book-object-surface::before {
+    content: "";
+    position: absolute;
+    z-index: 10;
+    inset: 0 auto 0 0;
+    width: 13px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      rgba(8, 12, 10, 0.22),
+      rgba(255, 255, 255, 0.1) 42%,
+      transparent
+    );
+    mix-blend-mode: multiply;
+  }
+
+  .book-object-surface::after {
+    content: "";
+    position: absolute;
+    z-index: 11;
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    width: 1px;
+    pointer-events: none;
+    background: rgba(255, 255, 255, 0.3);
+    box-shadow: 1px 0 rgba(0, 0, 0, 0.1);
+  }
+
+  /* Ebooks pull forward by their spine and expose more of the page block. */
+  .book-object[data-book-type="ebook"]:hover,
+  a:focus-visible .book-object[data-book-type="ebook"] {
+    filter: drop-shadow(0 4px 3px rgba(23, 32, 28, 0.1))
+      drop-shadow(0 20px 22px rgba(23, 32, 28, 0.17));
+    transform: perspective(900px) translate(-3px, -7px) rotateY(-9deg);
+  }
+
+  .book-object[data-book-type="ebook"]:hover::before,
+  a:focus-visible .book-object[data-book-type="ebook"]::before {
+    transform: translateX(5px);
+  }
+
+  /* Audiobooks behave like a CD package: the disc stays beneath the cover. */
+  .book-object[data-book-type="audiobook"] {
+    transform-style: flat;
+  }
+
+  .book-object[data-book-type="audiobook"]::before {
+    opacity: 0;
+  }
+
+  .book-object[data-book-type="audiobook"]::after {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    top: 20.5%;
+    left: 8.2%;
+    width: 87.7%;
+    aspect-ratio: 1;
+    border: 1px solid rgba(78, 92, 85, 0.28);
+    border-radius: 50%;
+    background:
+      radial-gradient(
+        circle,
+        transparent 0 5.3%,
+        rgba(255, 255, 255, 0.92) 5.7% 7.8%,
+        rgba(91, 111, 102, 0.5) 8.2% 9.4%,
+        transparent 9.8%
+      ),
+      conic-gradient(
+        from 18deg,
+        #d8e5df,
+        #fff5bd 12%,
+        #d9a6cf 20%,
+        #91c9df 29%,
+        #eef3ef 40%,
+        #efc650 48%,
+        #dfece6 59%,
+        #99d4bd 68%,
+        #dba9cf 77%,
+        #f4f7f5 89%,
+        #d8e5df
+      );
+    box-shadow: 2px 11px 20px rgba(22, 37, 29, 0.2);
+    transform: translateX(0) rotate(0deg) scale(0.97);
+    transition:
+      box-shadow 460ms ease,
+      transform 460ms cubic-bezier(0.18, 0.76, 0.2, 1);
+  }
+
+  .book-object[data-book-type="audiobook"]:hover,
+  a:focus-visible .book-object[data-book-type="audiobook"] {
+    filter: drop-shadow(0 4px 3px rgba(23, 32, 28, 0.1))
+      drop-shadow(0 18px 20px rgba(23, 32, 28, 0.16));
+    transform: translateY(-7px);
+  }
+
+  .book-object[data-book-type="audiobook"]:hover::after,
+  a:focus-visible .book-object[data-book-type="audiobook"]::after {
+    box-shadow: 7px 13px 20px rgba(22, 37, 29, 0.22);
+    transform: translateX(23.5%) rotate(72deg) scale(0.98);
+  }
+
+  .book-object[data-book-type="audiobook"]:hover .book-object-surface,
+  a:focus-visible .book-object[data-book-type="audiobook"] .book-object-surface {
+    transform: translate(-4px, -3px) rotateZ(-0.7deg);
+  }
+
+  /* Comics separate into two restrained print-registration color layers. */
+  .book-object[data-book-type="comic"]::before,
+  .book-object[data-book-type="comic"]::after {
+    content: "";
+    position: absolute;
+    inset: 0 4px 3px 0;
+    border: 0;
+    border-radius: 8px 13px 13px 8px;
+    transition: transform 460ms cubic-bezier(0.18, 0.76, 0.2, 1);
+  }
+
+  .book-object[data-book-type="comic"]::before {
+    z-index: 2;
+    background: #efc650;
+  }
+
+  .book-object[data-book-type="comic"]::after {
+    z-index: 1;
+    background: #cf6a49;
+  }
+
+  .book-object[data-book-type="comic"]:hover,
+  a:focus-visible .book-object[data-book-type="comic"] {
+    filter: drop-shadow(0 4px 3px rgba(23, 32, 28, 0.1))
+      drop-shadow(0 18px 20px rgba(23, 32, 28, 0.15));
+    transform: translateY(-7px) rotateZ(-1deg);
+  }
+
+  .book-object[data-book-type="comic"]:hover::before,
+  a:focus-visible .book-object[data-book-type="comic"]::before {
+    transform: translate(6px, 6px);
+  }
+
+  .book-object[data-book-type="comic"]:hover::after,
+  a:focus-visible .book-object[data-book-type="comic"]::after {
+    transform: translate(12px, 12px);
+  }
+
+  .book-object[data-book-type="comic"]:hover .book-object-surface,
+  a:focus-visible .book-object[data-book-type="comic"] .book-object-surface {
+    box-shadow:
+      inset 1px 0 rgba(255, 255, 255, 0.2),
+      16px 23px 28px rgba(20, 34, 27, 0.18);
+    transform: translate(-4px, -3px) rotateZ(-1.5deg);
+  }
+
+  .dark .book-object[data-book-type="ebook"]::before {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: repeating-linear-gradient(
+      to bottom,
+      #d7d0c2 0,
+      #d7d0c2 2px,
+      #8b8478 2.5px,
+      #c6beb0 3px
+    );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-object,
+  .book-object::before,
+  .book-object::after,
+  .book-object-surface {
+    transition: none;
   }
 }
 

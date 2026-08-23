@@ -21,14 +21,19 @@ export function LibraryExploreView({ data }: { data: ExploreData }) {
   }
 
   return (
-    <div className="space-y-10 pb-8">
+    <div className="space-y-12 sm:space-y-16 pb-12">
       {inProgress.length > 0 && (
-        <BookCarousel title="Continue Reading" books={inProgress.slice(0, 10)} allowSetAside />
+        <BookCarousel
+          title="Continue reading"
+          subtitle="The shortest path back into a book."
+          books={inProgress.slice(0, 10)}
+          allowSetAside
+        />
       )}
 
       {readNextInSeries.length > 0 && (
         <BookCarousel
-          title="Read Next in Series"
+          title="Next in the story"
           books={readNextInSeries.slice(0, 10).map((r) => r.book)}
         />
       )}

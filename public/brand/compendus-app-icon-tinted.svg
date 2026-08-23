@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Compendus tinted app icon</title>
+  <desc id="desc">A monochrome Compendus bound-volume mark designed for iOS icon tinting.</desc>
+  <rect width="1024" height="1024" fill="#EFF3F0"/>
+  <image href="compendus-mark-mono.svg" x="170" y="152" width="684" height="720"/>
+</svg>

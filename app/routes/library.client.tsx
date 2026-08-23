@@ -8,9 +8,10 @@ import { BookCover } from "../components/BookCover";
 import type { ExploreData } from "../actions/explore";
 import { InfiniteBookGrid } from "../components/InfiniteBookGrid";
 import { LibraryExploreView } from "../components/LibraryExploreView";
-import { SortDropdown, type SortOption } from "../components/SortDropdown";
-import { TypeTabs, type TypeFilter } from "../components/TypeTabs";
-import { FormatDropdown } from "../components/FormatDropdown";
+import type { SortOption } from "../components/SortDropdown";
+import type { TypeFilter } from "../components/TypeTabs";
+import { LibraryToolbar, type LibraryDensity } from "../components/LibraryToolbar";
+import type { BookType, ReadingState } from "../lib/book-types";
 
 type LibraryData = {
   view: "series" | "books" | "explore";
@@ -27,6 +28,9 @@ type LibraryData = {
   currentSort: SortOption;
   currentType: TypeFilter;
   currentFormats: string[];
+  currentReadingState?: ReadingState;
+  currentDensity: LibraryDensity;
+  typeCounts: Record<BookType, number>;
   formatCounts: Awaited<ReturnType<typeof getFormatCounts>>;
   otherFormatBooks: Awaited<ReturnType<typeof getBooks>>;
 };
@@ -51,21 +55,18 @@ export default function LibraryPage({
     currentSort,
     currentType,
     currentFormats,
+    currentReadingState,
+    currentDensity,
+    typeCounts,
     formatCounts,
     otherFormatBooks,
   } = data;
 
   return (
-    <main
-      className={
-        currentView === "explore"
-          ? "my-8 w-full max-w-none px-4 sm:px-6 lg:px-8"
-          : "container my-8 px-6 mx-auto"
-      }
-    >
+    <main className="mx-auto my-10 w-full max-w-[90rem] px-5 sm:my-14 sm:px-8 lg:px-11">
       {/* Header */}
-      <div className="flex flex-col gap-4 mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className={`flex flex-col gap-5 ${currentView === "explore" ? "mb-10" : "mb-9"}`}>
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {currentSeriesFilter ? (
               <>
@@ -84,36 +85,43 @@ export default function LibraryPage({
               </>
             ) : (
               <>
-                <h1 className="text-2xl font-bold text-foreground">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary">
                   {currentView === "explore" ? "Today" : "Library"}
-                </h1>
-                <p className="text-foreground-muted">
+                </p>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <h1 className="text-5xl font-extrabold leading-[.95] tracking-[-.065em] text-foreground sm:text-6xl lg:text-7xl">
+                    {currentView === "explore" ? "Make a little room." : "Your library."}
+                  </h1>
+                  {currentView !== "explore" && (
+                    <Link
+                      to="/admin"
+                      aria-label="Manage library"
+                      title={
+                        unmatchedCount > 0
+                          ? `Manage library · ${unmatchedCount} books need attention`
+                          : "Manage library"
+                      }
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+                    >
+                      <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+                        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                        <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+                      </svg>
+                    </Link>
+                  )}
+                </div>
+                <p className="mt-3 text-base text-foreground-muted">
                   {currentView === "explore"
-                    ? "Pick up where you left off"
+                    ? "Your books are waiting where you left them."
                     : currentView === "series"
                       ? `${seriesList.length} ${seriesList.length === 1 ? "series" : "series"}`
-                      : `${totalCount} ${totalCount === 1 ? "book" : "books"}`}
+                      : `${totalCount.toLocaleString()} titles across ebooks, audio, and comics.`}
                 </p>
               </>
             )}
           </div>
           <div className="flex items-center gap-2">
-            {!currentSeriesFilter && currentView !== "explore" && unmatchedCount > 0 && (
-              <Link
-                to="/admin/unmatched"
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-warning-light text-warning hover:opacity-80 transition-opacity text-sm"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-                <span className="font-medium">{unmatchedCount}</span>
-              </Link>
-            )}
             {/* Home has two clear exits: browse the catalog or explore ideas. */}
             {!currentSeriesFilter && currentView === "explore" && (
               <>
@@ -143,100 +151,23 @@ export default function LibraryPage({
                       d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
                     />
                   </svg>
-                  Explore
-                </Link>
-              </>
-            )}
-            {!currentSeriesFilter && currentView !== "explore" && (
-              <>
-                <Link
-                  to="/collections"
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
-                >
-                  Collections
-                </Link>
-                <Link
-                  to="/tags"
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
-                >
-                  Tags
+                  Wander
                 </Link>
               </>
             )}
           </div>
         </div>
         {!currentSeriesFilter && currentView !== "explore" && (
-          <div className="flex flex-wrap items-center gap-3">
-            {/* PRIMARY: Content-type filter — always visible, matches iOS */}
-            <TypeTabs
-              currentType={currentType}
-              currentSort={currentSort}
-              currentView={
-                currentView === "series" ? "series" : currentView === "books" ? "grid" : undefined
-              }
-              basePath="/library"
-            />
-
-            {/* Format dropdown — only meaningful in Browse */}
-            {currentView === "books" && formatCounts.length > 1 && (
-              <FormatDropdown
-                formatCounts={formatCounts}
-                selectedFormats={currentFormats}
-                currentType={currentType}
-                currentSort={currentSort}
-              />
-            )}
-
-            {/* Right edge: view-mode icons (Explore / Browse / Series) + sort */}
-            <div className="ml-auto flex items-center gap-2">
-              <div
-                className="inline-flex gap-0.5 p-0.5 bg-surface-elevated rounded-lg"
-                role="tablist"
-                aria-label="View mode"
-              >
-                <Link
-                  to={`/library?view=grid${currentType !== "all" ? `&type=${currentType}` : ""}${currentSort !== "recent" ? `&sort=${currentSort}` : ""}`}
-                  title="Browse — full grid"
-                  aria-label="Grid view"
-                  className={`p-1.5 rounded-md transition-colors ${
-                    currentView === "books"
-                      ? "bg-primary text-white"
-                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z"
-                    />
-                  </svg>
-                </Link>
-                <Link
-                  to={`/library?view=series${currentType !== "all" ? `&type=${currentType}` : ""}`}
-                  title="Series — group by series"
-                  aria-label="Series view"
-                  className={`p-1.5 rounded-md transition-colors ${
-                    currentView === "series"
-                      ? "bg-primary text-white"
-                      : "text-foreground-muted hover:text-foreground hover:bg-surface"
-                  }`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                    />
-                  </svg>
-                </Link>
-              </div>
-
-              {currentView === "books" && <SortDropdown currentSort={currentSort} />}
-            </div>
-          </div>
+          <LibraryToolbar
+            currentType={currentType}
+            currentSort={currentSort}
+            currentView={currentView}
+            currentFormats={currentFormats}
+            currentReadingState={currentReadingState}
+            currentDensity={currentDensity}
+            formatCounts={formatCounts}
+            typeCounts={typeCounts}
+          />
         )}
       </div>
 
@@ -294,6 +225,8 @@ export default function LibraryPage({
                 currentSort={currentSort}
                 currentType={currentType}
                 currentFormats={currentFormats}
+                currentReadingState={currentReadingState}
+                density={currentDensity}
                 seriesFilter={currentSeriesFilter}
                 emptyMessage={
                   currentSeriesFilter

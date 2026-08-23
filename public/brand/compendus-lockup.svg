@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 128" role="img" aria-labelledby="title desc">
+  <title id="title">Compendus</title>
+  <desc id="desc">The Compendus bound-volume mark and custom serif wordmark.</desc>
+  <image href="compendus-mark.svg" x="0" y="0" width="122" height="128"/>
+  <image href="compendus-wordmark.svg" x="152" y="26" width="438" height="86"/>
+</svg>

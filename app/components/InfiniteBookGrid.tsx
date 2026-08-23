@@ -6,9 +6,11 @@ import { BookCard } from "./BookCard";
 import type { Book } from "../lib/db/schema";
 import type { SortOption } from "./SortDropdown";
 import type { TypeFilter } from "./TypeTabs";
+import type { ReadingState } from "../lib/book-types";
+import type { LibraryDensity } from "./LibraryToolbar";
 
 const BOOKS_PER_PAGE = 24;
-const GAP = 20; // matches gap-5 (1.25rem = 20px)
+const GAP = 20;
 
 function LoadingSpinner() {
   return (
@@ -38,15 +40,23 @@ function LoadingSpinner() {
   );
 }
 
-function useColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
-  const [columns, setColumns] = useState(6);
+function useColumns(containerRef: React.RefObject<HTMLDivElement | null>, density: LibraryDensity) {
+  const [columns, setColumns] = useState(density === "compact" ? 8 : 6);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     function update(width: number) {
-      // Match BookGrid breakpoints: grid-cols-2 sm:3 md:4 lg:5 xl:6
+      if (density === "compact") {
+        if (width >= 1280) setColumns(8);
+        else if (width >= 1024) setColumns(7);
+        else if (width >= 768) setColumns(6);
+        else if (width >= 640) setColumns(4);
+        else setColumns(3);
+        return;
+      }
+      // The catalog is a broad shelf: more covers, less dashboard chrome.
       if (width >= 1280) setColumns(6);
       else if (width >= 1024) setColumns(5);
       else if (width >= 768) setColumns(4);
@@ -60,7 +70,7 @@ function useColumns(containerRef: React.RefObject<HTMLDivElement | null>) {
     observer.observe(el);
     update(el.clientWidth);
     return () => observer.disconnect();
-  }, [containerRef]);
+  }, [containerRef, density]);
 
   return columns;
 }
@@ -71,6 +81,8 @@ interface InfiniteBookGridProps {
   currentSort: SortOption;
   currentType: TypeFilter;
   currentFormats: string[];
+  currentReadingState?: ReadingState;
+  density: LibraryDensity;
   seriesFilter: string | null;
   emptyMessage?: string;
 }
@@ -81,6 +93,8 @@ export function InfiniteBookGrid({
   currentSort,
   currentType,
   currentFormats,
+  currentReadingState,
+  density,
   seriesFilter,
   emptyMessage = "No books found",
 }: InfiniteBookGridProps) {
@@ -90,10 +104,18 @@ export function InfiniteBookGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadControllerRef = useRef<AbortController | null>(null);
-  const columns = useColumns(containerRef);
+  const columns = useColumns(containerRef, density);
+  const gap = density === "compact" ? 16 : GAP;
   const queryKey = useMemo(
-    () => JSON.stringify([currentSort, currentType, [...currentFormats].sort(), seriesFilter]),
-    [currentSort, currentType, currentFormats, seriesFilter],
+    () =>
+      JSON.stringify([
+        currentSort,
+        currentType,
+        [...currentFormats].sort(),
+        currentReadingState,
+        seriesFilter,
+      ]),
+    [currentSort, currentType, currentFormats, currentReadingState, seriesFilter],
   );
   const activeQueryKeyRef = useRef(queryKey);
   activeQueryKeyRef.current = queryKey;
@@ -123,10 +145,11 @@ export function InfiniteBookGrid({
       if (currentSort !== "recent") params.set("sort", currentSort);
       if (currentType !== "all") params.set("type", currentType);
       if (currentFormats.length > 0) params.set("format", currentFormats.join(","));
+      if (currentReadingState) params.set("state", currentReadingState);
       if (seriesFilter) params.set("series", seriesFilter);
       return `/api/library?${params.toString()}`;
     },
-    [currentSort, currentType, currentFormats, seriesFilter],
+    [currentSort, currentType, currentFormats, currentReadingState, seriesFilter],
   );
 
   const loadMore = useCallback(async () => {
@@ -200,7 +223,7 @@ export function InfiniteBookGrid({
 
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
-    estimateSize: () => 380, // approximate row height (card aspect-ratio 2/3 + info)
+    estimateSize: () => (density === "compact" ? 270 : 340),
     overscan: 3,
   });
 
@@ -256,12 +279,16 @@ export function InfiniteBookGrid({
                   style={{
                     display: "grid",
                     gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                    gap: `${GAP}px`,
-                    paddingBottom: `${GAP}px`,
+                    gap: `${gap}px`,
+                    paddingBottom: `${gap}px`,
                   }}
                 >
                   {row.map((book) => (
-                    <BookCard key={book.id} book={book} />
+                    <BookCard
+                      key={book.id}
+                      book={book}
+                      size={density === "compact" ? "compact" : "default"}
+                    />
                   ))}
                 </div>
               </div>

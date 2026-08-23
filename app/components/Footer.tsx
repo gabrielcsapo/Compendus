@@ -1,5 +1,6 @@
 import { Link } from "react-flight-router/client";
 import { CompendusLogo } from "./CompendusLogo";
+import { CompendusWordmark } from "./CompendusWordmark";
 
 interface FooterProps {
   variant?: "full" | "compact";
@@ -54,7 +55,8 @@ export function Footer({ variant = "full" }: FooterProps) {
               className="flex items-center gap-2 text-foreground hover:text-primary transition-colors mb-4"
             >
               <CompendusLogo />
-              <span className="font-bold text-lg">Compendus</span>
+              <CompendusWordmark className="h-5 w-auto" />
+              <span className="sr-only">Compendus</span>
             </Link>
             <p className="text-sm text-foreground-muted">
               Self-hosted personal library manager for ebooks, audiobooks, and comics.
@@ -91,7 +93,7 @@ export function Footer({ variant = "full" }: FooterProps) {
               </li>
               <li>
                 <Link
-                  to="/discover"
+                  to="/discover/"
                   className="text-foreground-muted hover:text-foreground transition-colors"
                 >
                   Discover

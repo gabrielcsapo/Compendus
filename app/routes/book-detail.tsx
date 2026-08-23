@@ -11,6 +11,7 @@ import { getSeriesDetails } from "../actions/series";
 import { SeriesSection } from "../components/SeriesSection";
 import { CoverDropZone } from "../components/CoverDropZone";
 import { BookCover } from "../components/BookCover";
+import { BookObject } from "../components/BookObject";
 import { BookCollectionsManager } from "../components/BookCollectionsManager";
 import { BookActionsMenu } from "../components/BookActionsMenu";
 import { AuthorLinks } from "../components/AuthorLink";
@@ -21,7 +22,7 @@ import { BookRating } from "../components/BookRating";
 import { BookInfoButton } from "../components/BookInfoButton";
 import { CollapsibleDescription } from "../components/CollapsibleDescription";
 import { getCurrentProfile } from "../actions/profiles";
-import { ccdStatusOf, isReflowableFormat } from "../lib/book-types";
+import { ccdStatusOf, getBookType, isReflowableFormat } from "../lib/book-types";
 
 export default async function BookDetail({ params }: { params?: Record<string, string> }) {
   const id = params?.id as string;
@@ -44,35 +45,10 @@ export default async function BookDetail({ params }: { params?: Record<string, s
   const progressPercent = Math.round((book.readingProgress || 0) * 100);
   const coverUrl = getCoverUrl(book, "full") ?? undefined;
 
-  // Parse coverColor hex to RGB for gradient
-  const heroGradient = (() => {
-    const hex = book.coverColor;
-    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return undefined;
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return `linear-gradient(to bottom, rgba(${r}, ${g}, ${b}, 0.15) 0%, rgba(${r}, ${g}, ${b}, 0.05) 60%, transparent 100%)`;
-  })();
-
   return (
     <main className="pb-16">
-      {/* ── Cinematic hero: ambient cover backdrop + cover, title & actions ── */}
-      <section className="relative">
-        {/* Ambient backdrop — blurred cover + color wash, fading into the page */}
-        <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-          {coverUrl && (
-            <div
-              className="absolute inset-0 bg-cover bg-center scale-110 blur-3xl opacity-25 dark:opacity-40"
-              style={{ backgroundImage: `url("${coverUrl}")` }}
-            />
-          )}
-          {heroGradient && (
-            <div className="absolute inset-0" style={{ background: heroGradient }} />
-          )}
-          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-background to-transparent" />
-        </div>
-
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+      <section>
+        <div className="mx-auto max-w-7xl px-5 pt-8 sm:px-8 lg:px-11">
           <Link
             to="/library"
             className="inline-flex items-center gap-1.5 text-sm text-foreground-muted hover:text-primary transition-colors group"
@@ -93,10 +69,10 @@ export default async function BookDetail({ params }: { params?: Record<string, s
             Back to Library
           </Link>
 
-          <div className="mt-6 flex flex-col sm:flex-row gap-6 md:gap-8 items-start sm:items-center">
+          <div className="mt-8 grid items-start gap-8 sm:grid-cols-[12rem_minmax(0,1fr)] lg:grid-cols-[minmax(13rem,17rem)_minmax(0,1fr)_15rem] lg:gap-12">
             {/* Cover */}
-            <div className="w-40 sm:w-48 md:w-56 shrink-0 mx-auto sm:mx-0">
-              <div className="shadow-paper rounded-xl overflow-hidden ring-1 ring-black/10">
+            <div className="mx-auto w-40 shrink-0 sm:mx-0 sm:w-full">
+              <BookObject type={getBookType(book.format, book.bookTypeOverride)}>
                 <CoverDropZone
                   bookId={book.id}
                   coverPath={book.coverPath}
@@ -104,13 +80,13 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                   title={book.title}
                   updatedAt={book.updatedAt}
                 />
-              </div>
+              </BookObject>
             </div>
 
             {/* Title, metadata & actions */}
-            <div className="flex-1 min-w-0 space-y-3">
+            <div className="min-w-0 space-y-4">
               <div className="flex items-start justify-between gap-4">
-                <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight text-foreground leading-[1.1] break-words">
+                <h1 className="break-words text-4xl font-extrabold leading-[.98] tracking-[-.055em] text-foreground md:text-5xl lg:text-6xl">
                   {book.title}
                 </h1>
                 <div className="flex items-center gap-2 shrink-0 pt-1">
@@ -217,7 +193,7 @@ export default async function BookDetail({ params }: { params?: Record<string, s
               <OtherDevices devices={deviceProgress} />
 
               {/* Primary action + quiet secondary actions */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-3">
+              <div className="flex flex-wrap items-center gap-2 pt-4">
                 <PrimaryAction book={book} progressPercent={progressPercent} className="" />
                 <a
                   href={`/books/${book.id}.${book.format}`}
@@ -275,15 +251,51 @@ export default async function BookDetail({ params }: { params?: Record<string, s
                 <LinkedFormatsSection bookId={id} book={book} />
               </Suspense>
             </div>
+
+            <aside className="hidden border-l border-border pl-7 lg:block">
+              <p className="mb-5 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
+                About this edition
+              </p>
+              <dl className="space-y-0">
+                <div className="border-t border-border py-4">
+                  <dt className="text-xs text-foreground-muted">Format</dt>
+                  <dd className="mt-1 text-sm font-semibold uppercase text-foreground">
+                    {book.format}
+                  </dd>
+                </div>
+                {book.pageCount && (
+                  <div className="border-t border-border py-4">
+                    <dt className="text-xs text-foreground-muted">Length</dt>
+                    <dd className="mt-1 text-sm font-semibold text-foreground">
+                      {book.pageCount.toLocaleString()} pages
+                    </dd>
+                  </div>
+                )}
+                <div className="border-t border-border py-4">
+                  <dt className="text-xs text-foreground-muted">Progress</dt>
+                  <dd className="mt-1 text-sm font-semibold text-foreground">
+                    {progressPercent > 0 ? `${progressPercent}% read` : "Not started"}
+                  </dd>
+                </div>
+                {book.language && (
+                  <div className="border-y border-border py-4">
+                    <dt className="text-xs text-foreground-muted">Language</dt>
+                    <dd className="mt-1 text-sm font-semibold uppercase text-foreground">
+                      {book.language}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </aside>
           </div>
         </div>
       </section>
 
       {/* ── Content sections ──────────────────────────────────────────── */}
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 mt-8 space-y-6">
+      <div className="mx-auto mt-12 max-w-7xl space-y-6 px-5 sm:px-8 lg:px-11">
         {/* Description */}
         {book.description && (
-          <section className="bg-surface border border-border rounded-xl p-6 shadow-paper">
+          <section className="max-w-4xl border-t border-border py-8">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-foreground-muted mb-3">
               Description
             </h2>
