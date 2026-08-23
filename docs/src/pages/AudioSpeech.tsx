@@ -36,10 +36,12 @@ export default function AudioSpeech() {
   const [activeTab, setActiveTab] = useState<TabId>("transcription");
 
   return (
-    <div>
+    <div className="max-w-5xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Audio & Speech</h1>
-        <p className="text-foreground-muted">
+        <h1 className="reading-title mb-3 text-4xl leading-tight text-foreground sm:text-5xl">
+          Audio & Speech
+        </h1>
+        <p className="max-w-3xl text-lg leading-8 text-foreground-muted">
           Compendus can transcribe audiobooks to text, read books aloud with text-to-speech, and
           play audiobooks with synchronized karaoke-style lyrics.
         </p>

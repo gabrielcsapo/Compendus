@@ -8,16 +8,22 @@ import { CodeBlock } from "@app/components/docs";
  */
 export const mdxComponents = {
   h1: (props: ComponentPropsWithoutRef<"h1">) => (
-    <h1 className="text-3xl font-bold text-foreground mb-2 scroll-mt-20" {...props} />
+    <h1
+      className="reading-title mb-4 scroll-mt-24 text-4xl leading-tight text-foreground sm:text-5xl"
+      {...props}
+    />
   ),
   h2: (props: ComponentPropsWithoutRef<"h2">) => (
-    <h2 className="text-xl font-semibold text-foreground mb-3 mt-10 scroll-mt-20" {...props} />
+    <h2
+      className="reading-title mb-4 mt-14 scroll-mt-24 border-t border-border pt-8 text-2xl text-foreground sm:text-3xl"
+      {...props}
+    />
   ),
   h3: (props: ComponentPropsWithoutRef<"h3">) => (
-    <h3 className="text-lg font-medium text-foreground mb-2 mt-6 scroll-mt-20" {...props} />
+    <h3 className="mb-3 mt-8 scroll-mt-24 text-lg font-bold text-foreground" {...props} />
   ),
   p: (props: ComponentPropsWithoutRef<"p">) => (
-    <p className="text-foreground mb-3 leading-relaxed" {...props} />
+    <p className="mb-4 max-w-[46rem] text-[1.02rem] leading-8 text-foreground-muted" {...props} />
   ),
   a: ({ href, ...props }: ComponentPropsWithoutRef<"a">) => {
     if (href?.startsWith("/")) {
@@ -34,18 +40,24 @@ export const mdxComponents = {
     );
   },
   ul: (props: ComponentPropsWithoutRef<"ul">) => (
-    <ul className="list-disc list-inside space-y-2 text-foreground mb-4" {...props} />
+    <ul
+      className="mb-5 ml-5 list-disc space-y-2.5 text-foreground-muted marker:text-primary"
+      {...props}
+    />
   ),
   ol: (props: ComponentPropsWithoutRef<"ol">) => (
-    <ol className="list-decimal list-inside space-y-2 text-foreground mb-4" {...props} />
+    <ol
+      className="mb-5 ml-5 list-decimal space-y-2.5 text-foreground-muted marker:font-bold marker:text-primary"
+      {...props}
+    />
   ),
-  li: (props: ComponentPropsWithoutRef<"li">) => <li className="text-foreground" {...props} />,
+  li: (props: ComponentPropsWithoutRef<"li">) => <li className="pl-1 leading-7" {...props} />,
   strong: (props: ComponentPropsWithoutRef<"strong">) => (
     <strong className="font-semibold text-foreground" {...props} />
   ),
   code: (props: ComponentPropsWithoutRef<"code">) => (
     <code
-      className="bg-surface-elevated px-1.5 py-0.5 rounded text-sm border border-border font-mono"
+      className="rounded border border-border bg-surface-elevated px-1.5 py-0.5 font-mono text-sm text-foreground"
       {...props}
     />
   ),
@@ -62,24 +74,27 @@ export const mdxComponents = {
     return <CodeBlock language={lang || undefined}>{code}</CodeBlock>;
   },
   table: (props: ComponentPropsWithoutRef<"table">) => (
-    <div className="overflow-x-auto mb-4">
+    <div className="quiet-panel mb-6 overflow-x-auto">
       <table className="min-w-full text-sm" {...props} />
     </div>
   ),
   thead: (props: ComponentPropsWithoutRef<"thead">) => <thead {...props} />,
   th: (props: ComponentPropsWithoutRef<"th">) => (
-    <th className="text-left text-foreground-muted border-b border-border pr-6 py-2" {...props} />
+    <th
+      className="border-b border-border bg-surface-elevated px-4 py-3 text-left text-foreground-muted"
+      {...props}
+    />
   ),
   tbody: (props: ComponentPropsWithoutRef<"tbody">) => (
     <tbody className="text-foreground" {...props} />
   ),
   td: (props: ComponentPropsWithoutRef<"td">) => (
-    <td className="pr-6 py-2 border-b border-border/50" {...props} />
+    <td className="border-b border-border/50 px-4 py-3" {...props} />
   ),
   hr: (props: ComponentPropsWithoutRef<"hr">) => <hr className="border-border my-8" {...props} />,
   blockquote: (props: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
-      className="border-l-4 border-primary pl-4 my-4 text-foreground-muted italic"
+      className="my-6 border-l-2 border-accent bg-accent-light/45 py-4 pl-5 pr-4 text-foreground-muted"
       {...props}
     />
   ),

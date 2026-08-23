@@ -40,6 +40,7 @@ export const mockBooks: MockBook[] = [
     progress: 0.22,
     coverColor: "#1e1b4b",
     coverImage: `${base}covers/project-hail-mary.jpg`,
+    coverMeta: "16h 10m",
   },
   {
     title: "Saga Vol. 1",
@@ -49,6 +50,8 @@ export const mockBooks: MockBook[] = [
     progress: 1.0,
     coverColor: "#701a75",
     coverImage: `${base}covers/saga-vol-1.jpg`,
+    seriesNumber: 1,
+    coverMeta: "160 pages",
   },
   {
     title: "Neuromancer",

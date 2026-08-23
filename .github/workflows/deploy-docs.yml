@@ -6,9 +6,19 @@ on:
     paths:
       - "docs/**"
       - "app/components/docs/**"
+      - "app/components/BookObject.tsx"
+      - "app/components/BrandLockup.tsx"
+      - "app/components/CompendusLogo.tsx"
+      - "app/components/CompendusWordmark.tsx"
       - "app/lib/api/spec.ts"
+      - "app/lib/book-types.ts"
+      - "app/lib/product-ui.ts"
       - "app/lib/styles.ts"
-      - "app/styles/theme.css"
+      - "app/styles.css"
+      - "app/styles/**"
+      - "public/apple-touch-icon.png"
+      - "public/favicon.svg"
+      - "public/fonts/**"
       - ".github/workflows/deploy-docs.yml"
   workflow_dispatch:
 
@@ -29,11 +39,11 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: ".nvmrc"
           cache: "pnpm"
           cache-dependency-path: docs/pnpm-lock.yaml
 

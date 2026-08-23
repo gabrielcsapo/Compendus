@@ -1,3 +1,5 @@
+import { BookObject } from "@app/components/BookObject";
+
 export interface MockBook {
   title: string;
   author: string;
@@ -8,109 +10,79 @@ export interface MockBook {
   coverImage?: string;
   series?: string;
   seriesNumber?: number;
+  coverMeta?: string;
 }
 
-function TypeIcon({ type }: { type: MockBook["bookType"] }) {
-  if (type === "audiobook") {
-    return (
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15.536a5 5 0 001.414 1.414m2.828-9.9a9 9 0 012.828-2.828"
-        />
-        <circle cx="12" cy="17" r="1.5" strokeWidth={2} />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15.5V9" />
-      </svg>
-    );
-  }
-  return null;
-}
-
-function getBadgeStyles(type: MockBook["bookType"]): string {
-  if (type === "audiobook") {
-    return "bg-accent-light text-accent";
-  }
-  return "bg-primary-light text-primary";
-}
+const embeddedLabelShadow = {
+  textShadow: "0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.72)",
+};
 
 export function ShowcaseBookCard({ book }: { book: MockBook }) {
   const progressPercent = Math.round(book.progress * 100);
+  const carriesJacketMeta = book.bookType !== "ebook";
 
   return (
-    <div className="group relative min-w-0 bg-surface border border-border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:-translate-y-1 hover:border-primary/30">
-      {/* Cover */}
-      <div
-        className="block aspect-[2/3] w-full overflow-hidden bg-surface-elevated relative"
-        style={{ backgroundColor: book.coverColor }}
-      >
-        {book.coverImage ? (
-          <img
-            src={book.coverImage}
-            alt={book.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center p-4 bg-gradient-to-br from-primary-light to-accent-light">
-            <span className="text-center text-foreground-muted text-sm font-medium line-clamp-4">
-              {book.title}
-            </span>
-          </div>
-        )}
-
-        {/* Format badge */}
-        <span
-          className={`absolute top-2 right-2 inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full uppercase tracking-wide ${getBadgeStyles(book.bookType)} shadow-sm`}
-        >
-          <TypeIcon type={book.bookType} />
-          {book.format}
-        </span>
-      </div>
-
-      {/* Hover overlay */}
-      <div className="absolute inset-0 aspect-[2/3] bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center pointer-events-none">
-        <span className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg font-medium text-sm shadow-lg">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+    <article className="group min-w-0">
+      <a href="#formats" className="relative block" aria-label={`Preview ${book.title}`}>
+        <BookObject type={book.bookType} style={{ backgroundColor: book.coverColor }}>
+          {book.coverImage ? (
+            <img
+              src={book.coverImage}
+              alt={book.title}
+              className="h-full w-full object-cover"
+              loading="lazy"
             />
-          </svg>
-          {progressPercent > 0 ? "Continue" : "Read"}
-        </span>
-      </div>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary-light to-accent-light p-4">
+              <span className="line-clamp-4 text-center text-sm font-medium text-foreground-muted">
+                {book.title}
+              </span>
+            </div>
+          )}
 
-      {/* Info */}
-      <div className="p-4">
-        <h3 className="font-semibold line-clamp-2 mb-1 text-foreground text-sm">{book.title}</h3>
-        <p className="text-foreground-muted line-clamp-1 text-xs">{book.author}</p>
+          {carriesJacketMeta && (
+            <span
+              className="absolute right-3 top-3 z-20 text-[9px] font-extrabold uppercase tracking-[0.15em] text-white"
+              style={embeddedLabelShadow}
+            >
+              {book.bookType === "audiobook"
+                ? "Audio"
+                : book.seriesNumber
+                  ? `Issue ${book.seriesNumber}`
+                  : "Comic"}
+            </span>
+          )}
 
-        {book.series && (
-          <p className="line-clamp-1 text-xs mt-0.5">
-            {book.seriesNumber && (
-              <span className="text-foreground-muted">#{book.seriesNumber} in </span>
-            )}
-            <span className="text-primary font-medium">{book.series}</span>
-          </p>
-        )}
+          {book.coverMeta && (
+            <span
+              className="absolute bottom-3 right-3 z-20 text-[9px] font-bold tracking-[0.08em] text-white tabular-nums"
+              style={embeddedLabelShadow}
+            >
+              {book.coverMeta}
+            </span>
+          )}
+        </BookObject>
+      </a>
 
-        {/* Progress bar */}
-        {progressPercent > 0 && (
+      <div className="px-0.5 pt-3">
+        <h3 className="line-clamp-2 text-[13px] font-semibold leading-snug text-foreground">
+          {book.title}
+        </h3>
+        <p className="mt-1 line-clamp-1 text-xs text-foreground-muted">{book.author}</p>
+        {progressPercent > 0 && progressPercent < 100 && (
           <div className="mt-2">
-            <div className="bg-surface-elevated rounded-full overflow-hidden h-1.5">
+            <div className="h-1 overflow-hidden rounded-full bg-surface-elevated">
               <div
-                className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300"
+                className="h-full rounded-full bg-accent"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <p className="text-xs text-foreground-muted mt-1">{progressPercent}%</p>
+            <p className="mt-1 text-[10px] font-medium text-foreground-muted">
+              {progressPercent}% read
+            </p>
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 }

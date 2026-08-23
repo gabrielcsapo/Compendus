@@ -9,7 +9,7 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
+  src: url("../public/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
 }
 
 @font-face {
@@ -17,7 +17,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/fonts/source-sans-3-regular.woff2") format("woff2");
+  src: url("../public/fonts/source-sans-3-regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -25,7 +25,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/fonts/source-sans-3-bold.woff2") format("woff2");
+  src: url("../public/fonts/source-sans-3-bold.woff2") format("woff2");
 }
 
 @font-face {
@@ -33,7 +33,7 @@
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: url("/fonts/literata-regular.woff2") format("woff2");
+  src: url("../public/fonts/literata-regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -41,7 +41,7 @@
   font-style: italic;
   font-weight: 100 900;
   font-display: swap;
-  src: url("/fonts/Inter/Inter-Italic-VariableFont_opsz,wght.ttf") format("truetype");
+  src: url("../public/fonts/Inter/Inter-Italic-VariableFont_opsz,wght.ttf") format("truetype");
 }
 
 /* Base Styles */

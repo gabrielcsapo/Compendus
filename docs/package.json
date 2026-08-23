@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node --import tsx scripts/build-search-index.ts && vite build",
-    "build:search": "node --import tsx scripts/build-search-index.ts",
+    "build": "node --import tsx scripts/build-search-index.ts && oxfmt public/search-index.json && vite build",
+    "build:search": "node --import tsx scripts/build-search-index.ts && oxfmt public/search-index.json",
     "preview": "vite preview"
   },
   "dependencies": {

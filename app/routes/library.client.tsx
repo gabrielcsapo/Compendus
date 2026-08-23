@@ -12,6 +12,7 @@ import type { SortOption } from "../components/SortDropdown";
 import type { TypeFilter } from "../components/TypeTabs";
 import { LibraryToolbar, type LibraryDensity } from "../components/LibraryToolbar";
 import type { BookType, ReadingState } from "../lib/book-types";
+import { PRODUCT_FRAME_CLASS } from "../lib/product-ui";
 
 type LibraryData = {
   view: "series" | "books" | "explore";
@@ -63,7 +64,7 @@ export default function LibraryPage({
   } = data;
 
   return (
-    <main className="mx-auto my-10 w-full max-w-[90rem] px-5 sm:my-14 sm:px-8 lg:px-11">
+    <main className={`${PRODUCT_FRAME_CLASS} my-10 sm:my-14`}>
       {/* Header */}
       <div className={`flex flex-col gap-5 ${currentView === "explore" ? "mb-10" : "mb-9"}`}>
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">

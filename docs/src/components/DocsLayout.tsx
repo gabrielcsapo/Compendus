@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet } from "react-router";
+import { BrandLockup } from "@app/components/BrandLockup";
+import { PRODUCT_FRAME_CLASS } from "@app/lib/product-ui";
 import { DarkModeToggle } from "./DarkModeToggle";
 import { SearchModal } from "./SearchModal";
 import { Sidebar } from "./Sidebar";
-import { CompendusLogo } from "@app/components/CompendusLogo";
-import { CompendusWordmark } from "@app/components/CompendusWordmark";
 
 export function DocsLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -13,12 +13,11 @@ export function DocsLayout() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
 
-  // Cmd+K / Ctrl+K shortcut
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setSearchOpen((prev) => !prev);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        setSearchOpen((open) => !open);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -26,127 +25,135 @@ export function DocsLayout() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-surface/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center gap-4">
-          {/* Mobile sidebar toggle */}
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-50 border-b border-border/80 bg-background/88 backdrop-blur-xl">
+        <div className={`${PRODUCT_FRAME_CLASS} flex h-16 items-center gap-3 sm:gap-5`}>
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="lg:hidden p-2 -ml-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors"
-            aria-label="Toggle sidebar"
+            onClick={() => setSidebarOpen((open) => !open)}
+            className="-ml-2 grid h-9 w-9 place-items-center rounded-full text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground lg:hidden"
+            aria-label="Toggle documentation navigation"
+            aria-expanded={sidebarOpen}
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
+            <MenuIcon />
           </button>
 
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5 shrink-0">
-            <CompendusLogo className="w-6 h-6 text-primary" />
-            <CompendusWordmark className="h-[1.15rem] w-auto text-foreground" />
-            <span className="sr-only">Compendus</span>
-            <span className="text-xs text-foreground-muted bg-surface-elevated px-2 py-0.5 rounded-full">
+          <Link
+            to="/"
+            className="flex shrink-0 items-center gap-3 text-foreground hover:text-primary"
+          >
+            <BrandLockup wordmarkClassName="hidden h-[1.25rem] w-auto sm:block" />
+            <span className="rounded-full bg-surface-elevated px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-foreground-muted">
               Docs
             </span>
           </Link>
 
-          <div className="flex-1" />
-
-          {/* Search trigger */}
-          <button
-            onClick={openSearch}
-            className="flex items-center gap-2 px-3 py-1.5 border border-border rounded-lg text-sm text-foreground-muted hover:text-foreground hover:border-border-hover hover:bg-surface-elevated transition-colors cursor-pointer"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={openSearch}
+              className="flex h-9 items-center gap-2 rounded-full border border-border bg-surface px-3 text-sm text-foreground-muted transition-colors hover:border-border-hover hover:text-foreground sm:min-w-52"
+              aria-label="Search documentation"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            <span className="hidden sm:inline">Search docs...</span>
-            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono bg-surface-elevated border border-border rounded ml-2">
-              {navigator.platform?.includes("Mac") ? "\u2318" : "Ctrl+"}K
-            </kbd>
-          </button>
-
-          <DarkModeToggle />
-
-          <a
-            href="https://github.com/gabrielcsapo/compendus"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-elevated transition-colors hidden sm:block"
-            aria-label="GitHub repository"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-            </svg>
-          </a>
+              <SearchIcon />
+              <span className="hidden sm:inline">Search the guide</span>
+              <kbd className="ml-auto hidden rounded border border-border bg-surface-elevated px-1.5 py-0.5 font-mono text-[9px] md:inline">
+                ⌘K
+              </kbd>
+            </button>
+            <DarkModeToggle />
+            <a
+              href="https://github.com/gabrielcsapo/Compendus"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden h-9 w-9 place-items-center rounded-full text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground sm:grid"
+              aria-label="Compendus on GitHub"
+            >
+              <GitHubIcon />
+            </a>
+          </div>
         </div>
       </header>
 
-      <div className="flex-1 flex">
-        {/* Mobile sidebar overlay */}
+      <div
+        className={`${PRODUCT_FRAME_CLASS} flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12`}
+      >
         {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          <button
+            className="fixed inset-0 z-30 bg-black/45 lg:hidden"
             onClick={() => setSidebarOpen(false)}
+            aria-label="Close documentation navigation"
           />
         )}
 
-        {/* Sidebar */}
         <aside
-          className={`fixed lg:sticky top-14 z-40 h-[calc(100vh-3.5rem)] w-64 border-r border-border bg-surface overflow-y-auto py-6 px-4 transition-transform lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-40 w-[min(19rem,88vw)] overflow-y-auto border-r border-border bg-background px-5 pb-8 pt-24 transition-transform lg:sticky lg:top-16 lg:z-0 lg:h-[calc(100vh-4rem)] lg:w-auto lg:translate-x-0 lg:border-r-0 lg:bg-transparent lg:px-0 lg:py-10 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <Sidebar onNavigate={() => setSidebarOpen(false)} />
         </aside>
 
-        {/* Main content */}
-        <main className="flex-1 min-w-0 py-8 px-4 sm:px-8 lg:px-12">
+        <main className="min-w-0 py-10 sm:py-14 lg:py-16">
           <Outlet />
         </main>
       </div>
 
-      {/* Footer */}
-      <footer className="border-t border-border py-6 px-4 sm:px-8">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-foreground-muted">
-          <p>Compendus — Self-hosted personal digital library</p>
-          <div className="flex items-center gap-4">
+      <footer className="border-t border-border">
+        <div
+          className={`${PRODUCT_FRAME_CLASS} flex flex-col gap-3 py-7 text-sm text-foreground-muted sm:flex-row sm:items-center sm:justify-between`}
+        >
+          <p>Compendus documentation follows the product’s shared design system.</p>
+          <div className="flex items-center gap-5">
+            <Link to="/" className="hover:text-foreground">
+              Product
+            </Link>
             <a
-              href="https://github.com/gabrielcsapo/compendus"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-foreground transition-colors"
+              href="https://github.com/gabrielcsapo/Compendus/issues"
+              className="hover:text-foreground"
             >
-              GitHub
-            </a>
-            <a
-              href="https://github.com/gabrielcsapo/compendus/issues"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-foreground transition-colors"
-            >
-              Issues
+              Report an issue
             </a>
           </div>
         </div>
       </footer>
+
       <SearchModal open={searchOpen} onClose={closeSearch} />
     </div>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg
+      className="h-5 w-5"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeWidth={1.8} d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="6.5" strokeWidth={1.8} />
+      <path strokeLinecap="round" strokeWidth={1.8} d="m16 16 4 4" />
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z" />
+    </svg>
   );
 }

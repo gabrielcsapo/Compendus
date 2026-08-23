@@ -7,8 +7,8 @@ import { DarkModeToggle } from "./DarkModeToggle";
 import { GlobalUploadDropzone } from "./GlobalUploadDropzone";
 import { SearchInput } from "./SearchInput";
 import { Footer } from "./Footer";
-import { CompendusLogo } from "./CompendusLogo";
-import { CompendusWordmark } from "./CompendusWordmark";
+import { BrandLockup } from "./BrandLockup";
+import { PRODUCT_FRAME_CLASS } from "../lib/product-ui";
 import { ProfileAvatar } from "./ProfileAvatar";
 import { ToastProvider } from "./ToastContext";
 import { AudiobookProvider } from "./audio/AudiobookProvider";
@@ -340,14 +340,12 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
           ref={headerRef}
           className="sticky top-0 z-40 backdrop-blur-xl bg-background/88 border-b border-border/80"
         >
-          <nav className="mx-auto flex w-full max-w-[90rem] items-center px-5 py-3 sm:px-8 lg:px-11">
+          <nav className={`${PRODUCT_FRAME_CLASS} flex items-center py-3`}>
             <Link
               to="/"
               className="flex shrink-0 items-center gap-2.5 text-xl font-extrabold tracking-[-0.025em] text-foreground transition-colors hover:text-primary"
             >
-              <CompendusLogo className="h-7 w-7" />
-              <CompendusWordmark className="hidden h-[1.35rem] w-auto md:block" />
-              <span className="sr-only">Compendus</span>
+              <BrandLockup wordmarkClassName="hidden h-[1.35rem] w-auto md:block" />
             </Link>
 
             <ul className="ml-3 flex items-center gap-1 sm:ml-8 sm:gap-2">

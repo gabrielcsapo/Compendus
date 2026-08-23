@@ -1,44 +1,50 @@
-@import "tailwindcss";
-@import "../../app/styles/theme.css";
+/* The application stylesheet is the design-system source of truth for docs. */
+@import "../../app/styles.css";
+@source "./";
+@source "../../app/components/BrandLockup.tsx";
+@source "../../app/components/BookObject.tsx";
 @source "../../app/components/docs/";
-@plugin "@tailwindcss/typography";
+@source "../../app/lib/product-ui.ts";
 
-/* Base Styles */
-@layer base {
-  html {
-    color-scheme: light;
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+}
+
+@layer components {
+  .docs-article {
+    max-width: 52rem;
   }
 
-  html.dark {
-    color-scheme: dark;
+  .docs-article > :first-child {
+    margin-top: 0;
   }
 
-  body {
-    @apply bg-background text-foreground antialiased;
-    transition:
-      background-color var(--transition-base),
-      color var(--transition-base);
+  .docs-rule {
+    background: linear-gradient(90deg, var(--color-accent) 0 4rem, var(--color-border) 4rem 100%);
   }
 
-  * {
-    @apply outline-primary;
+  .shelf-wash {
+    background:
+      radial-gradient(
+        circle at 78% 16%,
+        color-mix(in srgb, var(--color-accent) 14%, transparent),
+        transparent 28%
+      ),
+      linear-gradient(145deg, var(--color-surface), var(--color-surface-elevated));
   }
 }
 
-/* Prose/Typography Overrides */
-@layer utilities {
-  .prose {
-    :where(a):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-      @apply text-primary no-underline hover:underline;
-    }
-
-    :where(strong):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-      @apply text-foreground;
-    }
-  }
-}
-
-/* Fallback color for unhighlighted code blocks */
+/* Fallback color for code while Shiki loads. */
 pre code:not(.shiki code) {
   color: #e5e7eb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }

@@ -1,6 +1,5 @@
 import { Link } from "react-flight-router/client";
-import { CompendusLogo } from "./CompendusLogo";
-import { CompendusWordmark } from "./CompendusWordmark";
+import { BrandLockup } from "./BrandLockup";
 
 interface FooterProps {
   variant?: "full" | "compact";
@@ -54,9 +53,7 @@ export function Footer({ variant = "full" }: FooterProps) {
               to="/"
               className="flex items-center gap-2 text-foreground hover:text-primary transition-colors mb-4"
             >
-              <CompendusLogo />
-              <CompendusWordmark className="h-5 w-auto" />
-              <span className="sr-only">Compendus</span>
+              <BrandLockup logoClassName="h-6 w-6" wordmarkClassName="h-5 w-auto" />
             </Link>
             <p className="text-sm text-foreground-muted">
               Self-hosted personal library manager for ebooks, audiobooks, and comics.

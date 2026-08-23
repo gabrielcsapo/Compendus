@@ -7,8 +7,8 @@ interface MdxPageProps {
 
 export function MdxPage({ Component }: MdxPageProps) {
   return (
-    <div className="space-y-0">
+    <article className="docs-article">
       <Component components={mdxComponents} />
-    </div>
+    </article>
   );
 }

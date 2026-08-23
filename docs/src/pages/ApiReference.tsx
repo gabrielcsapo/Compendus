@@ -8,10 +8,12 @@ export default function ApiReference() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   return (
-    <div>
+    <div className="max-w-5xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground mb-2">{apiSpec.title}</h1>
-        <p className="text-foreground-muted">{apiSpec.description}</p>
+        <h1 className="reading-title mb-3 text-4xl leading-tight text-foreground sm:text-5xl">
+          {apiSpec.title}
+        </h1>
+        <p className="max-w-2xl text-lg leading-8 text-foreground-muted">{apiSpec.description}</p>
         <p className="text-sm text-foreground-muted/70 mt-2">Version {apiSpec.version}</p>
       </div>
 

@@ -221,6 +221,6 @@ entries.push({
 });
 
 mkdirSync(publicDir, { recursive: true });
-writeFileSync(resolve(publicDir, "search-index.json"), JSON.stringify(entries, null, 2));
+writeFileSync(resolve(publicDir, "search-index.json"), `${JSON.stringify(entries, null, 2)}\n`);
 
 console.log(`Search index built with ${entries.length} entries`);

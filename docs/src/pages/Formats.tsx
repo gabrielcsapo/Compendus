@@ -74,10 +74,12 @@ const formatDetails = [
 
 export default function Formats() {
   return (
-    <div className="space-y-10">
+    <div className="max-w-5xl space-y-12">
       <div>
-        <h1 className="text-3xl font-bold text-foreground mb-2">Supported Formats</h1>
-        <p className="text-foreground-muted">
+        <h1 className="reading-title mb-3 text-4xl leading-tight text-foreground sm:text-5xl">
+          Supported Formats
+        </h1>
+        <p className="max-w-2xl text-lg leading-8 text-foreground-muted">
           Compendus supports a wide range of book, comic, and audiobook formats with automatic
           conversion where needed.
         </p>
@@ -88,7 +90,7 @@ export default function Formats() {
         <h2 className="text-xl font-semibold text-foreground mb-3">MIME Types</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {Object.entries(supportedFormats.books.mimeTypes).map(([format, mimeType]) => (
-            <div key={format} className="p-4 bg-surface-elevated rounded-lg border border-border">
+            <div key={format} className="quiet-panel p-4">
               <h3 className="font-semibold text-foreground uppercase text-sm">.{format}</h3>
               <p className="text-xs text-foreground-muted font-mono mt-1">{mimeType}</p>
             </div>
@@ -102,7 +104,7 @@ export default function Formats() {
           <h2 className="text-xl font-semibold text-foreground mb-4">{category.category}</h2>
           <div className="space-y-3">
             {category.formats.map((format) => (
-              <div key={format.ext} className="border border-border rounded-lg p-4">
+              <div key={format.ext} className="quiet-panel p-5">
                 <div className="flex items-center gap-3 mb-2">
                   <span className="px-2.5 py-1 bg-primary-light text-primary text-xs font-mono font-semibold rounded">
                     .{format.ext.toLowerCase()}
