@@ -26,6 +26,17 @@ class AppNavigation {
     /// Drives the active filter chip in LibraryView (shared between Mac sidebar and iOS chip bar)
     var libraryFilterChipId: String = "all"
 
+    init() {
+        let environment = ProcessInfo.processInfo.environment
+        if let tab = environment["COMPENDUS_SHOWCASE_TAB"].flatMap(Int.init) {
+            selectedTab = tab
+        }
+        if let filter = environment["COMPENDUS_SHOWCASE_FILTER"],
+           ["all", "ebooks", "audiobooks", "comics"].contains(filter) {
+            libraryFilterChipId = filter
+        }
+    }
+
     /// Explore is intentionally immersive, but closing it should preserve the
     /// reader's place instead of always resetting navigation to Today.
     func exitExplore() {

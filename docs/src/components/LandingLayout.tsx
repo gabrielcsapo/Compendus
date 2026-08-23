@@ -18,18 +18,24 @@ export function LandingLayout() {
             className="ml-auto hidden items-center gap-1 sm:flex"
             aria-label="Documentation site"
           >
-            <a
-              href="#reading"
+            <Link
+              to="/#reading"
               className="rounded-lg px-3 py-2 text-sm text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground"
             >
               Reading
-            </a>
-            <a
-              href="#formats"
+            </Link>
+            <Link
+              to="/#formats"
               className="rounded-lg px-3 py-2 text-sm text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground"
             >
               Formats
-            </a>
+            </Link>
+            <Link
+              to="/tour"
+              className="rounded-lg px-3 py-2 text-sm text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground"
+            >
+              Tour
+            </Link>
             <Link
               to="/docs/getting-started"
               className="rounded-lg px-3 py-2 text-sm text-foreground-muted transition-colors hover:bg-surface-elevated hover:text-foreground"
@@ -68,6 +74,9 @@ export function LandingLayout() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-foreground-muted">
             <Link to="/docs/getting-started" className="hover:text-foreground">
               Documentation
+            </Link>
+            <Link to="/tour" className="hover:text-foreground">
+              Product tour
             </Link>
             <a href="https://github.com/gabrielcsapo/Compendus" className="hover:text-foreground">
               GitHub

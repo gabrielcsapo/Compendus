@@ -5,7 +5,7 @@ import type { BookFormat } from "../types";
 
 // COMPENDUS_DATA_DIR overrides the data root (tests point it at a throwaway dir);
 // defaults to <cwd>/data. Must match db/index.ts so DB + files share one root.
-const DATA_DIR = process.env.COMPENDUS_DATA_DIR || resolve(process.cwd(), "data");
+export const DATA_DIR = process.env.COMPENDUS_DATA_DIR || resolve(process.cwd(), "data");
 const BOOKS_DIR = resolve(DATA_DIR, "books");
 const COVERS_DIR = resolve(DATA_DIR, "covers");
 const AVATARS_DIR = resolve(DATA_DIR, "avatars");
@@ -181,4 +181,4 @@ export function deleteResourceCache(bookId: string): void {
   }
 }
 
-export { BOOKS_DIR };
+export { BOOKS_DIR, COVERS_DIR, AVATARS_DIR };

@@ -3,8 +3,9 @@ import { createReadStream, constants } from "fs";
 import { resolve, dirname, relative, isAbsolute } from "path";
 import { lookup } from "mime-types";
 import type { Context } from "hono";
+import { DATA_DIR } from "../../app/lib/storage";
 
-const RESOURCE_CACHE_DIR = resolve(process.cwd(), "data", "resource-cache");
+const RESOURCE_CACHE_DIR = resolve(DATA_DIR, "resource-cache");
 
 /**
  * Get file stats without blocking the event loop.

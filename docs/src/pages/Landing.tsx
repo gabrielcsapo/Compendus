@@ -53,15 +53,21 @@ export default function Landing() {
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link
-                to="/docs/getting-started"
+                to="/tour"
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-bold text-white shadow-btn transition hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-btn-hover"
               >
-                Set up Compendus
+                Take the product tour
                 <ArrowIcon />
+              </Link>
+              <Link
+                to="/docs/getting-started"
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-5 py-3 text-sm font-bold text-foreground transition hover:border-border-hover hover:bg-surface-elevated"
+              >
+                Set up Compendus
               </Link>
               <a
                 href="https://github.com/gabrielcsapo/Compendus"
-                className="inline-flex items-center rounded-xl border border-border bg-surface px-5 py-3 text-sm font-bold text-foreground transition hover:border-border-hover hover:bg-surface-elevated"
+                className="inline-flex items-center px-2 py-3 text-sm font-bold text-foreground-muted transition hover:text-foreground"
               >
                 View the source
               </a>

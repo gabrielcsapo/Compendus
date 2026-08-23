@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "showcase/**"
       - "app/components/docs/**"
       - "app/components/BookObject.tsx"
       - "app/components/BrandLockup.tsx"

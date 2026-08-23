@@ -379,7 +379,7 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
         </header>
         <GlobalNavigationLoadingBar />
         <SearchCommandPalette />
-        {isAdmin && location.pathname.startsWith("/library") && <GlobalUploadDropzone />}
+        {isAdmin && <GlobalUploadDropzone />}
         <div className="flex-1" style={{ paddingBottom: "var(--listen-bar-height, 0px)" }}>
           {children}
         </div>

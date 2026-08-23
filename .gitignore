@@ -49,6 +49,7 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+.showcase/
 
 # Large GLiNER model — downloaded at runtime into data/, not committed
 models/onnx-community/gliner_small-v2/onnx/

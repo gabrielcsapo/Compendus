@@ -264,6 +264,7 @@ struct LibraryView: View {
                 }
             }
             .task {
+                selectedFilter = chipDrivenFilter
                 if books.isEmpty && !isSeriesChipSelected {
                     await loadBooks()
                 }

@@ -20,6 +20,7 @@
     "src/**/*.tsx",
     "../app/components/docs/**/*.ts",
     "../app/components/docs/**/*.tsx",
-    "../app/lib/**/*.ts"
+    "../app/lib/**/*.ts",
+    "../showcase/**/*.ts"
   ]
 }

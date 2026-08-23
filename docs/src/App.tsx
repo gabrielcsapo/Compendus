@@ -13,6 +13,7 @@ import Landing from "./pages/Landing";
 import ApiReference from "./pages/ApiReference";
 import Formats from "./pages/Formats";
 import AudioSpeech from "./pages/AudioSpeech";
+import Tour from "./pages/Tour";
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
       {/* Product landing page — standalone layout, no sidebar */}
       <Route element={<LandingLayout />}>
         <Route index element={<Landing />} />
+        <Route path="tour" element={<Tour />} />
       </Route>
 
       {/* Documentation — sidebar layout */}

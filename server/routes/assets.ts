@@ -7,6 +7,7 @@ import { extractEpubResource } from "../../app/lib/processing/epub";
 import { convertMobiToEpub } from "../../app/lib/processing/mobi-to-epub";
 import { db, books } from "../../app/lib/db";
 import type { BookFormat } from "../../app/lib/types";
+import { AVATARS_DIR, BOOKS_DIR, COVERS_DIR } from "../../app/lib/storage";
 import {
   getFileStat,
   streamFileResponse,
@@ -43,7 +44,7 @@ app.get("/books/:id/as-cbz", async (c) => {
 // GET /books/:id/as-epub - serve converted EPUB (auto-converts MOBI/AZW3 on first request)
 app.get("/books/:id/as-epub", async (c) => {
   const bookId = c.req.param("id");
-  const booksRoot = resolve(process.cwd(), "data", "books");
+  const booksRoot = BOOKS_DIR;
   const epubPath = resolveContained(booksRoot, `${bookId}.epub`);
   if (!epubPath) return c.json({ error: "Invalid book ID" }, 400);
 
@@ -124,7 +125,7 @@ app.get("/books/:id/as-epub", async (c) => {
 // GET /books/* - serve book files with streaming and range request support
 app.get("/books/:filepath{.+}", async (c) => {
   const filepath = c.req.param("filepath");
-  const filePath = resolveContained(resolve(process.cwd(), "data", "books"), filepath);
+  const filePath = resolveContained(BOOKS_DIR, filepath);
   if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
@@ -135,7 +136,7 @@ app.get("/books/:filepath{.+}", async (c) => {
 // GET /covers/:filename - serve cover images
 app.get("/covers/:filename", async (c) => {
   const filename = c.req.param("filename");
-  const filePath = resolveContained(resolve(process.cwd(), "data", "covers"), filename);
+  const filePath = resolveContained(COVERS_DIR, filename);
   if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
@@ -147,7 +148,7 @@ app.get("/covers/:filename", async (c) => {
 // GET /avatars/:filename - serve profile avatar images
 app.get("/avatars/:filename", async (c) => {
   const filename = c.req.param("filename");
-  const filePath = resolveContained(resolve(process.cwd(), "data", "avatars"), filename);
+  const filePath = resolveContained(AVATARS_DIR, filename);
   if (!filePath) return new Response("Not found", { status: 404 });
 
   return streamFileResponse(c, filePath, {
@@ -181,7 +182,7 @@ app.get("/comic/:id/:format/page/:pageNum", async (c) => {
   const bookId = c.req.param("id");
   const format = c.req.param("format");
   const pageNum = parseInt(c.req.param("pageNum"), 10);
-  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.${format}`);
+  const bookPath = resolveContained(BOOKS_DIR, `${bookId}.${format}`);
   if (!bookPath) return new Response("Page not found", { status: 404 });
 
   const bookStat = await getFileStat(bookPath);
@@ -214,7 +215,7 @@ app.get("/comic/:id/:format/page/:pageNum", async (c) => {
 app.get("/comic/:id/:format/info", async (c) => {
   const bookId = c.req.param("id");
   const format = c.req.param("format");
-  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.${format}`);
+  const bookPath = resolveContained(BOOKS_DIR, `${bookId}.${format}`);
   if (!bookPath) return new Response("Comic not found", { status: 404 });
 
   const bookStat = await getFileStat(bookPath);
@@ -243,7 +244,7 @@ app.get("/book/:id/:rest{.+}", async (c, next) => {
     return next();
   }
 
-  const bookPath = resolveContained(resolve(process.cwd(), "data", "books"), `${bookId}.epub`);
+  const bookPath = resolveContained(BOOKS_DIR, `${bookId}.epub`);
   if (!bookPath) return new Response("Resource not found", { status: 404 });
   const bookStat = await getFileStat(bookPath);
   if (!bookStat) {
