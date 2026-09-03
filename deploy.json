@@ -1,3 +1,0 @@
-{
-  "ignore": ["Compendus", "compendus.tar.gz", "server/__fixtures__", "tests/fixtures"]
-}

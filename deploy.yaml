@@ -1,0 +1,61 @@
+apiVersion: deploy.local/v1
+kind: Application
+
+metadata:
+  name: compendus
+  labels:
+    category: books
+
+configuration:
+  googleBooksApiKey:
+    type: secret
+    required: false
+    description: Google Books API key used for book metadata lookup
+  flightDebug:
+    type: string
+    default: "1"
+    allowedValues: ["0", "1"]
+    description: React Flight server debug logging switch
+
+components:
+  web:
+    displayName: Compendus
+    build:
+      context: .
+      ignore: [Compendus, compendus.tar.gz, server/__fixtures__, tests/fixtures]
+    role: web
+    capacity:
+      memoryBytes: 8589934592
+      cpuMillicores: 2000
+    interfaces:
+      http:
+        port: 3000
+        protocol: http
+    environment:
+      GOOGLE_BOOKS_API_KEY:
+        from: configuration.googleBooksApiKey
+      FLIGHT_DEBUG:
+        from: configuration.flightDebug
+    mounts:
+      /app/data:
+        resource: data
+
+resources:
+  data:
+    type: volume
+    durability: durable
+    dataRole: files
+    access: singleWriter
+    consistencyGroup: application
+    ownership: application
+    backup:
+      policy: required
+      retentionCopies: 2
+    suitcase:
+      allowedDataModes: [follows-one-site, site-local, syncs-across-sites]
+
+routes:
+  public:
+    to: web.http
+    path: /
+    discoverable: true
